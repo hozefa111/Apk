@@ -7,7 +7,7 @@
         android:layout_width="match_parent" android:layout_height="match_parent"
         android:background="#000000"
         app:use_controller="true" app:show_buffering="when_playing"
-        app:controller_show_timeout="4000" app:resize_mode="fit" />
+        app:resize_mode="fit" />
     <LinearLayout android:id="@+id/topBar" android:layout_width="match_parent"
         android:layout_height="56dp" android:gravity="center_vertical" android:background="#99060B12" android:orientation="horizontal">
         <TextView android:id="@+id/back" android:layout_width="48dp" android:layout_height="match_parent"
