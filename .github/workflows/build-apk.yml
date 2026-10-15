@@ -4,7 +4,6 @@ on:
   workflow_dispatch:
   push:
     branches: ["main", "master"]
-  pull_request:
 
 permissions:
   contents: read
@@ -12,7 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -21,11 +20,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Install Android SDK command-line tools
-        uses: android-actions/setup-android@v3
-      - name: Install Android API 36
+      - name: Install Android API 36 using runner SDK
+        shell: bash
         run: |
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(command -v sdkmanager)"; fi
+          "$SDKMANAGER" --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
       - name: Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
