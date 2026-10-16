@@ -831,7 +831,16 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         AlertDialog.Builder dialog=new AlertDialog.Builder(this)
                 .setTitle("Round · "+when(round.get("timestamp")))
                 .setMessage("Hukum: "+str(round,"hukumName")+
-                       
+                        "\nBid: "+str(round,"bid")+
+                        "\nResult: "+str(round,"result")+
+                        "\nPartners: "+android.text.TextUtils.join(", ",strings(round.get("partnerNames")))+
+                        "\nNon-partners: "+android.text.TextUtils.join(", ",strings(round.get("nonPartnerNames"))))
+                .setPositiveButton("Details",(d,w)->roundDetails(round))
+                .setNeutralButton("Share Image",(d,w)->shareRound(round));
+        if(loggedIn)dialog.setNegativeButton("Delete",(d,w)->confirmRemove("rounds",round,"round"));
+        else dialog.setNegativeButton("Close",null);
+        dialog.show();
+    }
     private void roundPage() {
         if(!loggedIn){empty("Admin login is required to add rounds.");return;}
         title(content,"New Hukum Round","Select players and preview scores before saving");
@@ -1020,17 +1029,6 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                     dialog.dismiss();
                     updateRoundForm();
                 }).setNegativeButton("Cancel",null).show();
-    }
-ing,Integer> score=scoreChanges();
-        for(Map<String,Object> p:active)if(playing.contains(id(p))) {
-            String pid=id(p),role=pid.equals(hukum)?"♛ ":partners.contains(pid)?"◈ ":"○ ";
-            int change=score.getOrDefault(pid,0);
-            line(preview,role+str(p,"name"),(change>=0?"+":"")+change,change>=0?GREEN:RED);
-        }
-        content.addView(preview);gap(content,16);
-        content.addView(button(busy?"Saving...":"✓  Save Round to Firebase",true,this::saveRound));
-        gap(content,14);
-        content.addView(text("Uses your existing Firebase project. No old records are deleted.",11,MUTED,false));
     }
     private boolean validRound() {
         if(!loggedIn||hukum==null||outcome==null||playing==null||playing.size()<3||partners.isEmpty())return false;
