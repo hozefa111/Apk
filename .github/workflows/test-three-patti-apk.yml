@@ -44,10 +44,7 @@ jobs:
             adb shell screencap -p /sdcard/patti-screen.png
             adb pull /sdcard/patti-screen.png patti-screen.png
             if grep -A 3 'FATAL EXCEPTION' crashlog.txt | grep -q 'com.hozefa.threepattipro'; then cat crashlog.txt; exit 1; fi
-            if ! grep -q 'com.hozefa.threepattipro.stable' activity.txt; then
-              cat activity.txt
-              exit 1
-            fi
+            grep -q 'com.hozefa.threepattipro.stable' activity.txt
             echo 'APK installed and 3 Patti PRO activity started without AndroidRuntime fatal crash'
       - name: Upload screen for inspection
         if: always()
