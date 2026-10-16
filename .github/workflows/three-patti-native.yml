@@ -24,7 +24,7 @@ jobs:
         with:
           gradle-version: '8.9'
       - name: Build installable APK
-        run: gradle --no-daemon --project-dir 3PattiProNative clean assembleDebug --stacktrace
+        run: gradle --no-daemon --project-dir 3PattiProNative clean testDebugUnitTest assembleDebug --stacktrace
       - name: Verify APK package and native code
         run: |
           set -euo pipefail

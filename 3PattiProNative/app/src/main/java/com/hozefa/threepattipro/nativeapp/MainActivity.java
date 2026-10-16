@@ -28,10 +28,10 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 public final class MainActivity extends Activity implements FirebaseGateway.Listener {
-    private static final int BG = 0xFF0B0F19, PANEL = 0xFF151C2C, PANEL2 = 0xFF1C2639;
-    private static final int BORDER = 0xFF2A3448, WHITE = 0xFFF9FAFE, MUTED = 0xFF96A4BC;
-    private static final int GOLD = 0xFFF4CD83, GREEN = 0xFF48D5A6, RED = 0xFFFF7188;
-    private static final int BLUE = 0xFF76ACFF;
+    private static final int BG = 0xFF0A0A0C, PANEL = 0xFF18181C, PANEL2 = 0xFF222228;
+    private static final int BORDER = 0xFF35343A, WHITE = 0xFFFFFFFF, MUTED = 0xFF8A8D93;
+    private static final int GOLD = 0xFFF6D365, GREEN = 0xFF2ECD71, RED = 0xFFE74C3C;
+    private static final int BLUE = 0xFF4FACFE;
     private FirebaseGateway api;
     private final List<Map<String,Object>> players = new ArrayList<>();
     private final List<Map<String,Object>> rounds = new ArrayList<>();
@@ -43,6 +43,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private String profileId=null, rankFilter="all";
     private long customStart=0L, customEnd=0L;
     private int profileRoundVisible=20;
+    private List<Map<String,Object>> currentRankData=null;
     private int visibleRoundCount=25, visibleSessionCount=20, visibleRankCount=35;
     private List<Map<String,Object>> cachedGames = Collections.emptyList();
     private final Map<String,Integer> cachedScores=new HashMap<>(),cachedGameScores=new HashMap<>(),cachedPlays=new HashMap<>(),cachedWins=new HashMap<>();
@@ -333,58 +334,84 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         scroll.post(()->scroll.scrollTo(0,prev));
     }
     private void home() {
-        title(content,"Your table, at a glance","Scores synced with the original 3 Patti PRO");
-        LinearLayout hero=column();
-        hero.setBackground(gradient(0xFF2B344D,0xFF1B2637,22));
-        pad(hero,20,22,20,22);
-        hero.addView(text("♠    TABLE STATUS",12,GOLD,true));
-        gap(hero,12);
-        hero.addView(text(activePlayers().size()+" Players  ·  "+gameRounds().size()+" Rounds",24,WHITE,true));
-        gap(hero,10);
-        Map<String,Object> session=activeSession();
-        hero.addView(text(session==null?"●  No active session":"●  LIVE · "+str(session,"sessionName"),
-                13,session==null?MUTED:GREEN,true));
-        gap(hero,16);
-        if(loggedIn) {
-            hero.addView(button(session==null?"▶  Start Session":"■  End Session",
-                    session==null,session==null?this::startSessionDialog:this::endSessionDialog));
-        } else {
-            hero.addView(text("Viewing scores · Log in to manage the game",12,MUTED,false));
-        }
-        content.addView(hero);gap(content,18);
-
+        title(content,"Table Status","3 Patti PRO · Live Game Dashboard");
         List<Map<String,Object>> games=gameRounds();
-        int total=0;
-        for(Map<String,Object> r:games)total+=num(r.get("bid"));
-        LinearLayout stats=row();
-        LinearLayout left=panel(),right=panel();
-        left.addView(text("ACTIVE PLAYERS",10,MUTED,true));
-        gap(left,9);left.addView(text(String.valueOf(activePlayers().size()),27,GOLD,true));
-        right.addView(text("TOTAL BIDS",10,MUTED,true));
-        gap(right,9);right.addView(text(String.valueOf(total),27,WHITE,true));
-        LinearLayout.LayoutParams half=new LinearLayout.LayoutParams(0,-2,1);
-        half.rightMargin=dp(9);stats.addView(left,half);
-        stats.addView(right,new LinearLayout.LayoutParams(0,-2,1));
-        content.addView(stats);gap(content,12);
-        LinearLayout winner=panel();
-        List<Map<String,Object>> leaders=rankedPlayers();
-        winner.addView(text("♛  TOP WINNER",11,GOLD,true));gap(winner,8);
-        if(leaders.isEmpty())winner.addView(text("No winners yet",16,MUTED,false));
-        else {
-            Map<String,Object> top=leaders.get(0);
-            winner.addView(text(str(top,"name")+"  ·  +"+scoreOf(id(top),gameRounds()),16,GREEN,true));
+        List<Map<String,Object>> active=activePlayers();
+        String winner="—";
+        int maxBalance=0,money=0;
+        for(Map<String,Object> p:active){
+            int balance=scoreOf(id(p),rounds);
+            if(balance>0)money+=balance;
+            if(balance>maxBalance){maxBalance=balance;winner=str(p,"name")+" (+"+balance+")";}
         }
-        content.addView(winner);gap(content,22);
+        LinearLayout hero=column();
+        hero.setBackground(gradient(0xFF28221C,0xFF151519,20));
+        pad(hero,16,18,16,18);
+        hero.addView(text("♛  3 PATTI PRO",12,GOLD,true));gap(hero,15);
+        LinearLayout top=row();
+        LinearLayout p1=statTile("PLAYERS",String.valueOf(active.size()),GOLD);
+        LinearLayout p2=statTile("ROUNDS",String.valueOf(games.size()),WHITE);
+        LinearLayout.LayoutParams h1=new LinearLayout.LayoutParams(0,-2,1);
+        h1.rightMargin=dp(9);top.addView(p1,h1);
+        top.addView(p2,new LinearLayout.LayoutParams(0,-2,1));
+        hero.addView(top);gap(hero,10);
+        LinearLayout bottom=row();
+        LinearLayout p3=statTile("TOP WINNER",winner,GREEN);
+        LinearLayout p4=statTile("ON TABLE",String.valueOf(money),GOLD);
+        LinearLayout.LayoutParams h3=new LinearLayout.LayoutParams(0,-2,1);
+        h3.rightMargin=dp(9);bottom.addView(p3,h3);
+        bottom.addView(p4,new LinearLayout.LayoutParams(0,-2,1));
+        hero.addView(bottom);
+        content.addView(hero);
+        gap(content,15);
 
-        content.addView(text("TOP PLAYERS",15,WHITE,true));gap(content,12);
-        List<Map<String,Object>> ranked=rankedPlayers();
-        if(ranked.isEmpty())empty("No rounds have been played yet.");
-        else for(int i=0;i<Math.min(3,ranked.size());i++)addRankCard(ranked.get(i),i);
-        gap(content,18);
-        if(loggedIn) {content.addView(button("＋  Create New Round",true,()->{tab=2;render(true);}));gap(content,24);}
-        content.addView(text("RECENT ROUNDS",15,WHITE,true));gap(content,12);
-        if(games.isEmpty())empty("Your completed rounds will appear here.");
-        else for(int i=0;i<Math.min(4,games.size());i++)addRoundCard(games.get(i));
+        Map<String,Object> session=activeSession();
+        if(loggedIn){
+            LinearLayout sessionBar=panel();
+            String status=session==null?"○  No active session":
+                    "●  SESSION ACTIVE · "+str(session,"sessionName");
+            sessionBar.addView(text(status,13,session==null?MUTED:GREEN,true));
+            if(session!=null) {
+                gap(sessionBar,7);
+                sessionBar.addView(text("Started "+when(session.get("startTime")),12,MUTED,false));
+            }
+            gap(sessionBar,12);
+            sessionBar.addView(button(session==null?"▶  Start Session":"■  End Session",
+                    session==null,session==null?this::startSessionDialog:this::endSessionDialog));
+            // Clear-all is intentionally not exposed in this build: user forbids data deletion.
+            content.addView(sessionBar);
+            gap(content,16);
+        }else {
+            LinearLayout viewOnly=panel();
+            viewOnly.addView(text("Viewing scores · Log in to add rounds and manage sessions",12,MUTED,false));
+            content.addView(viewOnly);gap(content,16);
+        }
+        if(loggedIn){content.addView(button("＋  Add Hukum Round",true,()->{tab=2;render(true);}));gap(content,18);}
+        content.addView(text("RECENT ACTIVITY",15,WHITE,true));gap(content,12);
+        if(games.isEmpty())empty("No rounds yet. Add players and start playing!");
+        else for(int i=0;i<Math.min(8,games.size());i++){
+            Map<String,Object> round=games.get(i);
+            LinearLayout card=panel();
+            String result=str(round,"result");
+            card.addView(text("Bid "+num(round.get("bid"))+" · "+("win".equals(result)?"Hukum Win":"Hukum Lose"),
+                    15,"win".equals(result)?GREEN:RED,true));
+            gap(card,7);
+            card.addView(text("Hukum: "+str(round,"hukumName")+" · "+when(round.get("timestamp")),12,MUTED,false));
+            card.setOnClickListener(v->roundDetails(round));
+            content.addView(card);gap(content,9);
+        }
+    }
+    private LinearLayout statTile(String label,String value,int valueColor){
+        LinearLayout tile=column();
+        tile.setBackground(shape(0xFF202024,13,0));
+        pad(tile,12,12,12,12);
+        tile.addView(text(label,10,MUTED,true));
+        gap(tile,8);
+        TextView number=text(value, label.equals("TOP WINNER")?13:22,valueColor,true);
+        number.setSingleLine(false);
+        number.setMaxLines(2);
+        tile.addView(number);
+        return tile;
     }
     private void empty(String message) {
         LinearLayout p=panel();
@@ -435,9 +462,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private List<Map<String,Object>> rankedFor(List<Map<String,Object>> games) {
         List<Map<String,Object>> result=new ArrayList<>(players);
         result.sort((a,b)->Integer.compare(scoreOf(id(b),games),scoreOf(id(a),games)));
-        if(!"all".equals(rankFilter)&&games!=gameRounds()) {
-            result.removeIf(p->played(id(p),games)==0);
-        }
+        result.removeIf(p->played(id(p),games)==0 && scoreOf(id(p),games)==0);
         return result;
     }
 
@@ -640,9 +665,10 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         rank.setGravity(Gravity.CENTER);r.addView(rank,lp(45,42));
         LinearLayout middle=column();
         middle.addView(text(str(p,"name"),16,WHITE,true));gap(middle,5);
-        middle.addView(text(played(id(p),gameRounds())+" rounds played",12,MUTED,false));
+        List<Map<String,Object>> source=(tab==3 && currentRankData!=null)?currentRankData:gameRounds();
+        middle.addView(text(played(id(p),source)+" rounds played",12,MUTED,false));
         r.addView(middle,new LinearLayout.LayoutParams(0,-2,1));
-        int score=scoreOf(id(p),gameRounds());
+        int score=scoreOf(id(p),source);
         r.addView(text((score>=0?"+":"")+score,19,score>=0?GREEN:RED,true));
         card.addView(r);
         card.setClickable(true);
@@ -653,6 +679,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         title(content,"Leaderboard","Lifetime scores · Hukum, Partner & Non-partner");
         dateFilterBar(content);
         List<Map<String,Object>> games=filteredRounds(), ranked=rankedFor(games);
+        currentRankData=games;
         if(ranked.isEmpty())empty("No players with rounds in this date range.");
         int maximum=Math.min(visibleRankCount,ranked.size());
         for(int i=0;i<maximum;i++) {
@@ -670,7 +697,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             }));
         }
         gap(content,10);
-        content.addView(button("Share Leaderboard",false,this::shareLeaderboard));
+        content.addView(button("Share Rankings Image",false,this::shareLeaderboard));
     }
     private void historyPage() {
         title(content,"History","Every saved round and previous session");
@@ -681,11 +708,12 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         toggle.addView(roundTab,l1);toggle.addView(sessionTab,new LinearLayout.LayoutParams(0,dp(48),1));
         content.addView(toggle);gap(content,18);
         if(historyTab==0) {
-            if(rounds.isEmpty())empty("No rounds recorded yet.");
-            int count=Math.min(visibleRoundCount,rounds.size());
-            for(int i=0;i<count;i++)addRoundCard(rounds.get(i));
-            if(count<rounds.size()) {
-                content.addView(button("Show "+Math.min(25,rounds.size()-count)+" More Rounds",false,()->{
+            List<Map<String,Object>> history=gameRounds();
+            if(history.isEmpty())empty("No rounds recorded yet.");
+            int count=Math.min(visibleRoundCount,history.size());
+            for(int i=0;i<count;i++)addRoundCard(history.get(i));
+            if(count<history.size()) {
+                content.addView(button("Show "+Math.min(25,history.size()-count)+" More Rounds",false,()->{
                     visibleRoundCount+=25;render(false);
                 }));
             }
@@ -834,15 +862,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         return playing.size()-partners.size()-1>=1;
     }
     private Map<String,Integer> scoreChanges() {
-        Map<String,Integer> changes=new LinkedHashMap<>();
-        for(String pid:playing) {
-            if("win".equals(outcome)) {
-                changes.put(pid,pid.equals(hukum)?bid*2:(partners.contains(pid)?bid:0));
-            } else {
-                changes.put(pid,pid.equals(hukum)?-bid:(partners.contains(pid)?-(int)Math.round(bid/2.0):bid));
-            }
-        }
-        return changes;
+        return ScoreRules.calculate(new ArrayList<>(playing),bid,hukum,new ArrayList<>(partners),outcome);
     }
     private void saveRound() {
         if(!validRound()){Toast.makeText(this,"Complete the round details first",Toast.LENGTH_SHORT).show();return;}
@@ -863,8 +883,20 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                         "\n\nThis will add one new round to your existing Firebase data.")
                 .setNegativeButton("Cancel",null)
                 .setPositiveButton("Save Round",(d,w)->{
-                    api.addDocument("rounds",body,"Round saved successfully");
-                    resetRound();tab=0;render(true);
+                    // Keep the user's form intact until the server confirms successful write.
+                    final Map<String,Object> preview=new HashMap<>(body);
+                    preview.put("timestamp",java.time.Instant.now().toString());
+                    api.addDocument("rounds",body,"Round saved successfully",()->{
+                        resetRound();
+                        tab=0;
+                        render(true);
+                        new AlertDialog.Builder(this)
+                            .setTitle("Round saved successfully")
+                            .setMessage("Your round is saved in your existing Firebase database. Share its premium image?")
+                            .setNegativeButton("Not Now",null)
+                            .setPositiveButton("Share Result",(dlg,index)->shareRound(preview))
+                            .show();
+                    });
                 }).show();
     }
     private void resetRound(){playing=null;partners.clear();hukum=null;outcome=null;bid=155;}
@@ -937,7 +969,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         message.append("Date: ").append(when(session.get("startTime")))
                 .append("\nEnded: ").append(session.get("endTime")==null?"Active":when(session.get("endTime")))
                 .append("\nRounds: ").append(num(session.get("totalRounds")));
-        long dur=num(session.get("duration"));
+        long dur=session.get("duration") instanceof Number?
+                ((Number)session.get("duration")).longValue():0L;
         if(dur>0)message.append("\nDuration: ").append(dur/3600000).append("h ").append((dur/60000)%60).append("m");
         Map<String,Object> mvp=map(session.get("mvp"));
         if(!mvp.isEmpty())message.append("\nMVP: ").append(str(mvp,"name")).append(" (").append(str(mvp,"score")).append(")");
@@ -964,7 +997,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         String detail=message.toString();
         new AlertDialog.Builder(this).setTitle(str(session,"sessionName"))
                 .setMessage(detail)
-                .setNeutralButton("Share", (d,w)->share(str(session,"sessionName")+"\n\n"+detail))
+                .setNeutralButton("Share Image", (d,w)->shareSession(session))
                 .setPositiveButton("Close",null).show();
     }
     private void confirmPlayerStatus(Map<String,Object> p,boolean activate) {
@@ -1122,27 +1155,77 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 "biggestLoss",FirebaseGateway.map("name",losingName,"score",worst));
         api.patchDocument("sessions",id(s),update,"Session ended · Summary saved");
     }
-    private void shareLeaderboard() {
-        StringBuilder out=new StringBuilder("♠  3 Patti PRO · Leaderboard\n\n");
-        int rank=0;
-        for(Map<String,Object> p:rankedPlayers()){
-            out.append(++rank).append(". ").append(str(p,"name")).append("  ");
-            int score=scoreOf(id(p),gameRounds());if(score>=0)out.append("+");out.append(score).append("\n");
+    private List<NativeImageShare.RankRow> shareRankRows(List<Map<String,Object>> games) {
+        List<NativeImageShare.RankRow> out=new ArrayList<>();
+        for(Map<String,Object> p:rankedFor(games)){
+            String pid=id(p);int w=0,h=0,part=0;
+            for(Map<String,Object> round:games){
+                if(!strings(round.get("playerIds")).contains(pid))continue;
+                boolean isHukum=pid.equals(str(round,"hukumId"));
+                boolean isPartner=strings(round.get("partnerIds")).contains(pid);
+                if(isHukum)h++;
+                if(isPartner)part++;
+                if("win".equals(str(round,"result"))==(isHukum||isPartner))w++;
+            }
+            int n=played(pid,games);
+            out.add(new NativeImageShare.RankRow(str(p,"name"),scoreOf(pid,games),n,w,n-w,h,part));
         }
-        NativeImageShare.share(this,"Leaderboard",out.toString());
+        return out;
+    }
+    private void shareLeaderboard() {
+        List<Map<String,Object>> selected=filteredRounds();
+        if(selected.isEmpty()){
+            Toast.makeText(this,"No ranks in this period",Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String label="all".equals(rankFilter)?"All Time":
+                rankFilter.substring(0,1).toUpperCase(Locale.ROOT)+rankFilter.substring(1);
+        NativeImageShare.leaderboard(this,label+"  ·  "+dateOnly(System.currentTimeMillis()),shareRankRows(selected));
     }
     private void shareRound(Map<String,Object> round) {
-        StringBuilder out=new StringBuilder("3 Patti PRO · Round\n");
-        out.append("Hukum: ").append(str(round,"hukumName")).append("\n");
-        out.append("Bid: ").append(str(round,"bid")).append("\n");
-        out.append("Result: ").append(str(round,"result")).append("\n");
-        for(Map.Entry<String,Object> e:map(round.get("scoreChanges")).entrySet())
-            out.append(nameOf(e.getKey())).append(": ").append(e.getValue()).append("\n");
-        NativeImageShare.share(this,"Round Result",out.toString());
+        List<NativeImageShare.ScoreRow> rows=new ArrayList<>();
+        String hukumId=str(round,"hukumId");
+        List<String> ids=strings(round.get("playerIds")),partners=strings(round.get("partnerIds"));
+        Map<String,Object> changes=map(round.get("scoreChanges"));
+        if(ids.isEmpty())ids=new ArrayList<>(changes.keySet());
+        for(String pid:ids)if(changes.containsKey(pid)){
+            String role=pid.equals(hukumId)?"hukum":partners.contains(pid)?"partner":"opponent";
+            rows.add(new NativeImageShare.ScoreRow(nameOf(pid),role,num(changes.get(pid))));
+        }
+        NativeImageShare.round(this,when(round.get("timestamp")),str(round,"hukumName"),
+                str(round,"result"),num(round.get("bid")),rows);
     }
-    private void share(String body) {NativeImageShare.share(this,"Session Summary",body);}
+    private void shareSession(Map<String,Object> session) {
+        List<NativeImageShare.AwardRow> awards=new ArrayList<>();
+        Map<String,Object> mvp=map(session.get("mvp"));
+        if(!mvp.isEmpty())awards.add(new NativeImageShare.AwardRow("🏅 MVP",str(mvp,"name")+"  "+str(mvp,"score")));
+        Map<String,Object> best=map(session.get("bestHukum"));
+        if(!best.isEmpty())awards.add(new NativeImageShare.AwardRow("♛ Best Hukum",str(best,"name")+" "+str(best,"winRate")+"%"));
+        Map<String,Object> biggest=map(session.get("biggestWin"));
+        if(!biggest.isEmpty())awards.add(new NativeImageShare.AwardRow("📈 Biggest Win",str(biggest,"name")+"  +"+str(biggest,"score")));
+        Map<String,Object> smallest=map(session.get("biggestLoss"));
+        if(!smallest.isEmpty())awards.add(new NativeImageShare.AwardRow("📉 Biggest Loss",str(smallest,"name")+"  "+str(smallest,"score")));
+        String[][] types={{"hukumKing","♛ Hukum King"},{"hotStreak","🔥 Hot Streak"},{"unlucky","💀 Unlucky"},
+                {"sharpPartner","🎯 Sharp Partner"},{"mvp","🏆 Session MVP"},{"riskTaker","💰 Risk Taker"}};
+        Map<String,Object> badges=map(session.get("badges"));
+        for(String[] pair:types){
+            List<String> names=new ArrayList<>();
+            for(String pid:strings(badges.get(pair[0])))names.add(nameOf(pid));
+            if(!names.isEmpty())awards.add(new NativeImageShare.AwardRow(pair[1],
+                    android.text.TextUtils.join(", ",names)));
+        }
+        List<NativeImageShare.RankRow> ranking=new ArrayList<>();
+        Object list=session.get("leaderboard");
+        if(list instanceof List)for(Object item:(List<?>)list){
+            Map<String,Object> p=map(item);
+            ranking.add(new NativeImageShare.RankRow(str(p,"name"),num(p.get("score")),num(p.get("roundsPlayed")),0,0,0,0));
+        }
+        NativeImageShare.session(this,str(session,"sessionName"),
+                when(session.get("startTime"))+"  ·  "+num(session.get("totalRounds"))+" rounds",awards,ranking);
+    }
     @Override public void onBackPressed() {
-        if(tab!=0){tab=0;render(true);}
+        if(tab==5){tab=3;render(true);}
+        else if(tab!=0){tab=0;render(true);}
         else new AlertDialog.Builder(this).setTitle("Exit 3 Patti PRO?")
                 .setNegativeButton("Stay",null).setPositiveButton("Exit",(d,w)->finish()).show();
     }

@@ -310,10 +310,14 @@ public final class FirebaseGateway {
     }
     public static Stamp now() { return new Stamp(Instant.now().toString()); }
     public void addDocument(String collection, Map<String,Object> fields,String success) {
+        addDocument(collection,fields,success,null);
+    }
+    public void addDocument(String collection, Map<String,Object> fields,String success,Runnable onSaved) {
         write(success,token -> {
             JSONObject body=new JSONObject();
             body.put("fields",encodeFields(fields));
             jsonCall("POST",dbRoot+"/"+collection,body,token);
+            if(onSaved!=null)ui.post(()->{if(running)onSaved.run();});
         });
     }
     public void patchDocument(String collection,String id,Map<String,Object> fields,String success) {
