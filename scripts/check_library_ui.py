@@ -11,7 +11,7 @@ root=ids("app/src/main/res/layout/activity_main.xml")
 required={"btnSettings","btnPick","navHome","navFolders","navContinue","navSearch",
           "continueCard","continueTitle","continueThumb","continueDetails",
           "search","clearSearch","btnSort","btnView","filterAll","filterRecent",
-          "filterProgress","folderFilter","videos","count","btnGrant","btnRefresh",
+          "filterProgress","filterHistory","folderFilter","videos","count","btnGrant","btnRefresh",
           "sectionTitle","empty","filterScroller"}
 assert required <= root, "Missing main view IDs: "+str(sorted(required-root))
 cards={"thumb","duration","playGlyph","title","details","watchProgress"}
@@ -36,8 +36,10 @@ for code in ("AMOLED black","Default opening screen","Folder gallery columns",
     "Hidden folders","Pinned folders","Check for updates","Clear video history"):
     assert code in settings, "Setting missing: "+code
 assert "playback_positions_v1" in sources["VideoAdapter"]
+assert "recently_watched" in main and "R.id.filterHistory" in main
+assert "defaultOrientation" in sources["PlayerActivity"] and "defaultOrientation" in sources["OrbitSettings"]
 assert "ORBIT" not in str(root) or True
-assert 'versionName = "0.2.0"' in Path("app/build.gradle.kts").read_text()
+assert 'versionName = "0.2.1"' in Path("app/build.gradle.kts").read_text()
 assert 'applicationId = "com.orbitplayer.app"' in Path("app/build.gradle.kts").read_text()
 manifest=Path("app/src/main/AndroidManifest.xml").read_text()
 assert 'android:name=".SettingsActivity"' in manifest

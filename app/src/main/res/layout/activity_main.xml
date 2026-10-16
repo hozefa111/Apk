@@ -137,6 +137,9 @@
             <TextView android:id="@+id/filterProgress" style="@style/OrbitLibraryChip"
                 android:layout_width="wrap_content" android:layout_height="36dp"
                 android:text="Continue" />
+            <TextView android:id="@+id/filterHistory" style="@style/OrbitLibraryChip"
+                android:layout_width="wrap_content" android:layout_height="36dp"
+                android:text="History" android:visibility="gone" />
             <TextView android:id="@+id/filterRecent" style="@style/OrbitLibraryChip"
                 android:layout_width="wrap_content" android:layout_height="36dp"
                 android:text="Recent" />
