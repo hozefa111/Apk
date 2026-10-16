@@ -238,7 +238,19 @@ class PlayerActivity : Activity() {
         exo.repeatMode = if (repeatOne) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         exo.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
+                if (BuildConfig.DEBUG) android.util.Log.e("OrbitPlayerQA", "PLAYER_ERROR ${error.errorCodeName}", error)
                 if (isFinishing || isDestroyed) return
+                val failedUri = videoUri
+                if (!repeatOne && PlaybackQueue.autoAdvance &&
+                    PlaybackQueue.adjacent(failedUri, 1) != null) {
+                    Toast.makeText(this@PlayerActivity,
+                        "Unable to play ${videoTitle.take(50)}. Trying next video.",
+                        Toast.LENGTH_LONG).show()
+                    handler.post {
+                        if (!isFinishing && !isDestroyed && videoUri == failedUri) switchQueue(1)
+                    }
+                    return
+                }
                 AlertDialog.Builder(this@PlayerActivity)
                     .setTitle("Unable to play this video")
                     .setMessage("Decoder or file problem: ${error.errorCodeName}.\n\n" +
@@ -256,6 +268,9 @@ class PlayerActivity : Activity() {
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                if (BuildConfig.DEBUG && playbackState == Player.STATE_READY) {
+                    android.util.Log.i("OrbitPlayerQA", "STATE_READY")
+                }
                 updateProgress()
                 updatePlayPauseButton()
 
@@ -898,7 +913,8 @@ class PlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
-        // PiP may bypass normal onStop cleanup on some devices.
+        // PiP may bypass onStop; preserve watch progress before releasing its player.
+        savePosition()
         playerView.player = null
         player?.release()
         player = null
