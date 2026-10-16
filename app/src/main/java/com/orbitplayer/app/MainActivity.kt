@@ -117,7 +117,7 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.btnSettings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
-        findViewById<View>(R.id.btnPick).setOnClickListener { openDocument() }
+        findViewById<View>(R.id.btnPick).setOnClickListener { showOpenSourceMenu() }
         findViewById<View>(R.id.btnPlaylists).setOnClickListener { showPlaylists() }
         findViewById<View>(R.id.btnAdvancedFilters).setOnClickListener { showAdvancedFilters() }
         videos.setItemViewCacheSize(8)
@@ -215,6 +215,41 @@ class MainActivity : Activity() {
             else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
         requestPermissions(requested, requestLibrary)
+    }
+
+    private fun showOpenSourceMenu() {
+        val options = arrayOf("Choose local video", "Open secure video link (HTTPS)", "Browse a connected file provider")
+        AlertDialog.Builder(this).setTitle("Open a video")
+            .setItems(options) { _, selected ->
+                when (selected) {
+                    0, 2 -> openDocument() // Android SAF supports installed SMB/drive document providers.
+                    1 -> {
+                        val field = EditText(this).apply {
+                            hint = "https://example.com/video.mp4"
+                            setSingleLine(true)
+                            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+                        }
+                        AlertDialog.Builder(this).setTitle("Secure network video")
+                            .setMessage("Supports direct HTTPS video files and HLS/DASH streams. An installed document provider can browse remote network folders.")
+                            .setView(field)
+                            .setNegativeButton("Cancel", null)
+                            .setPositiveButton("Play") { _, _ ->
+                                val url = NetworkVideoUrl.validated(field.text.toString())
+                                if (url == null) {
+                                    Toast.makeText(this, "Enter a valid HTTPS URL without login details", Toast.LENGTH_LONG).show()
+                                } else {
+                                    PlaybackQueue.replace(emptyList())
+                                    PlaybackQueue.persist(this)
+                                    val title = android.net.Uri.parse(url).lastPathSegment ?: "Network video"
+                                    startActivity(Intent(this, PlayerActivity::class.java).apply {
+                                        putExtra(PlayerActivity.EXTRA_URI, url)
+                                        putExtra(PlayerActivity.EXTRA_TITLE, title)
+                                    })
+                                }
+                            }.show()
+                    }
+                }
+            }.show()
     }
 
     private fun openDocument() {
