@@ -1,8 +1,11 @@
 package com.orbitplayer.app
 
 import android.app.Activity
-import android.app.PictureInPictureParams
+import android.app.Dialog
 import android.content.res.Configuration
+import android.graphics.drawable.ColorDrawable
+import android.graphics.Color
+import android.app.PictureInPictureParams
 import android.util.Rational
 import android.widget.SeekBar
 import android.widget.ImageView
@@ -25,6 +28,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.C
@@ -72,7 +76,7 @@ class PlayerActivity : Activity() {
     private var gestureSeeking = false
     private var gestureSeekAnchor = 0L
     private val hideControlsTask = Runnable {
-        if (player?.isPlaying == true && !userSeeking) hideControls()
+        if (!userSeeking && !touchLocked) hideControls()
     }
     private val progressUpdater = object : Runnable {
         override fun run() {
@@ -140,11 +144,9 @@ class PlayerActivity : Activity() {
         findViewById<View>(R.id.btnForward).setOnClickListener { seekRelative(10_000) }
         playPauseButton.setOnClickListener { togglePlayPause() }
         findViewById<View>(R.id.btnAspect).setOnClickListener { cycleAspectRatio() }
-        findViewById<View>(R.id.btnRotate).setOnClickListener { rotateVideo() }
         findViewById<View>(R.id.btnLock).setOnClickListener { setTouchLocked(true) }
         unlockButton.setOnClickListener { setTouchLocked(false) }
         findViewById<View>(R.id.btnPip).setOnClickListener { startPictureInPicture() }
-        findViewById<View>(R.id.btnInfo).setOnClickListener { showVideoInfo() }
         durationLabel.setOnClickListener {
             showRemainingTime = !showRemainingTime
             updateProgress()
@@ -174,6 +176,7 @@ class PlayerActivity : Activity() {
             }
         })
         attachGestureZones()
+        adjustForScreenSize()
         showControls()
         if (savedInstanceState != null) {
             lastSavedPosition = savedInstanceState.getLong("position", 0L)
@@ -315,7 +318,7 @@ class PlayerActivity : Activity() {
         val captions = arrayOf("0.5×", "0.75×", "1× (Normal)", "1.25×", "1.5×", "2×")
         AlertDialog.Builder(this).setTitle("Playback speed").setItems(captions) { _, selected ->
             player?.setPlaybackSpeed(speeds[selected])
-            speedButton.text = "${captions[selected].substringBefore(' ')}  Speed"
+            speedButton.text = captions[selected].substringBefore(' ')
             scheduleAutoHide()
         }.show()
     }
@@ -414,25 +417,42 @@ class PlayerActivity : Activity() {
     }
 
     private fun showMoreOptions() {
-        val captions = arrayOf("Video details", "Sleep timer" + if (sleepTimerMinutes > 0) " · $sleepTimerMinutes min" else "",
-            "Fit screen", "Crop to fill", "Stretch", "Rotate",
-            if (repeatOne) "Repeat video · On" else "Repeat video · Off")
-        AlertDialog.Builder(this).setTitle("Orbit cinema")
-            .setItems(captions) { _, which ->
-                when (which) {
-                    0 -> showVideoInfo()
-                    1 -> showSleepTimer()
-                    2 -> setAspectRatio(AspectRatioFrameLayout.RESIZE_MODE_FIT)
-                    3 -> setAspectRatio(AspectRatioFrameLayout.RESIZE_MODE_ZOOM)
-                    4 -> setAspectRatio(AspectRatioFrameLayout.RESIZE_MODE_FILL)
-                    5 -> rotateVideo()
-                    6 -> {
-                        repeatOne = !repeatOne
-                        player?.repeatMode = if (repeatOne) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
-                        notifyGesture(if (repeatOne) "Repeat on" else "Repeat off")
-                    }
-                }
-            }.show()
+        handler.removeCallbacks(hideControlsTask)
+        val dialog = Dialog(this)
+        dialog.setContentView(R.layout.orbit_pro_sheet)
+        dialog.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT)
+            setGravity(Gravity.BOTTOM)
+            addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setDimAmount(0.52f)
+        }
+        fun action(id: Int, work: () -> Unit) {
+            dialog.findViewById<View>(id).setOnClickListener {
+                dialog.dismiss()
+                work()
+            }
+        }
+        action(R.id.actionTracks) { showTrackChooser() }
+        action(R.id.actionInformation) { showVideoInfo() }
+        action(R.id.actionSleep) { showSleepTimer() }
+        action(R.id.actionRotate) { rotateVideo() }
+        action(R.id.actionAspect) { cycleAspectRatio() }
+        val repeat = dialog.findViewById<TextView>(R.id.actionRepeat)
+        repeat.text = if (repeatOne) "Repeat video  ·  On" else "Repeat video  ·  Off"
+        action(R.id.actionRepeat) {
+            repeatOne = !repeatOne
+            player?.repeatMode = if (repeatOne) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+            notifyGesture(if (repeatOne) "Repeat on" else "Repeat off")
+        }
+        action(R.id.actionPip) { startPictureInPicture() }
+        dialog.setOnDismissListener { scheduleAutoHide() }
+        dialog.show()
+        // Android resets the dialog window on show() on some API levels.
+        dialog.window?.apply {
+            setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT)
+            setGravity(Gravity.BOTTOM)
+        }
     }
 
     private fun setAspectRatio(mode: Int) {
@@ -443,7 +463,7 @@ class PlayerActivity : Activity() {
             AspectRatioFrameLayout.RESIZE_MODE_FILL -> "Stretch"
             else -> "Fit"
         }
-        findViewById<TextView>(R.id.btnAspect).text = "▣  $caption"
+        findViewById<TextView>(R.id.btnAspect).text = caption.uppercase(java.util.Locale.ROOT)
         notifyGesture("Screen: $caption")
         scheduleAutoHide()
     }
@@ -681,14 +701,14 @@ class PlayerActivity : Activity() {
         if (touchLocked) { showUnlockButton(); return }
         controlsVisible = true
         unlockButton.visibility = View.GONE
-        listOf(topBar, centerControls, bottomControls).forEach { animateControls(it, true) }
+        listOf(topBar, bottomControls).forEach { animateControls(it, true) }
         scheduleAutoHide()
     }
 
     private fun hideControls() {
         controlsVisible = false
         handler.removeCallbacks(hideControlsTask)
-        listOf(topBar, centerControls, bottomControls).forEach { animateControls(it, false) }
+        listOf(topBar, bottomControls).forEach { animateControls(it, false) }
         unlockButton.visibility = View.GONE
     }
 
@@ -698,8 +718,8 @@ class PlayerActivity : Activity() {
 
     private fun scheduleAutoHide() {
         handler.removeCallbacks(hideControlsTask)
-        if (player?.isPlaying == true && controlsVisible && !touchLocked && !userSeeking)
-            handler.postDelayed(hideControlsTask, 3000)
+        if (controlsVisible && !touchLocked && !userSeeking)
+            handler.postDelayed(hideControlsTask, if (player?.isPlaying == true) 3300 else 6000)
     }
 
     private fun setTouchLocked(locked: Boolean) {
@@ -741,6 +761,30 @@ class PlayerActivity : Activity() {
         requestedOrientation = if (requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE)
             ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         showControls()
+    }
+
+    /** Compact landscape keeps video unobstructed; advanced actions remain in the sheet. */
+    private fun adjustForScreenSize() {
+        val compact = resources.configuration.screenHeightDp < 510
+        findViewById<View>(R.id.quickActions).visibility = if (compact) View.GONE else View.VISIBLE
+        topBar.layoutParams = topBar.layoutParams.apply {
+            height = ((if (compact) 54 else 76) * resources.displayMetrics.density).toInt()
+        }
+        // Keep the transport bar slimmer in landscape without hiding playback actions.
+        val transport = findViewById<View>(R.id.centerControls)
+        transport.layoutParams = transport.layoutParams.apply {
+            height = ((if (compact) 62 else 72) * resources.displayMetrics.density).toInt()
+        }
+        val timeline = findViewById<View>(R.id.timelineRow)
+        timeline.layoutParams = timeline.layoutParams.apply {
+            height = ((if (compact) 36 else 42) * resources.displayMetrics.density).toInt()
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        adjustForScreenSize()
+        if (!touchLocked) showControls()
     }
 
     private fun enableImmersiveMode() {

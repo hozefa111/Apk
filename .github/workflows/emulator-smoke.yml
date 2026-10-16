@@ -3,6 +3,8 @@ name: Emulator Playback Smoke Test
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -31,7 +33,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg
-          ffmpeg -nostdin -hide_banner -loglevel error -f lavfi -i testsrc=size=320x240:rate=15 -t 3 -c:v mpeg4 -q:v 8 -pix_fmt yuv420p -y smoke.mp4
+          ffmpeg -nostdin -hide_banner -loglevel error -f lavfi -i testsrc=size=320x240:rate=15 -t 24 -c:v mpeg4 -q:v 8 -pix_fmt yuv420p -y smoke.mp4
       - name: Launch on Android emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -45,16 +47,27 @@ jobs:
           script: |
             adb install app/build/outputs/apk/debug/app-debug.apk
             adb shell pm grant com.orbitplayer.app android.permission.READ_MEDIA_VIDEO || true
-            adb push smoke.mp4 /sdcard/Movies/orbit_smoke.mp4
-            adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Movies/orbit_smoke.mp4 || true
+            adb shell mkdir -p /sdcard/Download
+            adb push smoke.mp4 /sdcard/Download/orbit_smoke.mp4
+            adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Download/orbit_smoke.mp4 || true
             sleep 8
             adb logcat -c
             adb shell am start -n com.orbitplayer.app/.MainActivity
             sleep 3
-            adb shell am start -n com.orbitplayer.app/.PlayerActivity --es video_uri file:///sdcard/Movies/orbit_smoke.mp4
+            adb shell am start -n com.orbitplayer.app/.PlayerActivity --es video_uri file:///sdcard/Download/orbit_smoke.mp4
             sleep 8
             adb shell dumpsys activity activities > activity-state.txt
             adb logcat -d -v time > emulator-logcat.txt
+            adb shell input tap 180 400 || true
+            sleep 1
+            adb shell screencap -p /sdcard/Download/orbit_screenshot.png || true
+            adb pull /sdcard/Download/orbit_screenshot.png orbit-smoke-screen.png || true
+            adb shell settings put system accelerometer_rotation 0 || true
+            adb shell settings put system user_rotation 1 || true
+            sleep 4
+            adb shell input tap 400 180 || true
+            adb shell screencap -p /sdcard/Download/orbit_landscape.png || true
+            adb pull /sdcard/Download/orbit_landscape.png orbit-landscape-screen.png || true
             if grep -E 'FATAL EXCEPTION|Process: com\.orbitplayer\.app' emulator-logcat.txt; then
               echo "Detected fatal Android exception"
               exit 1
@@ -72,4 +85,6 @@ jobs:
           path: |
             emulator-logcat.txt
             activity-state.txt
+            orbit-smoke-screen.png
+            orbit-landscape-screen.png
           if-no-files-found: ignore
