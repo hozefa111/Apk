@@ -2,6 +2,8 @@ package com.orbitplayer.app
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
+import android.widget.Toast
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
@@ -19,6 +21,8 @@ import android.widget.TextView
  * Explicit updates are the only user-initiated network action.
  */
 class SettingsActivity : Activity() {
+    private val importRequest = 919
+    private val exportRequest = 920
     private lateinit var settings: OrbitSettings
     private lateinit var scroll: ScrollView
     private lateinit var content: LinearLayout
@@ -170,6 +174,19 @@ class SettingsActivity : Activity() {
         toggle("Automatically refresh library", "Update Albums when videos are added or removed", settings.autoRefresh) {
             settings.autoRefresh = it
         }
+        row("Export playlists", "Save a JSON backup of your playlists") {
+            startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "application/json"
+                putExtra(Intent.EXTRA_TITLE, "OrbitPro-Playlists.json")
+            }, exportRequest)
+        }
+        row("Import playlists", "Merge a previously exported JSON playlist file") {
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+            }, importRequest)
+        }
         row("Rescan videos", "Refresh the accessible local video library") {
             settings.prefs.edit().putBoolean("needs_rescan", true).apply()
             finish()
@@ -247,6 +264,45 @@ class SettingsActivity : Activity() {
                 }.setNegativeButton("Cancel", null).show()
         }
     }
+    @Deprecated("Documents provider result callback")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        val collections = OrbitCollections(this)
+        when (requestCode) {
+            exportRequest -> {
+                val ok = runCatching {
+                    contentResolver.openOutputStream(uri, "w")?.use { stream ->
+                        stream.write(collections.exportJson().toByteArray(Charsets.UTF_8))
+                        stream.flush()
+                    } ?: error("Cannot open export destination")
+                }
+                Toast.makeText(this, if (ok.isSuccess) "Playlists backed up" else
+                    "Export failed: ${ok.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+            }
+            importRequest -> {
+                val result = runCatching {
+                    val bytes = contentResolver.openInputStream(uri)?.use { source ->
+                        val output = java.io.ByteArrayOutputStream()
+                        val block = ByteArray(8192)
+                        while (output.size() <= 5_000_000) {
+                            val n = source.read(block)
+                            if (n < 0) break
+                            output.write(block, 0, n)
+                        }
+                        output.toByteArray()
+                    } ?: error("Cannot open selected file")
+                    require(bytes.size <= 5_000_000) { "File too large" }
+                    collections.importJson(String(bytes, Charsets.UTF_8))
+                }
+                Toast.makeText(this, if (result.isSuccess)
+                    "Imported ${result.getOrDefault(0)} playlist entries"
+                    else "Import failed: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     private fun manageFolders(kind: String, title: String) {
         val items = settings.folders(kind).sorted()
         if (items.isEmpty()) {
