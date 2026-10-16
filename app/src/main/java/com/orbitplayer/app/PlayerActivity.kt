@@ -210,6 +210,7 @@ class PlayerActivity : Activity() {
         val exo = ExoPlayer.Builder(this).build()
         player = exo
         playerView.player = exo
+        prefs.edit().putString("last_played_uri", videoUri).apply()
         playerView.resizeMode = resizeMode
         exo.repeatMode = if (repeatOne) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         exo.addListener(object : Player.Listener {
@@ -294,6 +295,7 @@ class PlayerActivity : Activity() {
         }
         savePosition()
         videoUri = adjacent.uri.toString()
+        prefs.edit().putString("last_played_uri", videoUri).apply()
         videoTitle = adjacent.title
         playerTitle.text = videoTitle
         subtitleUri = null

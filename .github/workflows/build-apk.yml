@@ -35,6 +35,8 @@ jobs:
           gradle-version: '8.13'
       - name: Verify required Android layout attributes
         run: python3 scripts/check_layouts.py
+      - name: Validate premium library screen
+        run: python3 scripts/check_library_ui.py
       - name: Build debug APK and test
         run: gradle --no-daemon :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest
       - name: Upload installable APK
