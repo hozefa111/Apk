@@ -33,7 +33,7 @@ import java.util.concurrent.Executors
  * Every chip/button changes the selected media, folder, view or user-approved permission.
  */
 class MainActivity : Activity() {
-    private enum class Filter { ALL, CONTINUE, RECENT }
+    private enum class Filter { ALL, CONTINUE, RECENT, HISTORY }
     private enum class Tab { VIDEOS, FOLDERS, CONTINUE, SEARCH }
     private enum class Sort { NEWEST, OLDEST, NAME, SIZE }
 
@@ -93,6 +93,7 @@ class MainActivity : Activity() {
             "Search" -> Tab.SEARCH
             else -> Tab.FOLDERS
         }
+        if (tab == Tab.VIDEOS) chosenFolder = preferences.lastFolder
         gridManager = GridLayoutManager(this, if (gallery) 2 else 1)
         videos.layoutManager = gridManager
         videos.adapter = adapter
@@ -113,6 +114,7 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.filterAll).setOnClickListener { chooseFilter(Filter.ALL) }
         findViewById<View>(R.id.filterProgress).setOnClickListener { chooseFilter(Filter.CONTINUE) }
         findViewById<View>(R.id.filterRecent).setOnClickListener { chooseFilter(Filter.RECENT) }
+        findViewById<View>(R.id.filterHistory).setOnClickListener { chooseFilter(Filter.HISTORY) }
         findViewById<View>(R.id.navHome).setOnClickListener { setTab(Tab.VIDEOS) }
         findViewById<View>(R.id.navFolders).setOnClickListener { setTab(Tab.FOLDERS) }
         findViewById<View>(R.id.navContinue).setOnClickListener { setTab(Tab.CONTINUE) }
@@ -286,6 +288,9 @@ class MainActivity : Activity() {
 
     private fun filterVideos() {
         val nowSeconds = System.currentTimeMillis() / 1000
+        val history = progress.getString("recently_watched", "")?.split("|")
+            ?.filter { it.isNotBlank() } ?: emptyList()
+        val historyOrder = history.withIndex().associate { it.value to it.index }
         val cutoff = nowSeconds - 30L * 24L * 60L * 60L
         val filtered = allVideos.asSequence()
             .filter { !preferences.hasFolder("hidden", it.folder) }
@@ -294,17 +299,23 @@ class MainActivity : Activity() {
                 it.folder.contains(query, ignoreCase = true) }
             .filter {
                 when {
-                    tab == Tab.CONTINUE -> hasProgress(it)
+                    tab == Tab.CONTINUE ->
+                        if (filter == Filter.HISTORY) it.uri.toString() in history
+                        else hasProgress(it)
+                    filter == Filter.HISTORY -> it.uri.toString() in history
                     filter == Filter.ALL -> true
                     filter == Filter.CONTINUE -> hasProgress(it)
                     else -> it.modifiedSeconds >= cutoff
                 }
             }
-        visibleVideos = when (sort) {
-            Sort.NEWEST -> filtered.sortedByDescending { it.modifiedSeconds }
-            Sort.OLDEST -> filtered.sortedBy { it.modifiedSeconds }
-            Sort.NAME -> filtered.sortedBy { it.title.lowercase() }
-            Sort.SIZE -> filtered.sortedByDescending { it.sizeBytes }
+        visibleVideos = when {
+            filter == Filter.HISTORY -> filtered.sortedBy {
+                historyOrder[it.uri.toString()] ?: Int.MAX_VALUE
+            }
+            sort == Sort.NEWEST -> filtered.sortedByDescending { it.modifiedSeconds }
+            sort == Sort.OLDEST -> filtered.sortedBy { it.modifiedSeconds }
+            sort == Sort.NAME -> filtered.sortedBy { it.title.lowercase() }
+            else -> filtered.sortedByDescending { it.sizeBytes }
         }.toList()
         adapter.submit(visibleVideos)
         if (tab == Tab.FOLDERS) {
@@ -323,7 +334,8 @@ class MainActivity : Activity() {
         }
         status.text = "${visibleVideos.size} videos  ·  ${allVideos.size} total"
         findViewById<TextView>(R.id.sectionTitle).text = when {
-            tab == Tab.CONTINUE -> "Continue Watching"
+            tab == Tab.CONTINUE ->
+                if (filter == Filter.HISTORY) "Watch History" else "Continue Watching"
             tab == Tab.SEARCH -> "Search Library"
             chosenFolder != "All folders" -> chosenFolder.trim('/').substringAfterLast('/')
             filter == Filter.RECENT -> "Recently Added"
@@ -337,6 +349,7 @@ class MainActivity : Activity() {
             R.id.filterAll to (filter == Filter.ALL),
             R.id.filterProgress to (filter == Filter.CONTINUE),
             R.id.filterRecent to (filter == Filter.RECENT),
+            R.id.filterHistory to (filter == Filter.HISTORY),
             R.id.folderFilter to (chosenFolder != "All folders")
         )) {
             val view = findViewById<TextView>(id)
