@@ -24,7 +24,8 @@ import java.util.concurrent.Executors
  */
 class VideoAdapter(
     private val context: Context,
-    private val onOpen: (VideoItem) -> Unit
+    private val onOpen: (VideoItem) -> Unit,
+    private val onLongPress: (VideoItem) -> Unit = {}
 ) : RecyclerView.Adapter<VideoAdapter.VideoHolder>() {
 
     private var items: List<VideoItem> = emptyList()
@@ -112,6 +113,11 @@ class VideoAdapter(
         holder.itemView.setOnClickListener {
             val current = holder.bindingAdapterPosition
             if (current != RecyclerView.NO_POSITION && current < items.size) onOpen(items[current])
+        }
+        holder.itemView.setOnLongClickListener {
+            val current = holder.bindingAdapterPosition
+            if (current != RecyclerView.NO_POSITION && current < items.size) onLongPress(items[current])
+            true
         }
     }
 
