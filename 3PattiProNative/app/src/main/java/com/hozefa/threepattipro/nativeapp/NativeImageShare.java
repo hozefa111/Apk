@@ -11,6 +11,8 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.util.*;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Native Canvas artwork styled to match the original 3 Patti PRO HTML share-card:
@@ -23,6 +25,7 @@ public final class NativeImageShare {
     private static final int GOLD=0xFFF5A623, WHITE=Color.WHITE, MUTED=0xFF9EA4BA;
     private static final int GREEN=0xFF4CAF50, RED=0xFFF44336, PANEL=0xFF1A1A2E;
     private static final int BACKGROUND=0xFF0F0F1A, LINE=0xFF343446;
+    private static final ExecutorService RENDERER=Executors.newSingleThreadExecutor();
     private NativeImageShare() {}
 
     public static final class ScoreRow {
@@ -112,6 +115,10 @@ public final class NativeImageShare {
 
     private static String score(int n){return n==0?"—":n>0?"+"+n:String.valueOf(n);}
     public static void round(Activity activity,String date,String hukum,String result,int bid,List<ScoreRow> rows){
+        final List<ScoreRow> snapshot=rows==null?Collections.emptyList():new ArrayList<>(rows);
+        RENDERER.execute(()->renderRound(activity,date,hukum,result,bid,snapshot));
+    }
+    private static void renderRound(Activity activity,String date,String hukum,String result,int bid,List<ScoreRow> rows){
         if(rows==null)rows=Collections.emptyList();
         int playerCount=Math.min(rows.size(),45);
         int details=255;
@@ -143,8 +150,12 @@ public final class NativeImageShare {
     }
 
     public static void leaderboard(Activity activity,String filter,List<RankRow> rows){
+        final List<RankRow> snapshot=rows==null?Collections.emptyList():new ArrayList<>(rows);
+        RENDERER.execute(()->renderLeaderboard(activity,filter,snapshot));
+    }
+    private static void renderLeaderboard(Activity activity,String filter,List<RankRow> rows){
         if(rows==null)rows=Collections.emptyList();
-        int count=Math.min(rows.size(),100);
+        int count=Math.min(rows.size(),65);
         int section=90+count*105;
         Art card=new Art(370+section+135);
         card.header("Rankings","📅  "+filter);
@@ -166,9 +177,15 @@ public final class NativeImageShare {
 
     public static void session(Activity activity,String title,String date,
                                List<AwardRow> awards,List<RankRow> ranked){
+        final List<AwardRow> badges=awards==null?Collections.emptyList():new ArrayList<>(awards);
+        final List<RankRow> scores=ranked==null?Collections.emptyList():new ArrayList<>(ranked);
+        RENDERER.execute(()->renderSession(activity,title,date,badges,scores));
+    }
+    private static void renderSession(Activity activity,String title,String date,
+                               List<AwardRow> awards,List<RankRow> ranked){
         if(awards==null)awards=Collections.emptyList();
         if(ranked==null)ranked=Collections.emptyList();
-        int awardsCount=Math.min(awards.size(),25),count=Math.min(ranked.size(),100);
+        int awardsCount=Math.min(awards.size(),25),count=Math.min(ranked.size(),65);
         int awardsHeight=awardsCount==0?0:85+awardsCount*75;
         int ranksHeight=90+count*86;
         Art card=new Art(370+awardsHeight+ranksHeight+155);
@@ -201,7 +218,7 @@ public final class NativeImageShare {
         try {
             File dir=new File(activity.getCacheDir(),"share");
             if(!dir.exists()&&!dir.mkdirs())throw new IllegalStateException("Cannot create cache");
-            File file=new File(dir,"3-patti-pro-scorecard.png");
+            File file=new File(dir,"3-patti-pro-"+System.nanoTime()+".png");
             try(FileOutputStream stream=new FileOutputStream(file)){
                 if(!bitmap.compress(Bitmap.CompressFormat.PNG,100,stream))
                     throw new IllegalStateException("PNG write failed");
@@ -212,10 +229,12 @@ public final class NativeImageShare {
             send.putExtra(Intent.EXTRA_STREAM,uri);
             send.setClipData(ClipData.newRawUri(title,uri));
             send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            activity.startActivity(Intent.createChooser(send,title));
+            activity.runOnUiThread(()->{
+                if(!activity.isFinishing())activity.startActivity(Intent.createChooser(send,title));
+            });
         }catch(Exception ex){
-            android.widget.Toast.makeText(activity,"Image sharing failed: "+ex.getMessage(),
-                    android.widget.Toast.LENGTH_LONG).show();
+            activity.runOnUiThread(()->android.widget.Toast.makeText(activity,
+                    "Image sharing failed: "+ex.getMessage(),android.widget.Toast.LENGTH_LONG).show());
         }finally {bitmap.recycle();}
     }
 }

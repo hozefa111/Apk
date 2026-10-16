@@ -217,7 +217,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         b.setGravity(Gravity.CENTER);
         b.setMinHeight(dp(48));
         pad(b,18,12,18,12);
-        b.setBackground(primary?gradient(0xFFF4D391,0xFFE2AE60,14):shape(PANEL2,14,BORDER));
+        b.setBackground(primary?gradient(0xFFF6D365,0xFFFDA085,14):shape(PANEL2,14,BORDER));
+        b.setForeground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x40FFFFFF),null,null));
         b.setClickable(true);
         b.setFocusable(true);
         b.setOnClickListener(v->{
@@ -232,6 +233,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         TextView t=text(name,13,fg,selected);
         t.setGravity(Gravity.CENTER);pad(t,15,10,15,10);
         t.setBackground(shape(fill,12,selected?(gold?GOLD:GREEN):BORDER));
+        t.setForeground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x35FFFFFF),null,null));
         t.setClickable(true);
         t.setFocusable(true);
         t.setMinHeight(dp(48));
@@ -264,7 +266,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         navigation=row();pad(navigation,7,7,7,7);
         navigation.setMinimumHeight(dp(64));
-        navigation.setBackgroundColor(PANEL);
+        navigation.setBackgroundColor(0xFF121215);
         root.addView(navigation,lp(-1,66));
         setContentView(root);
         render(true);
@@ -386,7 +388,12 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             viewOnly.addView(text("Viewing scores · Log in to add rounds and manage sessions",12,MUTED,false));
             content.addView(viewOnly);gap(content,16);
         }
-        if(loggedIn){content.addView(button("＋  Add Hukum Round",true,()->{tab=2;render(true);}));gap(content,18);}
+        label(content,"Quick Actions");
+        quickActions("＋  New Round",()->{if(loggedIn){tab=2;render(true);}else loginDialog();},
+                "♣  Players",()->{tab=1;render(true);});
+        quickActions("★  Rankings",()->{tab=3;render(true);},
+                "◷  History",()->{tab=4;render(true);});
+        gap(content,13);
         content.addView(text("RECENT ACTIVITY",15,WHITE,true));gap(content,12);
         if(games.isEmpty())empty("No rounds yet. Add players and start playing!");
         else for(int i=0;i<Math.min(8,games.size());i++){
@@ -400,6 +407,15 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             card.setOnClickListener(v->roundDetails(round));
             content.addView(card);gap(content,9);
         }
+    }
+    private void quickActions(String a,Runnable left,String b,Runnable right) {
+        LinearLayout row=row();
+        LinearLayout.LayoutParams lp1=new LinearLayout.LayoutParams(0,dp(72),1);
+        lp1.rightMargin=dp(10);
+        row.addView(button(a,false,left),lp1);
+        row.addView(button(b,false,right),new LinearLayout.LayoutParams(0,dp(72),1));
+        content.addView(row);
+        gap(content,10);
     }
     private LinearLayout statTile(String label,String value,int valueColor){
         LinearLayout tile=column();
@@ -1225,6 +1241,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     @Override public void onBackPressed() {
         if(tab==5){tab=3;render(true);}
+        else if(tab==5){tab=3;render(true);}
         else if(tab!=0){tab=0;render(true);}
         else new AlertDialog.Builder(this).setTitle("Exit 3 Patti PRO?")
                 .setNegativeButton("Stay",null).setPositiveButton("Exit",(d,w)->finish()).show();
