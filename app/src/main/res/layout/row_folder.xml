@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:layout_marginHorizontal="5dp" android:layout_marginBottom="13dp"
+    android:orientation="vertical">
+    <FrameLayout android:layout_width="match_parent"
+        android:layout_height="114dp" android:background="@drawable/orbit_thumb_bg"
+        android:clipToOutline="true">
+        <ImageView android:id="@+id/folderThumb"
+            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:scaleType="centerCrop" android:contentDescription="Folder cover" />
+        <TextView android:id="@+id/folderPinned" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:layout_gravity="top|end"
+            android:layout_margin="5dp" android:paddingHorizontal="6dp"
+            android:paddingVertical="3dp" android:background="@drawable/orbit_duration_bg"
+            android:text="★" android:textColor="#FFE79E" android:textSize="12sp"
+            android:visibility="gone" />
+    </FrameLayout>
+    <TextView android:id="@+id/folderTitle"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" android:ellipsize="end"
+        android:maxLines="1" android:textColor="#F4F6FD"
+        android:textSize="13sp" android:fontFamily="sans-serif-medium"/>
+    <TextView android:id="@+id/folderCount"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="3dp" android:textColor="#8998B2"
+        android:textSize="11sp"/>
+</LinearLayout>

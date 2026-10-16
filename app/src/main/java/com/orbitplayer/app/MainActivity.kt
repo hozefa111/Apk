@@ -22,6 +22,8 @@ import android.widget.EditText
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
+import android.view.inputmethod.InputMethodManager
+import android.graphics.Color
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import java.util.concurrent.Executors
@@ -32,6 +34,7 @@ import java.util.concurrent.Executors
  */
 class MainActivity : Activity() {
     private enum class Filter { ALL, CONTINUE, RECENT }
+    private enum class Tab { VIDEOS, FOLDERS, CONTINUE, SEARCH }
     private enum class Sort { NEWEST, OLDEST, NAME, SIZE }
 
     private val requestLibrary = 501
@@ -39,6 +42,11 @@ class MainActivity : Activity() {
     private val executor = Executors.newSingleThreadExecutor()
     private val handler = Handler(Looper.getMainLooper())
     private val progress by lazy { getSharedPreferences("playback_positions_v1", MODE_PRIVATE) }
+    private val preferences by lazy { OrbitSettings(this) }
+    private lateinit var albumAdapter: FolderAdapter
+    private var tab = Tab.FOLDERS
+    private var albums = emptyList<FolderAlbum>()
+    private var albumSort = 0
 
     private lateinit var adapter: VideoAdapter
     private lateinit var gridManager: GridLayoutManager
@@ -76,10 +84,23 @@ class MainActivity : Activity() {
         search = findViewById(R.id.search)
         videos = findViewById(R.id.videos)
         adapter = VideoAdapter(this) { open(it) }
-        gridManager = GridLayoutManager(this, 2)
+        albumAdapter = FolderAdapter(this, { openAlbum(it) }, { folderOptions(it) })
+        gallery = preferences.gallery
+        sort = Sort.values()[preferences.sort]
+        tab = when (preferences.defaultTab) {
+            "Videos" -> Tab.VIDEOS
+            "Continue" -> Tab.CONTINUE
+            "Search" -> Tab.SEARCH
+            else -> Tab.FOLDERS
+        }
+        gridManager = GridLayoutManager(this, if (gallery) 2 else 1)
         videos.layoutManager = gridManager
         videos.adapter = adapter
         videos.setHasFixedSize(true)
+        findViewById<View>(R.id.btnSettings).setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+        findViewById<View>(R.id.btnPick).setOnClickListener { openDocument() }
         videos.setItemViewCacheSize(8)
 
         findViewById<View>(R.id.btnRefresh).setOnClickListener {
@@ -92,16 +113,10 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.filterAll).setOnClickListener { chooseFilter(Filter.ALL) }
         findViewById<View>(R.id.filterProgress).setOnClickListener { chooseFilter(Filter.CONTINUE) }
         findViewById<View>(R.id.filterRecent).setOnClickListener { chooseFilter(Filter.RECENT) }
-        findViewById<View>(R.id.navHome).setOnClickListener {
-            chosenFolder = "All folders"
-            filter = Filter.ALL
-            search.setText("")
-            videos.scrollToPosition(0)
-            filterVideos()
-        }
-        findViewById<View>(R.id.navFolders).setOnClickListener { showFolderDialog() }
-        findViewById<View>(R.id.navOpen).setOnClickListener { openDocument() }
-        findViewById<View>(R.id.navUpdates).setOnClickListener { UpdateManager.check(this) }
+        findViewById<View>(R.id.navHome).setOnClickListener { setTab(Tab.VIDEOS) }
+        findViewById<View>(R.id.navFolders).setOnClickListener { setTab(Tab.FOLDERS) }
+        findViewById<View>(R.id.navContinue).setOnClickListener { setTab(Tab.CONTINUE) }
+        findViewById<View>(R.id.navSearch).setOnClickListener { setTab(Tab.SEARCH) }
         continueCard.setOnClickListener { continueVideo?.let { open(it) } }
         findViewById<View>(R.id.clearSearch).setOnClickListener { search.setText("") }
         search.addTextChangedListener(object : TextWatcher {
@@ -116,6 +131,7 @@ class MainActivity : Activity() {
         })
 
         updatePermissionsUi()
+        applyAppearance()
         if (hasLibraryPermission()) scan() else filterVideos()
         showPreviousCrashReport()
     }
@@ -124,10 +140,14 @@ class MainActivity : Activity() {
         super.onResume()
         updatePermissionsUi()
         if (::adapter.isInitialized) {
+            applyAppearance()
             adapter.refreshProgress()
             refreshContinueCard()
-            if (hasLibraryPermission() && allVideos.isEmpty()) scan()
-            else if (filter == Filter.CONTINUE) filterVideos()
+            if (gallery != preferences.gallery && tab != Tab.FOLDERS) setGalleryMode(preferences.gallery)
+            val rescan = preferences.prefs.getBoolean("needs_rescan", false)
+            if (rescan) preferences.prefs.edit().putBoolean("needs_rescan", false).apply()
+            if (hasLibraryPermission() && (allVideos.isEmpty() || rescan)) scan()
+            else filterVideos()
         }
     }
 
@@ -170,6 +190,7 @@ class MainActivity : Activity() {
     private fun setGalleryMode(newValue: Boolean) {
         if (gallery == newValue) return
         gallery = newValue
+        preferences.gallery = gallery
         adapter.useGallery(gallery)
         gridManager.spanCount = if (gallery) 2 else 1
         findViewById<ImageView>(R.id.btnView).setImageResource(
@@ -180,10 +201,21 @@ class MainActivity : Activity() {
     }
 
     private fun showSortDialog() {
+        if (tab == Tab.FOLDERS) {
+            val options = arrayOf("Name A to Z", "Most videos first", "Recently updated")
+            AlertDialog.Builder(this).setTitle("Sort folders")
+                .setSingleChoiceItems(options, albumSort) { dialog, selected ->
+                    albumSort = selected
+                    updateAlbums()
+                    dialog.dismiss()
+                }.setNegativeButton("Cancel", null).show()
+            return
+        }
         val values = arrayOf("Newest first", "Oldest first", "Name A to Z", "Largest first")
         AlertDialog.Builder(this).setTitle("Sort videos")
             .setSingleChoiceItems(values, sort.ordinal) { dialog, selected ->
                 sort = Sort.values()[selected]
+                preferences.sort = selected
                 sortButton.text = arrayOf("Newest", "Oldest", "Name A–Z", "Largest")[selected] + "  ▾"
                 filterVideos()
                 dialog.dismiss()
@@ -240,6 +272,8 @@ class MainActivity : Activity() {
         folderOptions = listOf("All folders") +
             allVideos.map { it.folder }.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
         if (chosenFolder !in folderOptions) chosenFolder = "All folders"
+        preferences.prefs.edit().putStringSet("known_folder_paths",
+            folderOptions.drop(1).toSet()).apply()
     }
 
     private fun savedPosition(item: VideoItem): Long =
@@ -254,14 +288,16 @@ class MainActivity : Activity() {
         val nowSeconds = System.currentTimeMillis() / 1000
         val cutoff = nowSeconds - 30L * 24L * 60L * 60L
         val filtered = allVideos.asSequence()
+            .filter { !preferences.hasFolder("hidden", it.folder) }
             .filter { chosenFolder == "All folders" || it.folder == chosenFolder }
             .filter { query.isBlank() || it.title.contains(query, ignoreCase = true) ||
                 it.folder.contains(query, ignoreCase = true) }
             .filter {
-                when (filter) {
-                    Filter.ALL -> true
-                    Filter.CONTINUE -> hasProgress(it)
-                    Filter.RECENT -> it.modifiedSeconds >= cutoff
+                when {
+                    tab == Tab.CONTINUE -> hasProgress(it)
+                    filter == Filter.ALL -> true
+                    filter == Filter.CONTINUE -> hasProgress(it)
+                    else -> it.modifiedSeconds >= cutoff
                 }
             }
         visibleVideos = when (sort) {
@@ -271,6 +307,12 @@ class MainActivity : Activity() {
             Sort.SIZE -> filtered.sortedByDescending { it.sizeBytes }
         }.toList()
         adapter.submit(visibleVideos)
+        if (tab == Tab.FOLDERS) {
+            updateAlbums()
+            return
+        }
+        videos.adapter = adapter
+        gridManager.spanCount = if (gallery) 2 else 1
         empty.visibility = if (visibleVideos.isEmpty()) View.VISIBLE else View.GONE
         empty.text = when {
             !hasLibraryPermission() -> "Enable library access or tap Open to choose a video."
@@ -280,11 +322,15 @@ class MainActivity : Activity() {
             else -> "Nothing matches this folder or search."
         }
         status.text = "${visibleVideos.size} videos  ·  ${allVideos.size} total"
-        findViewById<TextView>(R.id.sectionTitle).text = when (filter) {
-            Filter.ALL -> "Your Library"
-            Filter.CONTINUE -> "Keep Watching"
-            Filter.RECENT -> "Recently Added"
+        findViewById<TextView>(R.id.sectionTitle).text = when {
+            tab == Tab.CONTINUE -> "Continue Watching"
+            tab == Tab.SEARCH -> "Search Library"
+            chosenFolder != "All folders" -> chosenFolder.trim('/').substringAfterLast('/')
+            filter == Filter.RECENT -> "Recently Added"
+            filter == Filter.CONTINUE -> "Keep Watching"
+            else -> "All Videos"
         }
+        renderChrome()
         folderChip.text = if (chosenFolder == "All folders") "Folders  ▾"
                           else chosenFolder.substringAfterLast('/').take(18) + "  ▾"
         for ((id, selected) in arrayOf(
@@ -305,7 +351,9 @@ class MainActivity : Activity() {
         continueVideo = allVideos.firstOrNull { it.uri.toString() == preferred && hasProgress(it) }
             ?: allVideos.filter(::hasProgress).maxByOrNull { it.modifiedSeconds }
         val item = continueVideo
-        continueCard.visibility = if (item == null) View.GONE else View.VISIBLE
+        continueCard.visibility =
+            if (item == null || tab != Tab.VIDEOS || chosenFolder != "All folders") View.GONE
+            else View.VISIBLE
         if (item == null) return
         findViewById<TextView>(R.id.continueTitle).text = item.title
         findViewById<TextView>(R.id.continueDetails).text =
@@ -384,11 +432,138 @@ class MainActivity : Activity() {
             .show()
     }
 
+
+    private fun applyAppearance() {
+        val dark = if (preferences.amoled) Color.BLACK else Color.rgb(8, 12, 23)
+        findViewById<View>(R.id.mainRoot).setBackgroundColor(dark)
+        window.statusBarColor = dark
+        window.navigationBarColor = dark
+    }
+
+    private fun setTab(next: Tab) {
+        tab = next
+        preferences.lastTab = next.name
+        filter = if (next == Tab.CONTINUE) Filter.CONTINUE else Filter.ALL
+        chosenFolder = "All folders"
+        search.setText("")
+        filterVideos()
+        videos.scrollToPosition(0)
+        if (next == Tab.SEARCH) {
+            search.requestFocus()
+            val input = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+            input.showSoftInput(search, InputMethodManager.SHOW_IMPLICIT)
+        } else {
+            search.clearFocus()
+            val input = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+            input.hideSoftInputFromWindow(search.windowToken, 0)
+        }
+    }
+
+    private fun renderChrome() {
+        val folders = tab == Tab.FOLDERS
+        findViewById<View>(R.id.filterScroller).visibility =
+            if (folders || tab == Tab.CONTINUE) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.btnView).visibility = if (folders) View.GONE else View.VISIBLE
+        if (folders) findViewById<TextView>(R.id.sectionTitle).text = "Albums"
+        val bar = mapOf(
+            Tab.VIDEOS to R.id.navHome, Tab.FOLDERS to R.id.navFolders,
+            Tab.CONTINUE to R.id.navContinue, Tab.SEARCH to R.id.navSearch
+        )
+        bar.forEach { (item, id) ->
+            val group = findViewById<android.widget.LinearLayout>(id)
+            val active = item == tab
+            val color = if (active) Color.rgb(178, 145, 255) else Color.rgb(151, 163, 188)
+            group.getChildAt(0)?.let { child ->
+                if (child is ImageView) child.setColorFilter(color)
+            }
+            group.getChildAt(1)?.let { child ->
+                if (child is TextView) child.setTextColor(color)
+            }
+        }
+        continueCard.visibility = if (tab == Tab.VIDEOS && continueVideo != null
+            && chosenFolder == "All folders") View.VISIBLE else View.GONE
+    }
+
+    private fun updateAlbums() {
+        albums = allVideos.asSequence()
+            .filter { !preferences.hasFolder("hidden", it.folder) }
+            .groupBy { it.folder }
+            .map { (path, items) ->
+                val recent = items.maxByOrNull { it.modifiedSeconds } ?: items.first()
+                FolderAlbum(path, items.size, recent, items,
+                    preferences.hasFolder("pinned", path))
+            }.let { a ->
+                when (albumSort) {
+                    1 -> a.sortedWith(compareByDescending<FolderAlbum> { it.pinned }
+                        .thenByDescending { it.count }.thenBy { it.displayName.lowercase() })
+                    2 -> a.sortedWith(compareByDescending<FolderAlbum> { it.pinned }
+                        .thenByDescending { it.cover.modifiedSeconds })
+                    else -> a.sortedWith(compareByDescending<FolderAlbum> { it.pinned }
+                        .thenBy { it.displayName.lowercase() })
+                }
+            }
+        videos.adapter = albumAdapter
+        gridManager.spanCount = preferences.folderColumns
+        albumAdapter.submit(albums)
+        empty.visibility = if (albums.isEmpty()) View.VISIBLE else View.GONE
+        empty.text = if (hasLibraryPermission())
+            "No visible video folders.\\nUnhide folders in Settings if needed."
+            else "Allow video access to see your folders."
+        status.text = "${albums.size} folders  ·  ${albums.sumOf { it.count }} videos"
+        sortButton.text = arrayOf("A–Z  ▾", "Most  ▾", "Recent  ▾")[albumSort]
+        renderChrome()
+    }
+
+    private fun openAlbum(album: FolderAlbum) {
+        tab = Tab.VIDEOS
+        chosenFolder = album.path
+        filter = Filter.ALL
+        search.setText("")
+        filterVideos()
+        videos.scrollToPosition(0)
+    }
+
+    private fun folderOptions(album: FolderAlbum) {
+        val pinLabel = if (album.pinned) "Unpin favorite" else "Pin as favorite"
+        AlertDialog.Builder(this).setTitle(album.displayName)
+            .setItems(arrayOf("Open folder", "Play all videos", pinLabel, "Hide folder")) { _, which ->
+                when (which) {
+                    0 -> openAlbum(album)
+                    1 -> {
+                        val ordered = album.items.sortedByDescending { it.modifiedSeconds }
+                        if (ordered.isNotEmpty()) {
+                            visibleVideos = ordered
+                            open(ordered.first())
+                        }
+                    }
+                    2 -> {
+                        preferences.setFolder("pinned", album.path, !album.pinned)
+                        updateAlbums()
+                    }
+                    3 -> AlertDialog.Builder(this).setTitle("Hide ${album.displayName}?")
+                        .setMessage("Videos stay on your phone. You can unhide the folder in Settings.")
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Hide") { _, _ ->
+                            preferences.setFolder("hidden", album.path, true)
+                            updateAlbums()
+                        }.show()
+                }
+            }.show()
+    }
+
+    @Deprecated("Android back key is used to return from an opened album to the albums grid")
+    override fun onBackPressed() {
+        if (tab == Tab.VIDEOS && chosenFolder != "All folders") setTab(Tab.FOLDERS)
+        else if (tab == Tab.SEARCH || tab == Tab.CONTINUE) setTab(Tab.FOLDERS)
+        else super.onBackPressed()
+    }
+
     override fun onDestroy() {
         destroyed = true
         ++scanGeneration
         executor.shutdownNow()
         adapter.dispose()
+        albumAdapter.dispose()
         super.onDestroy()
     }
 }
