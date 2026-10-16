@@ -1,6 +1,5 @@
 package com.orbitplayer.app
 
-import android.content.ContentResolver
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.Build
@@ -13,79 +12,136 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
+import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import java.util.concurrent.Executors
 
-/** Bounded thumbnail cache. Heavy video thumbnail decoding never blocks scrolling. */
+/**
+ * Orbit's offline gallery: two view modes, stable IDs, bounded thumbnails and diff-based updates.
+ * No thumbnail decoding on the main/UI thread.
+ */
 class VideoAdapter(
     private val context: Context,
     private val onOpen: (VideoItem) -> Unit
-) : RecyclerView.Adapter<VideoAdapter.VideoViewHolder>() {
-    private var items = listOf<VideoItem>()
-    init { setHasStableIds(true) }
+) : RecyclerView.Adapter<VideoAdapter.VideoHolder>() {
 
-    override fun getItemId(position: Int): Long = items[position].uri.toString().hashCode().toLong()
+    private var items: List<VideoItem> = emptyList()
+    private var galleryMode = true
+    private val prefs = context.getSharedPreferences("playback_positions_v1", Context.MODE_PRIVATE)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val executor = Executors.newFixedThreadPool(2)
-    private val cache = object : LruCache<String, Bitmap>(8 * 1024) {
-        override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount / 1024
+    private val cache = object : LruCache<String, Bitmap>(12 * 1024) {
+        override fun sizeOf(key: String, value: Bitmap) =
+            (value.byteCount / 1024).coerceAtLeast(1)
+    }
+
+    init { setHasStableIds(true) }
+    override fun getItemId(position: Int): Long = items[position].uri.toString().hashCode().toLong()
+    override fun getItemViewType(position: Int) = if (galleryMode) 1 else 0
+    override fun getItemCount(): Int = items.size
+
+    fun useGallery(gallery: Boolean) {
+        if (galleryMode == gallery) return
+        galleryMode = gallery
+        notifyDataSetChanged() // Different ViewHolder layout / type is intentional.
+    }
+
+    fun refreshProgress() {
+        if (items.isNotEmpty()) notifyItemRangeChanged(0, items.size, "progress")
     }
 
     fun submit(videos: List<VideoItem>) {
-        items = videos.toList()
-        notifyDataSetChanged()
+        val old = items
+        val next = videos.toList()
+        val delta = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+            override fun getOldListSize() = old.size
+            override fun getNewListSize() = next.size
+            override fun areItemsTheSame(a: Int, b: Int) = old[a].uri == next[b].uri
+            override fun areContentsTheSame(a: Int, b: Int) = old[a] == next[b]
+        }, true)
+        items = next
+        delta.dispatchUpdatesTo(this)
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VideoViewHolder {
-        val view = LayoutInflater.from(parent.context).inflate(R.layout.row_video, parent, false)
-        return VideoViewHolder(view)
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VideoHolder {
+        val layout = if (viewType == 1) R.layout.row_video else R.layout.row_video_list
+        return VideoHolder(LayoutInflater.from(parent.context).inflate(layout, parent, false))
     }
 
-    override fun getItemCount(): Int = items.size
-
-    override fun onBindViewHolder(holder: VideoViewHolder, position: Int) {
+    override fun onBindViewHolder(holder: VideoHolder, position: Int) {
         val item = items[position]
         holder.title.text = item.title
-        holder.details.text = "${formatDuration(item.durationMs)}  ·  ${formatSize(item.sizeBytes)}  ·  ${item.folder}"
+        holder.details.text = if (galleryMode) {
+            "${formatSize(item.sizeBytes)}  ·  ${item.folder}"
+        } else {
+            "${formatSize(item.sizeBytes)}  ·  ${item.folder}"
+        }
+        holder.duration.text = formatDuration(item.durationMs)
+        bindProgress(holder, item)
         val key = item.uri.toString()
         holder.thumb.tag = key
         holder.thumb.setImageDrawable(null)
         holder.glyph.visibility = View.VISIBLE
-        cache.get(key)?.let {
-            holder.thumb.setImageBitmap(it)
+        synchronized(cache) { cache.get(key) }?.let { image ->
+            holder.thumb.setImageBitmap(image)
             holder.glyph.visibility = View.GONE
         } ?: run {
             executor.execute {
-                val bmp = try {
+                val bitmap = try {
                     if (Build.VERSION.SDK_INT >= 29) {
-                        context.contentResolver.loadThumbnail(item.uri, Size(192, 108), null)
+                        context.contentResolver.loadThumbnail(item.uri, Size(384, 216), null)
                     } else {
-                        val id = item.uri.lastPathSegment?.toLongOrNull() ?: -1
+                        val id = item.uri.lastPathSegment?.toLongOrNull() ?: -1L
                         MediaStore.Video.Thumbnails.getThumbnail(context.contentResolver, id,
                             MediaStore.Video.Thumbnails.MINI_KIND, null)
                     }
                 } catch (_: Exception) { null }
-                if (bmp != null) {
-                    cache.put(key, bmp)
+                if (bitmap != null) {
+                    synchronized(cache) { cache.put(key, bitmap) }
                     mainHandler.post {
                         if (holder.thumb.tag == key) {
-                            holder.thumb.setImageBitmap(bmp)
+                            holder.thumb.setImageBitmap(bitmap)
                             holder.glyph.visibility = View.GONE
                         }
                     }
                 }
             }
         }
-        holder.itemView.setOnClickListener { onOpen(item) }
+        holder.itemView.setOnClickListener {
+            val current = holder.bindingAdapterPosition
+            if (current != RecyclerView.NO_POSITION && current < items.size) onOpen(items[current])
+        }
     }
 
-    fun dispose() { executor.shutdownNow(); cache.evictAll() }
+    override fun onBindViewHolder(holder: VideoHolder, position: Int, payloads: MutableList<Any>) {
+        if (payloads.isNotEmpty() && payloads.all { it == "progress" }) {
+            bindProgress(holder, items[position])
+        } else super.onBindViewHolder(holder, position, payloads)
+    }
 
-    class VideoViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        val title: TextView = itemView.findViewById(R.id.title)
-        val details: TextView = itemView.findViewById(R.id.details)
-        val thumb: ImageView = itemView.findViewById(R.id.thumb)
-        val glyph: TextView = itemView.findViewById(R.id.playGlyph)
+    private fun bindProgress(holder: VideoHolder, item: VideoItem) {
+        val current = prefs.getLong("position_${item.uri.toString().hashCode()}", 0L)
+        val duration = item.durationMs
+        val valid = duration > 0 && current >= 3_000L && current < duration - 5_000L
+        holder.watchProgress.visibility = if (valid) View.VISIBLE else View.GONE
+        holder.watchProgress.progress = if (valid)
+            (current * 1000L / duration).toInt().coerceIn(0, 1000) else 0
+    }
+
+    fun dispose() {
+        executor.shutdownNow()
+        synchronized(cache) { cache.evictAll() }
+        mainHandler.removeCallbacksAndMessages(null)
+    }
+
+    class VideoHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val title: TextView = view.findViewById(R.id.title)
+        val details: TextView = view.findViewById(R.id.details)
+        val duration: TextView = view.findViewById(R.id.duration)
+        val thumb: ImageView = view.findViewById(R.id.thumb)
+        val glyph: TextView = view.findViewById(R.id.playGlyph)
+        val watchProgress: ProgressBar = view.findViewById(R.id.watchProgress)
     }
 }

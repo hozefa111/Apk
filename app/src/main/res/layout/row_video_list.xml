@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+ android:layout_width="match_parent" android:layout_height="94dp"
+ android:orientation="horizontal" android:gravity="center_vertical"
+ android:layout_marginHorizontal="5dp" android:layout_marginBottom="10dp"
+ android:paddingStart="7dp" android:paddingEnd="12dp"
+ android:background="@drawable/orbit_gallery_card_bg">
+ <FrameLayout android:layout_width="127dp" android:layout_height="78dp"
+    android:background="@drawable/orbit_thumb_bg" android:clipToOutline="true">
+    <ImageView android:id="@+id/thumb" android:layout_width="match_parent"
+      android:layout_height="match_parent" android:scaleType="centerCrop"
+      android:contentDescription="Video preview"/>
+    <TextView android:id="@+id/playGlyph" android:layout_width="35dp"
+      android:layout_height="35dp" android:layout_gravity="center"
+      android:gravity="center" android:text="▶" android:textSize="14sp"
+      android:textColor="#FFFFFF" android:background="@drawable/play_badge_bg"/>
+    <TextView android:id="@+id/duration" android:layout_width="wrap_content"
+      android:layout_height="wrap_content" android:layout_gravity="bottom|end"
+      android:layout_margin="5dp" android:paddingHorizontal="5dp"
+      android:paddingVertical="2dp" android:background="@drawable/orbit_duration_bg"
+      android:textSize="10sp" android:textColor="#FFFFFF"/>
+ </FrameLayout>
+ <LinearLayout android:layout_width="0dp" android:layout_height="match_parent"
+     android:layout_weight="1" android:paddingStart="13dp"
+     android:gravity="center_vertical" android:orientation="vertical">
+    <TextView android:id="@+id/title" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:textSize="13sp"
+        android:maxLines="2" android:ellipsize="end"
+        android:textColor="#F2F5FF" android:fontFamily="sans-serif-medium"/>
+    <TextView android:id="@+id/details" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:layout_marginTop="5dp"
+        android:textSize="10sp" android:maxLines="1" android:ellipsize="end"
+        android:textColor="#9EAEC8"/>
+    <ProgressBar android:id="@+id/watchProgress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent" android:layout_height="3dp"
+        android:layout_marginTop="8dp" android:visibility="gone"
+        android:max="1000" android:progressTint="#69D8E9"
+        android:progressBackgroundTint="#44536D89"/>
+ </LinearLayout>
+ <TextView android:layout_width="18dp" android:layout_height="wrap_content"
+    android:gravity="center" android:text="›" android:textSize="23sp"
+    android:textColor="#6F90D6"/>
+</LinearLayout>

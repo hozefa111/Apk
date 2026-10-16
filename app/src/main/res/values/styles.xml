@@ -22,4 +22,23 @@
         <item name="android:fontFamily">sans-serif-medium</item>
         <item name="android:background">?android:attr/selectableItemBackground</item>
     </style>
+    <style name="OrbitLibraryChip">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">36dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingStart">15dp</item>
+        <item name="android:paddingEnd">15dp</item>
+        <item name="android:layout_marginEnd">8dp</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:textColor">#C4D0E9</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:background">@drawable/orbit_filter_idle</item>
+    </style>
+    <style name="OrbitBottomNavItem">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:gravity">center</item>
+    </style>
 </resources>
