@@ -68,8 +68,10 @@ jobs:
             adb logcat -c
             adb shell am start -n com.orbitplayer.app/.MainActivity
             sleep 3
-            adb shell am start -n com.orbitplayer.app/.SettingsActivity
+            python3 scripts/tap_android_view.py com.orbitplayer.app:id/btnSettings
             sleep 2
+            adb shell dumpsys activity activities > settings-activity.txt
+            grep -F '.SettingsActivity' settings-activity.txt
             adb shell screencap -p /sdcard/Download/orbit_settings.png
             adb pull /sdcard/Download/orbit_settings.png orbit-settings-screen.png
             adb shell input keyevent 4
@@ -101,6 +103,7 @@ jobs:
             emulator-logcat.txt
             media-rows.txt
             orbit-settings-screen.png
+            settings-activity.txt
             activity-state.txt
             orbit-smoke-screen.png
             orbit-landscape-screen.png
