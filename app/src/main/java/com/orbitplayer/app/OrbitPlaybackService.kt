@@ -5,6 +5,7 @@ import android.os.Binder
 import android.os.IBinder
 import androidx.media3.common.AudioAttributes
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 
@@ -24,7 +25,9 @@ class OrbitPlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        exo = ExoPlayer.Builder(this).build().apply {
+        exo = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(OrbitDataSourceFactory(this)))
+            .build().apply {
             setAudioAttributes(AudioAttributes.DEFAULT, true)
             setHandleAudioBecomingNoisy(true)
         }
