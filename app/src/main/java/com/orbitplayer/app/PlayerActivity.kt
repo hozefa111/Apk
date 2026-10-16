@@ -6,7 +6,6 @@ import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
 import android.graphics.Color
 import android.app.PictureInPictureParams
-import android.content.res.Configuration
 import android.util.Rational
 import android.widget.SeekBar
 import android.widget.ImageView
