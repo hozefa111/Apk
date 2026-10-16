@@ -146,7 +146,7 @@ public final class FirebaseGateway {
     }
     private void scheduleNext() {
         ui.removeCallbacks(refreshLoop);
-        ui.postDelayed(refreshLoop, 30000);
+        ui.postDelayed(refreshLoop, 12000);
     }
     private void load() {
         if (!running) return;

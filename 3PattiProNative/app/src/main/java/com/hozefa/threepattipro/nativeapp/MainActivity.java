@@ -282,6 +282,18 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         status.setBackground(shape(PANEL2,12,BORDER));
         status.setOnClickListener(v->{if(busy)return;if(loggedIn)confirmLogout();else loginDialog();});
         toolbar.addView(status);
+        TextView refresh=text("↻",23,GOLD,true);
+        refresh.setGravity(Gravity.CENTER);
+        refresh.setBackground(shape(PANEL2,12,BORDER));
+        refresh.setMinWidth(dp(48));refresh.setMinHeight(dp(48));
+        refresh.setOnClickListener(v->{
+            if(api!=null) {
+                api.refresh();
+                Toast.makeText(this,"Refreshing scores...",Toast.LENGTH_SHORT).show();
+            }
+        });
+        LinearLayout.LayoutParams rp=lp(48,48);rp.leftMargin=dp(8);
+        toolbar.addView(refresh,rp);
     }
     private void render(boolean reset) {
         if(content==null||navigation==null)return;
@@ -353,7 +365,16 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         LinearLayout.LayoutParams half=new LinearLayout.LayoutParams(0,-2,1);
         half.rightMargin=dp(9);stats.addView(left,half);
         stats.addView(right,new LinearLayout.LayoutParams(0,-2,1));
-        content.addView(stats);gap(content,22);
+        content.addView(stats);gap(content,12);
+        LinearLayout winner=panel();
+        List<Map<String,Object>> leaders=rankedPlayers();
+        winner.addView(text("♛  TOP WINNER",11,GOLD,true));gap(winner,8);
+        if(leaders.isEmpty())winner.addView(text("No winners yet",16,MUTED,false));
+        else {
+            Map<String,Object> top=leaders.get(0);
+            winner.addView(text(str(top,"name")+"  ·  +"+scoreOf(id(top),gameRounds()),16,GREEN,true));
+        }
+        content.addView(winner);gap(content,22);
 
         content.addView(text("TOP PLAYERS",15,WHITE,true));gap(content,12);
         List<Map<String,Object>> ranked=rankedPlayers();
