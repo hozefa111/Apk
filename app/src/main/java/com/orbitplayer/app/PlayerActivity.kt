@@ -31,6 +31,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.media3.common.Timeline
+import androidx.media3.extractor.metadata.Chapter
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -92,6 +94,9 @@ class PlayerActivity : Activity() {
     private var videoUri = ""
     private var videoTitle = "Video"
     private var subtitleUri: Uri? = null
+    private var externalSubtitleUri: Uri? = null
+    private var subtitleTimeline: SubtitleTimeline? = null
+    private lateinit var externalSubtitle: TextView
     private var lastSavedPosition = 0L
     private var repeatOne = false
     private var resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
@@ -122,6 +127,8 @@ class PlayerActivity : Activity() {
         gestureHud = findViewById(R.id.gestureHud)
         gestureMeter = findViewById(R.id.gestureMeter)
         speedButton = findViewById(R.id.btnSpeed)
+        externalSubtitle = findViewById(R.id.externalSubtitle)
+        configureSubtitleAppearance()
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         videoUri = intent?.data?.toString()
             ?: intent?.getStringExtra(EXTRA_URI).orEmpty()
@@ -339,6 +346,9 @@ class PlayerActivity : Activity() {
         videoTitle = adjacent.title
         playerTitle.text = videoTitle
         subtitleUri = null
+        externalSubtitleUri = null
+        subtitleTimeline = null
+        externalSubtitle.visibility = View.GONE
         lastSavedPosition = if (userOptions.resume) savedProgress(videoUri) else 0L
         try {
             player?.apply {
@@ -445,6 +455,13 @@ class PlayerActivity : Activity() {
         if (requestCode == PICK_SUBTITLE && resultCode == RESULT_OK) {
             val uri = data?.data ?: return
             runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            if (subtitleMime(uri) == MimeTypes.APPLICATION_SUBRIP || subtitleMime(uri) == MimeTypes.TEXT_VTT) {
+                loadTimedExternalSubtitle(uri)
+                return
+            }
+            externalSubtitleUri = null
+            subtitleTimeline = null
+            externalSubtitle.visibility = View.GONE
             subtitleUri = uri
             val exo = player ?: return
             val pos = exo.currentPosition.coerceAtLeast(0L)
@@ -478,6 +495,8 @@ class PlayerActivity : Activity() {
         }
         action(R.id.actionTracks) { showTrackChooser() }
         action(R.id.actionInformation) { showVideoInfo() }
+        action(R.id.actionSubtitleSync) { showSubtitleSync() }
+        action(R.id.actionChapters) { showChapters() }
         action(R.id.actionSleep) { showSleepTimer() }
         action(R.id.actionRotate) { rotateVideo() }
         action(R.id.actionAspect) { cycleAspectRatio() }
@@ -510,6 +529,124 @@ class PlayerActivity : Activity() {
         findViewById<TextView>(R.id.btnAspect).text = caption.uppercase(java.util.Locale.ROOT)
         notifyGesture("Screen: $caption")
         scheduleAutoHide()
+    }
+
+    private fun configureSubtitleAppearance() {
+        if (!::externalSubtitle.isInitialized) return
+        externalSubtitle.setTextColor(userOptions.subtitleColor)
+        externalSubtitle.textSize = 18f * userOptions.subtitleScale
+        externalSubtitle.setBackgroundColor(if (userOptions.subtitleBackground) 0xB3000000.toInt() else 0)
+    }
+
+    private fun renderTimedExternalSubtitle(positionMs: Long) {
+        if (!::externalSubtitle.isInitialized) return
+        val cue = subtitleTimeline?.textAt(positionMs, userOptions.subtitleDelayMs).orEmpty()
+        if (cue.isBlank()) {
+            if (externalSubtitle.visibility != View.GONE) externalSubtitle.visibility = View.GONE
+            return
+        }
+        if (externalSubtitle.text.toString() != cue) externalSubtitle.text = cue
+        externalSubtitle.visibility = View.VISIBLE
+        val params = externalSubtitle.layoutParams as FrameLayout.LayoutParams
+        val density = resources.displayMetrics.density
+        val newBottom = ((if (controlsVisible && !touchLocked) 182 else 25) * density).toInt()
+        if (params.bottomMargin != newBottom) {
+            params.bottomMargin = newBottom
+            externalSubtitle.layoutParams = params
+        }
+    }
+
+    /** Native cue tracks are untouched; only an external SRT or VTT cue index is shifted. */
+    private fun loadTimedExternalSubtitle(uri: Uri) {
+        externalSubtitleUri = uri
+        subtitleTimeline = null
+        externalSubtitle.visibility = View.GONE
+        Thread {
+            val decoded = runCatching {
+                val bytes = contentResolver.openInputStream(uri)?.use { input ->
+                    input.readNBytes(4 * 1024 * 1024 + 1)
+                } ?: error("Cannot read subtitle file")
+                require(bytes.size <= 4 * 1024 * 1024) { "Subtitle file exceeds 4 MB" }
+                SubtitleTimeline.parse(String(bytes, Charsets.UTF_8))
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed || externalSubtitleUri != uri) return@runOnUiThread
+                val timeline = decoded.getOrNull()
+                if (timeline == null || timeline.size == 0) {
+                    Toast.makeText(this, "No readable timed captions in this file", Toast.LENGTH_LONG).show()
+                    externalSubtitleUri = null
+                    return@runOnUiThread
+                }
+                subtitleTimeline = timeline
+                configureSubtitleAppearance()
+                val existing = player ?: return@runOnUiThread
+                val pos = existing.currentPosition
+                val playing = existing.playWhenReady
+                // Remove a previously attached native external text source, if present.
+                val hadNativeExternal = subtitleUri != null
+                subtitleUri = null
+                if (hadNativeExternal) {
+                    existing.setMediaItem(buildMediaItem(), pos)
+                    existing.prepare()
+                    existing.playWhenReady = playing
+                }
+                existing.trackSelectionParameters = existing.trackSelectionParameters.buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
+                renderTimedExternalSubtitle(pos)
+                Toast.makeText(this, "${timeline.size} captions loaded · Timing adjustable", Toast.LENGTH_SHORT).show()
+            }
+        }.start()
+    }
+
+    private fun showSubtitleSync() {
+        if (subtitleTimeline == null) {
+            AlertDialog.Builder(this).setTitle("Subtitle timing")
+                .setMessage("Live timing shift works with an external SRT or WebVTT file. Select SUBS first. Embedded subtitle delay is not supported by the current Media3 renderer.")
+                .setPositiveButton("Choose subtitles") { _, _ -> chooseSubtitle() }
+                .setNegativeButton("Close", null).show()
+            return
+        }
+        val options = arrayOf("−1.0 second", "−0.25 second", "+0.25 second", "+1.0 second", "Reset to zero", "Turn off external captions")
+        AlertDialog.Builder(this).setTitle("Subtitle timing · ${userOptions.subtitleDelayMs} ms")
+            .setItems(options) { _, which ->
+                val delta = longArrayOf(-1000L,-250L,250L,1000L,0L,0L)[which]
+                when(which) {
+                    4 -> userOptions.subtitleDelayMs = 0L
+                    5 -> { subtitleTimeline = null; externalSubtitleUri = null }
+                    else -> userOptions.subtitleDelayMs += delta
+                }
+                renderTimedExternalSubtitle(player?.currentPosition ?: 0L)
+                notifyGesture("Caption offset: ${userOptions.subtitleDelayMs} ms")
+            }.setNegativeButton("Close", null).show()
+    }
+
+    private fun showChapters() {
+        val exo = player ?: return
+        val entries = ArrayList<Pair<String, Long>>()
+        val offsetMs = if (exo.currentTimeline.isEmpty) 0L else
+            exo.currentTimeline.getWindow(exo.currentMediaItemIndex, Timeline.Window())
+                .positionInFirstPeriodUs / 1000L
+        for (group in exo.currentTracks.groups) {
+            for (i in 0 until group.length) {
+                val metadata = group.getTrackFormat(i).metadata ?: continue
+                for (k in 0 until metadata.length()) {
+                    val chapter = metadata[k] as? Chapter ?: continue
+                    if (chapter.isHidden) continue
+                    val start = (chapter.startTimeMs - offsetMs).coerceAtLeast(0L)
+                    entries.add(Pair("${chapter.title?.toString() ?: "Chapter ${entries.size + 1}"}  ·  ${formatTime(start)}", start))
+                }
+            }
+        }
+        val unique = entries.distinctBy { it.second }.sortedBy { it.second }
+        if (unique.isEmpty()) {
+            Toast.makeText(this, "No embedded chapters found in this video", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this).setTitle("Chapters · ${unique.size}")
+            .setItems(unique.map { it.first }.toTypedArray()) { _, selected ->
+                exo.seekTo(unique[selected].second)
+                showControls()
+            }.setNegativeButton("Close", null).show()
     }
 
     private fun showVideoInfo() {
@@ -704,6 +841,7 @@ class PlayerActivity : Activity() {
         if (!::seekBar.isInitialized) return
         val duration = exo.duration
         val position = exo.currentPosition.coerceAtLeast(0L)
+        renderTimedExternalSubtitle(position)
         if (duration > 0L) {
             val totalText = if (showRemainingTime) "−" + formatTime((duration - position).coerceAtLeast(0L))
                 else formatTime(duration)
