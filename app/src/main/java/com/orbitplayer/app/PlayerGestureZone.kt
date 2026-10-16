@@ -17,27 +17,40 @@ class PlayerGestureZone(
     private val onDoubleTap: (Float) -> Unit,
     private val onVerticalScroll: (Boolean, Float) -> Unit,
     private val onHorizontalSeek: (Float, Boolean) -> Unit,
-    private val onPinch: (Boolean) -> Unit
+    private val onPinch: (Boolean) -> Unit,
+    private val onHoldBoost: (Boolean) -> Unit,
+    private val onGestureCancelled: () -> Unit
 ) : View(context) {
 
     private enum class Swipe { NONE, VERTICAL, HORIZONTAL }
     private var swipe = Swipe.NONE
     private var horizontalFraction = 0f
     private var zoomAccumulated = 1f
+    private var boosting = false
     private val detector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(event: MotionEvent): Boolean = true
 
         override fun onSingleTapConfirmed(event: MotionEvent): Boolean {
+            if (boosting) return true
             onTap()
             return true
         }
 
         override fun onDoubleTap(event: MotionEvent): Boolean {
+            if (boosting) return true
             onDoubleTap((event.x / width.coerceAtLeast(1)).coerceIn(0f, 1f))
             return true
         }
 
+        override fun onLongPress(event: MotionEvent) {
+            if (swipe == Swipe.NONE && !scaleDetector.isInProgress) {
+                boosting = true
+                onHoldBoost(true)
+            }
+        }
+
         override fun onScroll(start: MotionEvent?, end: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+            if (boosting) return true
             if (start == null || end.pointerCount > 1) return false
             val dx = end.x - start.x
             val dy = end.y - start.y
@@ -81,9 +94,14 @@ class PlayerGestureZone(
         scaleDetector.onTouchEvent(event)
         if (event.pointerCount == 1 && !scaleDetector.isInProgress) detector.onTouchEvent(event)
         if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            if (boosting) {
+                boosting = false
+                onHoldBoost(false)
+            }
             if (swipe == Swipe.HORIZONTAL && event.actionMasked == MotionEvent.ACTION_UP) {
                 onHorizontalSeek(horizontalFraction, true)
             }
+            if (event.actionMasked == MotionEvent.ACTION_CANCEL) onGestureCancelled()
             swipe = Swipe.NONE
             horizontalFraction = 0f
         }
