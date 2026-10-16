@@ -9,6 +9,7 @@ import androidx.core.content.FileProvider;
 import android.text.TextPaint;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
