@@ -1,0 +1,40 @@
+name: Native 3 Patti PRO Emulator Smoke
+
+on:
+  push:
+    branches: [three-patti-pro-native]
+    paths: ['.github/workflows/three-patti-native-smoke.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download previously built native APK
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 38851686016
+          github-token: ${{ github.token }}
+          name: 3-Patti-PRO-NATIVE-APK
+          path: native-apk
+      - name: Android emulator launch and crash check
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          disable-animations: true
+          script: |
+            adb install native-apk/app-debug.apk
+            adb shell am start -n com.hozefa.threepattipro.nativeapp/.MainActivity
+            sleep 22
+            adb shell pidof com.hozefa.threepattipro.nativeapp
+            adb shell uiautomator dump /sdcard/hierarchy.xml >/dev/null
+            adb shell cat /sdcard/hierarchy.xml | grep -q '3 PATTI PRO'
+            adb shell cat /sdcard/hierarchy.xml | grep -q 'HOME\|Home\|YOUR TABLE\|Your table'
+            echo 'Android native app launch verified'
