@@ -2,6 +2,8 @@ package com.orbitplayer.app
 
 import android.content.Intent
 import android.os.Binder
+import android.os.Handler
+import android.os.Looper
 import android.os.IBinder
 import androidx.media3.common.AudioAttributes
 import androidx.media3.exoplayer.ExoPlayer
@@ -16,10 +18,13 @@ class OrbitPlaybackService : MediaSessionService() {
     }
 
     inner class PlayerBinder : Binder() {
+        val service: OrbitPlaybackService get() = this@OrbitPlaybackService
         val player: ExoPlayer get() = this@OrbitPlaybackService.exo
     }
 
     private val binder = PlayerBinder()
+    private val timerHandler = Handler(Looper.getMainLooper())
+    private var sleepTimer: Runnable? = null
     private lateinit var exo: ExoPlayer
     private var session: MediaSession? = null
 
@@ -46,7 +51,20 @@ class OrbitPlaybackService : MediaSessionService() {
         }
     }
 
+    /** Service-owned timer survives Activity closure while opt-in background audio plays. */
+    fun setSleepTimer(minutes: Int) {
+        sleepTimer?.let { timerHandler.removeCallbacks(it) }
+        sleepTimer = null
+        if (minutes > 0) {
+            val action = Runnable { exo.pause(); sleepTimer = null }
+            sleepTimer = action
+            timerHandler.postDelayed(action, minutes * 60_000L)
+        }
+    }
+
     override fun onDestroy() {
+        sleepTimer?.let { timerHandler.removeCallbacks(it) }
+        sleepTimer = null
         session?.release()
         session = null
         exo.release()

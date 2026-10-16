@@ -97,11 +97,13 @@ class PlayerActivity : Activity() {
     private fun skipMs() = userOptions.seekSeconds * 1000L
     private var player: ExoPlayer? = null
     private var bound = false
+    private var playbackService: OrbitPlaybackService? = null
     private var playerListener: Player.Listener? = null
     private val playbackConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             if (isFinishing || isDestroyed) return
             val instance = binder as? OrbitPlaybackService.PlayerBinder ?: return
+            playbackService = instance.service
             try {
                 preparePlayer(instance.player)
             } catch (error: Exception) {
@@ -114,6 +116,7 @@ class PlayerActivity : Activity() {
             }
         }
         override fun onServiceDisconnected(name: ComponentName) {
+            playbackService = null
             playerView.player = null
             player = null
             playerListener = null
@@ -731,20 +734,8 @@ class PlayerActivity : Activity() {
         val values = intArrayOf(0, 15, 30, 45, 60, 90)
         AlertDialog.Builder(this).setTitle("Sleep timer")
             .setSingleChoiceItems(options, values.indexOf(sleepTimerMinutes).coerceAtLeast(0)) { dialog, which ->
-                sleepTimerRunnable?.let { handler.removeCallbacks(it) }
-                sleepTimerRunnable = null
                 sleepTimerMinutes = values[which]
-                if (sleepTimerMinutes > 0) {
-                    val task = Runnable {
-                        player?.pause()
-                        sleepTimerMinutes = 0
-                        sleepTimerRunnable = null
-                        showControls()
-                        notifyGesture("Sleep timer finished")
-                    }
-                    sleepTimerRunnable = task
-                    handler.postDelayed(task, sleepTimerMinutes * 60_000L)
-                }
+                playbackService?.setSleepTimer(sleepTimerMinutes)
                 notifyGesture(if (sleepTimerMinutes > 0) "Timer: $sleepTimerMinutes min" else "Sleep timer off")
                 dialog.dismiss()
             }.setNegativeButton("Cancel", null).show()
@@ -1089,6 +1080,7 @@ class PlayerActivity : Activity() {
             active.clearMediaItems()
         }
         player = null
+        playbackService = null
         if (bound) {
             unbindService(playbackConnection)
             bound = false
