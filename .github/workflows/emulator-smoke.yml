@@ -1,5 +1,10 @@
 name: Emulator Playback Smoke Test
 
+# Each new PR revision supersedes unfinished smoke/compile runs from its predecessor.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main]
