@@ -272,7 +272,22 @@ class PlayerActivity : Activity() {
                 AlertDialog.Builder(this@PlayerActivity)
                     .setTitle("Unable to play this video")
                     .setMessage("Decoder or file problem: ${error.errorCodeName}.\n\n" +
-                        "Orbit Pro uses the decoders available on your device. This codec might require an additional decoder.")
+                        "Orbit Pro uses Android-supported codecs. An uncommon codec may need another player.")
+                    .setNeutralButton("Open with another app") { _, _ ->
+                        val uri = Uri.parse(videoUri)
+                        if (uri.scheme != "orbit-smb") {
+                            runCatching {
+                                startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(uri, "video/*")
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }, "Choose video player"))
+                            }.onFailure {
+                                Toast.makeText(this@PlayerActivity, "No compatible video player found", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            Toast.makeText(this@PlayerActivity, "Private SMB streams cannot be shared with other apps", Toast.LENGTH_LONG).show()
+                        }
+                    }
                     .setPositiveButton("OK", null)
                     .show()
             }
