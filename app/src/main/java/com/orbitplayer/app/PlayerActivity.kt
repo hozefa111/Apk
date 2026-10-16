@@ -2,6 +2,11 @@ package com.orbitplayer.app
 
 import android.app.Activity
 import android.app.Dialog
+import android.content.ComponentName
+import android.content.Context
+import android.content.ServiceConnection
+import android.os.IBinder
+import androidx.media3.common.MediaMetadata
 import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
 import android.graphics.Color
@@ -91,6 +96,29 @@ class PlayerActivity : Activity() {
     private val userOptions by lazy { OrbitSettings(this) }
     private fun skipMs() = userOptions.seekSeconds * 1000L
     private var player: ExoPlayer? = null
+    private var bound = false
+    private var playerListener: Player.Listener? = null
+    private val playbackConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, binder: IBinder) {
+            if (isFinishing || isDestroyed) return
+            val instance = binder as? OrbitPlaybackService.PlayerBinder ?: return
+            try {
+                preparePlayer(instance.player)
+            } catch (error: Exception) {
+                android.util.Log.e("OrbitPlayer", "Player session startup failed", error)
+                if (!isFinishing) AlertDialog.Builder(this@PlayerActivity)
+                    .setTitle("Player could not start")
+                    .setMessage(error.message ?: error.javaClass.simpleName)
+                    .setPositiveButton("Close") { _, _ -> finish() }
+                    .show()
+            }
+        }
+        override fun onServiceDisconnected(name: ComponentName) {
+            playerView.player = null
+            player = null
+            playerListener = null
+        }
+    }
     private var videoUri = ""
     private var videoTitle = "Video"
     private var subtitleUri: Uri? = null
@@ -209,26 +237,21 @@ class PlayerActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
-        if (videoUri.isNotBlank()) {
-            try {
-                preparePlayer()
-            } catch (error: Exception) {
-                android.util.Log.e("OrbitPlayer", "Player startup failed", error)
-                AlertDialog.Builder(this)
-                    .setTitle("Player could not start")
-                    .setMessage((error.message ?: error.javaClass.simpleName).take(1200) + "\\n\\nPlease copy any error report shown after reopening the app.")
-                    .setPositiveButton("Close") { _, _ -> finish() }
-                    .setCancelable(false)
-                    .show()
-            }
+        if (videoUri.isNotBlank() && !bound) {
+            val intent = Intent(this, OrbitPlaybackService::class.java)
+                .setAction(OrbitPlaybackService.LOCAL_BIND_ACTION)
+            bound = bindService(intent, playbackConnection, Context.BIND_AUTO_CREATE)
         }
     }
 
-    private fun preparePlayer() {
+    private fun preparePlayer(exo: ExoPlayer) {
         if (player != null) return
-        val exo = ExoPlayer.Builder(this).build()
-        exo.setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, true)
-        exo.setHandleAudioBecomingNoisy(true)
+        val alreadyPlayingThisFile =
+            exo.currentMediaItem?.localConfiguration?.uri?.toString() == videoUri
+        if (!alreadyPlayingThisFile && exo.mediaItemCount > 0) {
+            exo.stop()
+            exo.clearMediaItems()
+        }
         player = exo
         playerView.player = exo
         prefs.edit().putString("last_played_uri", videoUri).apply()
@@ -243,7 +266,7 @@ class PlayerActivity : Activity() {
         exo.trackSelectionParameters = params.build()
         playerView.resizeMode = resizeMode
         exo.repeatMode = if (repeatOne) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
-        exo.addListener(object : Player.Listener {
+        val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 if (isFinishing || isDestroyed) return
                 AlertDialog.Builder(this@PlayerActivity)
@@ -279,11 +302,15 @@ class PlayerActivity : Activity() {
                     }
                 }
             }
-        })
+        }
+        playerListener = listener
+        exo.addListener(listener)
         try {
-            exo.setMediaItem(buildMediaItem(), lastSavedPosition.coerceAtLeast(0L))
-            exo.prepare()
-            exo.playWhenReady = userOptions.autoplay
+            if (!alreadyPlayingThisFile) {
+                exo.setMediaItem(buildMediaItem(), lastSavedPosition.coerceAtLeast(0L))
+                exo.prepare()
+                exo.playWhenReady = userOptions.autoplay
+            }
         } catch (ex: Exception) {
             AlertDialog.Builder(this)
                 .setTitle("Could not open video")
@@ -300,6 +327,7 @@ class PlayerActivity : Activity() {
 
     private fun buildMediaItem(): MediaItem {
         val item = MediaItem.Builder().setUri(Uri.parse(videoUri))
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(videoTitle).build())
         subtitleUri?.let { uri ->
             item.setSubtitleConfigurations(
                 listOf(MediaItem.SubtitleConfiguration.Builder(uri)
@@ -1036,17 +1064,33 @@ class PlayerActivity : Activity() {
         savePosition()
         holdSpeedRestore?.let { player?.setPlaybackSpeed(it) }
         holdSpeedRestore = null
+        val active = player
         playerView.player = null
-        player?.release()
+        playerListener?.let { active?.removeListener(it) }
+        playerListener = null
+        if (active != null && !userOptions.backgroundPlayback) {
+            active.pause()
+            active.stop()
+            active.clearMediaItems()
+        }
         player = null
+        if (bound) {
+            unbindService(playbackConnection)
+            bound = false
+        }
         super.onStop()
     }
 
     override fun onDestroy() {
-        // PiP may bypass normal onStop cleanup on some devices.
+        // The playback session owns the decoder; never release it from an Activity.
         playerView.player = null
-        player?.release()
+        playerListener?.let { player?.removeListener(it) }
+        playerListener = null
         player = null
+        if (bound) {
+            unbindService(playbackConnection)
+            bound = false
+        }
         sleepTimerRunnable?.let { handler.removeCallbacks(it) }
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()
