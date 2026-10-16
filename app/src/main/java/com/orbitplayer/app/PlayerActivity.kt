@@ -5,6 +5,7 @@ import android.app.PictureInPictureParams
 import android.content.res.Configuration
 import android.util.Rational
 import android.widget.SeekBar
+import android.widget.ImageView
 import android.widget.ProgressBar
 import android.view.HapticFeedbackConstants
 import android.app.AlertDialog
@@ -61,7 +62,7 @@ class PlayerActivity : Activity() {
     private lateinit var centerControls: View
     private lateinit var bottomControls: View
     private lateinit var unlockButton: View
-    private lateinit var playPauseButton: TextView
+    private lateinit var playPauseButton: ImageView
     private lateinit var seekBar: SeekBar
     private lateinit var currentTimeLabel: TextView
     private lateinit var durationLabel: TextView
@@ -629,7 +630,7 @@ class PlayerActivity : Activity() {
     private fun updatePlayPauseButton() {
         if (!::playPauseButton.isInitialized) return
         val isPlaying = player?.isPlaying == true
-        playPauseButton.text = if (isPlaying) "Ⅱ" else "▶"
+        playPauseButton.setImageResource(if (isPlaying) R.drawable.orbit_ic_pause else R.drawable.orbit_ic_play)
         playPauseButton.contentDescription = if (isPlaying) "Pause video" else "Play video"
     }
 
