@@ -63,6 +63,9 @@ class OrbitSettings(context: Context) {
     var playbackSpeed: Float
         get() = prefs.getFloat("playback_speed", 1f).coerceIn(0.5f,2f)
         set(value) = prefs.edit().putFloat("playback_speed", value.coerceIn(0.5f,2f)).apply()
+    var defaultOrientation: String
+        get() = prefs.getString("default_orientation", "Automatic") ?: "Automatic"
+        set(value) = prefs.edit().putString("default_orientation", value).apply()
     var lastTab: String
         get() = prefs.getString("last_tab", "") ?: ""
         set(value) = prefs.edit().putString("last_tab", value).apply()
