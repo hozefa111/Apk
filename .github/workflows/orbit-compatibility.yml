@@ -1,0 +1,93 @@
+name: Orbit Android 8 and 15 Compatibility QA
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'scripts/**'
+      - '.github/workflows/orbit-compatibility.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: orbit-compat-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compatibility:
+    name: Android ${{ matrix.api }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 35]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK
+        run: |
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - run: gradle --no-daemon :app:assembleDebug
+      - name: Sample media
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          ffmpeg -nostdin -hide_banner -loglevel error -f lavfi -i testsrc=size=320x240:rate=15 -t 24 -c:v mpeg4 -q:v 8 -pix_fmt yuv420p -y compatibility.mp4
+      - name: KVM
+        run: if [ -e /dev/kvm ]; then sudo chmod a+rw /dev/kvm; fi
+      - name: Start emulator and verify native playback
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: default
+          profile: pixel_2
+          ram-size: 1536M
+          heap-size: 256M
+          emulator-boot-timeout: 1200
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            adb wait-for-device
+            adb install app/build/outputs/apk/debug/app-debug.apk
+            adb shell pm grant com.orbitplayer.app android.permission.READ_EXTERNAL_STORAGE || true
+            adb shell pm grant com.orbitplayer.app android.permission.READ_MEDIA_VIDEO || true
+            adb shell mkdir -p /sdcard/Download
+            adb push compatibility.mp4 /sdcard/Download/orbit_compat.mp4
+            adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Download/orbit_compat.mp4 || true
+            sleep 9
+            adb logcat -c
+            adb shell am start -n com.orbitplayer.app/.MainActivity
+            sleep 3
+            python3 scripts/tap_android_view.py com.orbitplayer.app:id/btnSettings
+            sleep 2
+            adb shell input keyevent 4
+            adb shell content query --uri content://media/external/video/media --projection _id:_display_name > compat-media-rows.txt
+            grep -F 'orbit_compat.mp4' compat-media-rows.txt
+            adb shell am start -n com.orbitplayer.app/.PlayerActivity --es video_uri "content://media/external/video/media/$(grep -F 'orbit_compat.mp4' compat-media-rows.txt | sed -E 's/.*_id=([0-9]+).*/\1/' | head -1 | tr -d '\r')"
+            sleep 9
+            adb shell input tap 180 400 || true
+            sleep 1
+            python3 scripts/audit_emulator_ui.py
+            adb logcat -d -v time > android-compat-log.txt
+            ! grep -E 'FATAL EXCEPTION|Process: com\.orbitplayer\.app' android-compat-log.txt
+            adb shell pidof com.orbitplayer.app
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbit-android-api-${{ matrix.api }}-logs
+          path: |
+            compat-media-rows.txt
+            android-compat-log.txt
+          if-no-files-found: ignore
