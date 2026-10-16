@@ -45,16 +45,19 @@ jobs:
           script: |
             adb install app/build/outputs/apk/debug/app-debug.apk
             adb shell pm grant com.orbitplayer.app android.permission.READ_MEDIA_VIDEO || true
-            adb push smoke.mp4 /sdcard/Movies/orbit_smoke.mp4
-            adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Movies/orbit_smoke.mp4 || true
+            adb shell mkdir -p /sdcard/Download
+            adb push smoke.mp4 /sdcard/Download/orbit_smoke.mp4
+            adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Download/orbit_smoke.mp4 || true
             sleep 8
             adb logcat -c
             adb shell am start -n com.orbitplayer.app/.MainActivity
             sleep 3
-            adb shell am start -n com.orbitplayer.app/.PlayerActivity --es video_uri file:///sdcard/Movies/orbit_smoke.mp4
+            adb shell am start -n com.orbitplayer.app/.PlayerActivity --es video_uri file:///sdcard/Download/orbit_smoke.mp4
             sleep 8
             adb shell dumpsys activity activities > activity-state.txt
             adb logcat -d -v time > emulator-logcat.txt
+            adb shell screencap -p /sdcard/Download/orbit_screenshot.png || true
+            adb pull /sdcard/Download/orbit_screenshot.png orbit-smoke-screen.png || true
             if grep -E 'FATAL EXCEPTION|Process: com\.orbitplayer\.app' emulator-logcat.txt; then
               echo "Detected fatal Android exception"
               exit 1
@@ -72,4 +75,5 @@ jobs:
           path: |
             emulator-logcat.txt
             activity-state.txt
+            orbit-smoke-screen.png
           if-no-files-found: ignore
