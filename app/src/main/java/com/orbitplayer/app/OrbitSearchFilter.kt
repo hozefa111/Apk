@@ -7,15 +7,18 @@ data class OrbitSearchFilter(
     val durationGroup: Int = 0,
     val sizeGroup: Int = 0
 ) {
-    fun matches(item: VideoItem): Boolean {
-        if (extension.isNotBlank() && !item.title.endsWith(".$extension", true)) return false
-        if (minimumHeight > 0 && item.height < minimumHeight) return false
-        val minutes = item.durationMs / 60000L
+    fun matches(item: VideoItem): Boolean =
+        matchesMetadata(item.title, item.height, item.durationMs, item.sizeBytes)
+
+    fun matchesMetadata(title: String, height: Int, durationMs: Long, sizeBytes: Long): Boolean {
+        if (extension.isNotBlank() && !title.endsWith(".$extension", true)) return false
+        if (minimumHeight > 0 && height < minimumHeight) return false
+        val minutes = durationMs / 60000L
         if (durationGroup == 1 && minutes >= 5) return false
         if (durationGroup == 2 && (minutes < 5 || minutes >= 30)) return false
         if (durationGroup == 3 && minutes < 30) return false
-        if (sizeGroup == 1 && item.sizeBytes >= 100L * 1024 * 1024) return false
-        if (sizeGroup == 2 && item.sizeBytes < 1024L * 1024 * 1024) return false
+        if (sizeGroup == 1 && sizeBytes >= 100L * 1024 * 1024) return false
+        if (sizeGroup == 2 && sizeBytes < 1024L * 1024 * 1024) return false
         return true
     }
     val active get() = extension.isNotBlank() || minimumHeight > 0 ||
