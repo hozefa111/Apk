@@ -71,6 +71,14 @@ grep -F "$PACKAGE/.PlayerActivity" qa/player-activity.txt >/dev/null || {
   echo "PlayerActivity did not remain active"; exit 1;
 }
 
+# Android's one-time immersive-mode tutorial covers the controls on a fresh emulator.
+# Dismiss the system-owned overlay explicitly before judging the app's player UI.
+adb shell uiautomator dump /sdcard/orbit-preflight.xml >/dev/null
+adb exec-out cat /sdcard/orbit-preflight.xml > qa/preflight.xml
+if grep -F 'android:id/immersive_cling_title' qa/preflight.xml >/dev/null; then
+  python3 scripts/tap_android_view.py android:id/ok
+  sleep 1
+fi
 # Check playback UI remains reachable after tapping the video surface.
 adb shell input tap 410 400
 sleep 1
