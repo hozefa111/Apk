@@ -16,7 +16,9 @@ class VideoRepository(private val context: Context) {
             MediaStore.Video.Media.DURATION,
             MediaStore.Video.Media.SIZE,
             MediaStore.Video.Media.DATE_MODIFIED,
-            MediaStore.Video.Media.BUCKET_DISPLAY_NAME
+            MediaStore.Video.Media.BUCKET_DISPLAY_NAME,
+            MediaStore.Video.Media.WIDTH,
+            MediaStore.Video.Media.HEIGHT
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             columns.add(MediaStore.Video.Media.RELATIVE_PATH)
@@ -33,6 +35,8 @@ class VideoRepository(private val context: Context) {
             val nameIndex = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
             val durationIndex = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
             val sizeIndex = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
+            val widthIndex = cursor.getColumnIndex(MediaStore.Video.Media.WIDTH)
+            val heightIndex = cursor.getColumnIndex(MediaStore.Video.Media.HEIGHT)
             val dateIndex = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_MODIFIED)
             val bucketIndex = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.BUCKET_DISPLAY_NAME)
             val relativeIndex = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
@@ -50,7 +54,9 @@ class VideoRepository(private val context: Context) {
                         durationMs = cursor.getLong(durationIndex),
                         sizeBytes = cursor.getLong(sizeIndex),
                         folder = folder,
-                        modifiedSeconds = cursor.getLong(dateIndex)
+                        modifiedSeconds = cursor.getLong(dateIndex),
+                        width = if (widthIndex >= 0) cursor.getInt(widthIndex) else 0,
+                        height = if (heightIndex >= 0) cursor.getInt(heightIndex) else 0
                     )
                 )
             }

@@ -101,6 +101,10 @@
             android:textSize="14sp" android:textColor="#F8F8FF"
             android:textColorHint="#8292B1" android:paddingEnd="7dp"
             android:imeOptions="actionSearch"/>
+        <ImageView android:id="@+id/btnAdvancedFilters"
+            android:layout_width="44dp" android:layout_height="match_parent"
+            android:padding="13dp" android:src="@drawable/orbit_nav_filter"
+            android:contentDescription="Advanced video search filters"/>
         <TextView android:id="@+id/clearSearch" android:layout_width="42dp"
             android:layout_height="match_parent" android:gravity="center"
             android:text="×" android:textSize="24sp" android:textColor="#9DACCB"
