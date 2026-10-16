@@ -55,30 +55,27 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           disk-size: 4096M
           disable-animations: true
+          # Emulator runner evaluates script commands individually, not as a single persistent shell.
+          # Avoid multi-line for/if constructs and shell variables spanning separate commands.
           script: |
+            adb wait-for-device
             adb install app/build/outputs/apk/debug/app-debug.apk
             adb shell pm grant com.orbitplayer.app android.permission.READ_MEDIA_VIDEO || true
-            adb shell pm grant com.orbitplayer.app android.permission.READ_EXTERNAL_STORAGE || true
             adb shell mkdir -p /sdcard/Download
-            uploaded=no
-            for attempt in 1 2 3 4; do
-              if adb push smoke.mp4 /sdcard/Download/orbit_smoke.mp4; then
-                uploaded=yes
-                break
-              fi
-              adb wait-for-device
-              sleep 4
-            done
-            [ "$uploaded" = yes ] || { echo "Emulator transfer failed"; exit 1; }
+            adb push smoke.mp4 /sdcard/Download/orbit_smoke.mp4 || adb push smoke.mp4 /sdcard/Download/orbit_smoke.mp4 || adb push smoke.mp4 /sdcard/Download/orbit_smoke.mp4
             adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Download/orbit_smoke.mp4 || true
             sleep 8
             adb logcat -c
             adb shell am start -n com.orbitplayer.app/.MainActivity
             sleep 3
-            # Use a MediaStore content URI, not a file:// path blocked by scoped storage.
-            video_id="$(adb shell content query --uri content://media/external/video/media --projection _id:_display_name 2>/dev/null | grep -F 'orbit_smoke.mp4' | sed -E 's/.*_id=([0-9]+).*/\1/' | head -1 | tr -d '\r')"
-            [ -n "$video_id" ] || { echo "MediaStore did not index the test video"; exit 1; }
-            adb shell am start -n com.orbitplayer.app/.PlayerActivity --es video_uri "content://media/external/video/media/$video_id"
+            adb shell am start -n com.orbitplayer.app/.SettingsActivity
+            sleep 2
+            adb shell screencap -p /sdcard/Download/orbit_settings.png
+            adb pull /sdcard/Download/orbit_settings.png orbit-settings-screen.png
+            adb shell input keyevent 4
+            adb shell content query --uri content://media/external/video/media --projection _id:_display_name > media-rows.txt
+            grep -F 'orbit_smoke.mp4' media-rows.txt
+            adb shell am start -n com.orbitplayer.app/.PlayerActivity --es video_uri "content://media/external/video/media/$(grep -F 'orbit_smoke.mp4' media-rows.txt | sed -E 's/.*_id=([0-9]+).*/\\1/' | head -1 | tr -d '\\r')"
             sleep 8
             adb shell dumpsys activity activities > activity-state.txt
             adb logcat -d -v time > emulator-logcat.txt
@@ -92,15 +89,9 @@ jobs:
             adb shell input tap 400 180 || true
             adb shell screencap -p /sdcard/Download/orbit_landscape.png || true
             adb pull /sdcard/Download/orbit_landscape.png orbit-landscape-screen.png || true
-            if grep -E 'FATAL EXCEPTION|Process: com\.orbitplayer\.app' emulator-logcat.txt; then
-              echo "Detected fatal Android exception"
-              exit 1
-            fi
-            if ! adb shell pidof com.orbitplayer.app >/dev/null; then
-              echo "App process has died"
-              exit 1
-            fi
-            echo "App process still alive after player startup"
+            ! grep -E 'FATAL EXCEPTION|Process: com\\.orbitplayer\\.app' emulator-logcat.txt
+            adb shell pidof com.orbitplayer.app
+            echo "App survived library, settings and player startup"
       - name: Upload emulator logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -108,6 +99,8 @@ jobs:
           name: emulator-playback-smoke-logs
           path: |
             emulator-logcat.txt
+            media-rows.txt
+            orbit-settings-screen.png
             activity-state.txt
             orbit-smoke-screen.png
             orbit-landscape-screen.png
