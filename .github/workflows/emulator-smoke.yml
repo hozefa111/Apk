@@ -34,6 +34,14 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg
           ffmpeg -nostdin -hide_banner -loglevel error -f lavfi -i testsrc=size=320x240:rate=15 -t 24 -c:v mpeg4 -q:v 8 -pix_fmt yuv420p -y smoke.mp4
+      - name: Check KVM acceleration
+        run: |
+          if [ -e /dev/kvm ]; then
+            sudo chmod a+rw /dev/kvm
+            ls -l /dev/kvm
+          else
+            echo "KVM not available; Android emulator may be slow or unavailable"
+          fi
       - name: Launch on Android emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -41,20 +49,36 @@ jobs:
           arch: x86_64
           target: default
           profile: pixel_2
-          ram-size: 2048M
+          ram-size: 1536M
+          heap-size: 256M
+          emulator-boot-timeout: 1200
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           disk-size: 4096M
           disable-animations: true
           script: |
             adb install app/build/outputs/apk/debug/app-debug.apk
             adb shell pm grant com.orbitplayer.app android.permission.READ_MEDIA_VIDEO || true
+            adb shell pm grant com.orbitplayer.app android.permission.READ_EXTERNAL_STORAGE || true
             adb shell mkdir -p /sdcard/Download
-            adb push smoke.mp4 /sdcard/Download/orbit_smoke.mp4
+            uploaded=no
+            for attempt in 1 2 3 4; do
+              if adb push smoke.mp4 /sdcard/Download/orbit_smoke.mp4; then
+                uploaded=yes
+                break
+              fi
+              adb wait-for-device
+              sleep 4
+            done
+            [ "$uploaded" = yes ] || { echo "Emulator transfer failed"; exit 1; }
             adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Download/orbit_smoke.mp4 || true
             sleep 8
             adb logcat -c
             adb shell am start -n com.orbitplayer.app/.MainActivity
             sleep 3
-            adb shell am start -n com.orbitplayer.app/.PlayerActivity --es video_uri file:///sdcard/Download/orbit_smoke.mp4
+            # Use a MediaStore content URI, not a file:// path blocked by scoped storage.
+            video_id="$(adb shell content query --uri content://media/external/video/media --projection _id:_display_name 2>/dev/null | grep -F 'orbit_smoke.mp4' | sed -E 's/.*_id=([0-9]+).*/\1/' | head -1 | tr -d '\r')"
+            [ -n "$video_id" ] || { echo "MediaStore did not index the test video"; exit 1; }
+            adb shell am start -n com.orbitplayer.app/.PlayerActivity --es video_uri "content://media/external/video/media/$video_id"
             sleep 8
             adb shell dumpsys activity activities > activity-state.txt
             adb logcat -d -v time > emulator-logcat.txt
