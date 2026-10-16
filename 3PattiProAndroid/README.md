@@ -1,23 +1,17 @@
-# 3 Patti PRO — Android app
+# 3 Patti PRO Android (bundled edition 2.0)
+This is an isolated Android application derived from the original [3 Patti PRO web game](https://github.com/hozefa111/hh), which is **not changed** by this build.
 
-Android WebView shell for the existing **3 Patti PRO — Score Tracker** website.
+**Firebase**: The Android APK uses the same original unmodified `firebase-config.js`, same account login and `patti-pro-a61d8` Firestore. No Firebase migration, reset, data clearing or database replacement.
 
-**Original, unchanged source:** https://github.com/hozefa111/hh
+**Full UI**: The GitHub Actions workflow checks out a pinned read-only snapshot of the HH website, copies its HTML/CSS/JS/manifest/icons to the Android APK as packaged local assets, disables only service-worker registration in the Android COPY, and builds a signed debug APK. This fixes dependencies on the original GitHub Pages web address for loading the interface.
 
-**Website loaded:** https://hozefa111.github.io/hh/
+**Features**:
+- Android launcher icon and splash screen
+- Bundled site and real Firebase login/data from the existing project (internet still needed)
+- Native Android share sheet for scorecard/ranking images
+- Native Android back control wired to site's `handleAndroidBack()`
+- Connection error screen with tap-to-retry
 
-The Android wrapper contains no Firebase credentials, does not create a new Firebase project, and does not migrate/delete/change any Firestore data. It opens the original hosted web app, which uses its existing Firebase configuration for login, players, sessions, and rounds.
+**Compatibility**: Android 8.0+; install APK from workflow artifact after extracting ZIP. APK package `com.hozefa.threepattipro.stable` (different from prototype app, can be installed beside it). This is a debug-signed, not Play-Store-signed APK. WebView Android runtime and Firebase account access still require on-device testing.
 
-### Requirements
-- Internet connection and Android 7.0+
-- Same Firebase account credentials as on the website.
-- Published web app must remain online.
-- Some browser-only APIs (file downloads, web push) may behave differently in Android WebView.
-- Google OAuth login would require additional native/browser integration; original app currently uses email/password.
-
-### Build
-Use the GitHub Actions workflow **Build 3 Patti PRO Android APK** in this branch, or Android Studio with JDK 17 + Gradle 8.9 + Android SDK 35. APK output: `app/build/outputs/apk/debug/app-debug.apk`.
-
-**Isolation:** Changes exist only under this folder and a separate GitHub Actions workflow on branch `three-patti-pro-android` in repository `hozefa111/Apk`. The `hozefa111/hh` repository and its Firebase backend were not modified.
-
-**Note:** Debug-signed build is for personal device testing. It has not been tested on a physical Android phone.
+**Source protection**: Neither the original `hozefa111/hh` repository nor Firebase server data is written to by any build step. All changes are on `hozefa111/Apk` branch `three-patti-pro-android`.
