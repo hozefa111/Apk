@@ -46,7 +46,7 @@ jobs:
         run: |
           # Text file copy/paste can accidentally include a CR/LF at the end of the password.
           # Normalize only line endings; never print or commit the signing secret.
-          ORBIT_SIGN_PASSWORD="$(printf '%s' "$ORBIT_SIGN_PASSWORD" | tr -d '\\r\\n')"
+          ORBIT_SIGN_PASSWORD="$(printf '%s' "$ORBIT_SIGN_PASSWORD" | tr -d '\r\n')"
           export ORBIT_SIGN_PASSWORD
           if [ -z "$ORBIT_KEYSTORE_B64" ] || [ -z "$ORBIT_SIGN_PASSWORD" ]; then
             echo "Signing secrets not yet configured. Release skipped; debug build workflow remains usable."
