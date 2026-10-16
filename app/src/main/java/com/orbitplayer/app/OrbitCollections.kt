@@ -63,6 +63,28 @@ class OrbitCollections(context: Context) {
         prefs.edit().putString("playlists", data.toString()).apply()
     }
 
+    /** Export is explicit; media URIs/playlist names leave device only if user saves this JSON. */
+    fun exportJson(): String = readPlaylists().toString(2)
+
+    /** Merge imported named playlists. Invalid/unsupported entries are ignored. */
+    fun importJson(text: String): Int {
+        require(text.length <= 5_000_000) { "Playlist file is too large" }
+        val imported = JSONObject(text)
+        val keys = imported.keys()
+        var added = 0
+        var namesSeen = 0
+        while (keys.hasNext() && namesSeen++ < 100) {
+            val key = keys.next().trim().take(50)
+            if (key.isBlank()) continue
+            val arr = imported.optJSONArray(key) ?: continue
+            val uris = (0 until arr.length().coerceAtMost(4000))
+                .map { arr.optString(it) }
+                .filter { it.startsWith("content://") || it.startsWith("https://") }
+            added += add(key, uris)
+        }
+        return added
+    }
+
     fun delete(name: String) {
         val data = readPlaylists()
         data.remove(name)
