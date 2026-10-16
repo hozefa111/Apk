@@ -48,6 +48,7 @@ public final class FirebaseGateway {
     private boolean reloadRequested=false;
     private final Runnable refreshLoop=() -> executor.execute(this::load);
     private final String dbRoot;
+    private final String documentRoot = "projects/" + project + "/databases/(default)/documents";
 
     public FirebaseGateway(Context c, Listener l, String key) {
         context = c.getApplicationContext();
@@ -254,7 +255,7 @@ public final class FirebaseGateway {
         write("Player renamed",token->{
             JSONArray operations=new JSONArray();
             JSONObject playerUpdate=new JSONObject();
-            playerUpdate.put("name",dbRoot+"/players/"+encoded(playerId));
+            playerUpdate.put("name",documentRoot+"/players/"+playerId);
             playerUpdate.put("fields",encodeFields(map("name",newName)));
             operations.put(new JSONObject()
                     .put("update",playerUpdate)
@@ -284,7 +285,7 @@ public final class FirebaseGateway {
                 if(operations.length()>=500)
                     throw new IOException("Too many rounds for an atomic rename. No records changed.");
                 JSONObject update=new JSONObject();
-                update.put("name",dbRoot+"/rounds/"+encoded(rid));
+                update.put("name",documentRoot+"/rounds/"+rid);
                 update.put("fields",encodeFields(edits));
                 JSONArray fields=new JSONArray();
                 for(String field:edits.keySet())fields.put(field);
