@@ -92,6 +92,8 @@ class SettingsActivity : Activity() {
         }
 
         section("VIDEO PLAYBACK")
+        choose("Default video orientation", settings.defaultOrientation,
+            listOf("Automatic", "Landscape", "Portrait")) { settings.defaultOrientation = it }
         toggle("Resume playback", "Continue videos from the saved position", settings.resume) {
             settings.resume = it
         }
