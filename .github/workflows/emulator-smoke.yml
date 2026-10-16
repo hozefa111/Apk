@@ -12,8 +12,13 @@ permissions:
 
 jobs:
   smoke:
+    name: Native playback / Android API ${{ matrix.api }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 33, 35]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -44,7 +49,7 @@ jobs:
       - name: Native playback and UX smoke
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 33
+          api-level: ${{ matrix.api }}
           arch: x86_64
           target: default
           profile: pixel_2
@@ -59,6 +64,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: emulator-playback-smoke-logs
+          name: emulator-playback-smoke-logs-api-${{ matrix.api }}
           path: qa/
           if-no-files-found: ignore
