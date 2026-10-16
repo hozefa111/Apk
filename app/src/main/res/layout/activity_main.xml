@@ -33,6 +33,16 @@
                 android:text="YOUR OFFLINE CINEMA" android:letterSpacing="0.13"
                 android:textColor="#8E9DBA" android:textSize="9sp" />
         </LinearLayout>
+        <ImageView android:id="@+id/btnPick" android:layout_width="43dp"
+            android:layout_height="43dp" android:padding="11dp" android:layout_marginEnd="8dp"
+            android:src="@drawable/orbit_nav_open"
+            android:background="@drawable/orbit_icon_surface"
+            android:contentDescription="Open a video from device" />
+        <ImageView android:id="@+id/btnSettings" android:layout_width="43dp"
+            android:layout_height="43dp" android:padding="11dp" android:layout_marginEnd="8dp"
+            android:src="@drawable/orbit_ic_settings"
+            android:background="@drawable/orbit_icon_surface"
+            android:contentDescription="Settings" />
         <ImageView android:id="@+id/btnRefresh" android:layout_width="46dp"
             android:layout_height="46dp" android:padding="12dp"
             android:src="@drawable/orbit_nav_refresh"
@@ -115,7 +125,7 @@
             android:contentDescription="Switch to compact list" />
     </LinearLayout>
 
-    <HorizontalScrollView android:layout_width="match_parent"
+    <HorizontalScrollView android:id="@+id/filterScroller" android:layout_width="match_parent"
         android:layout_height="44dp" android:fillViewport="false"
         android:scrollbars="none" android:paddingStart="17dp">
         <LinearLayout android:layout_width="wrap_content" android:layout_height="match_parent"
@@ -187,22 +197,22 @@
                 android:layout_marginTop="4dp" android:text="Folders" android:textSize="10sp"
                 android:textColor="#9AA9C4"/>
         </LinearLayout>
-        <LinearLayout android:id="@+id/navOpen" style="@style/OrbitBottomNavItem"
+        <LinearLayout android:id="@+id/navContinue" style="@style/OrbitBottomNavItem"
             android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1">
             <ImageView android:layout_width="20dp" android:layout_height="20dp"
-                android:src="@drawable/orbit_nav_open" android:tint="#9AA9C4"
-                android:contentDescription="Open a video"/>
+                android:src="@drawable/orbit_nav_resume" android:tint="#9AA9C4"
+                android:contentDescription="Continue watching"/>
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginTop="4dp" android:text="Open" android:textSize="10sp"
+                android:layout_marginTop="4dp" android:text="Continue" android:textSize="10sp"
                 android:textColor="#9AA9C4"/>
         </LinearLayout>
-        <LinearLayout android:id="@+id/navUpdates" style="@style/OrbitBottomNavItem"
+        <LinearLayout android:id="@+id/navSearch" style="@style/OrbitBottomNavItem"
             android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1">
             <ImageView android:layout_width="20dp" android:layout_height="20dp"
-                android:src="@drawable/orbit_nav_update" android:tint="#9AA9C4"
-                android:contentDescription="Check for updates"/>
+                android:src="@drawable/orbit_nav_search" android:tint="#9AA9C4"
+                android:contentDescription="Search videos"/>
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginTop="4dp" android:text="Updates" android:textSize="10sp"
+                android:layout_marginTop="4dp" android:text="Search" android:textSize="10sp"
                 android:textColor="#9AA9C4"/>
         </LinearLayout>
     </LinearLayout>

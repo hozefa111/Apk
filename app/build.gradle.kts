@@ -10,8 +10,8 @@ android {
         applicationId = "com.orbitplayer.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.1.9"
+        versionCode = 11
+        versionName = "0.2.0"
     }
     // Release credentials are read only from private GitHub Actions secrets.
     val orbitSigningPath = System.getenv("ORBIT_KEYSTORE_PATH")
