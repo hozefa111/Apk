@@ -246,37 +246,54 @@ public final class FirebaseGateway {
         } else out.put("stringValue",String.valueOf(value));
         return out;
     }
-    public void renamePlayer(String playerId,String newName,List<Map<String,Object>> rounds){
-        write("Player renamed", token -> {
-            String uri=dbRoot+"/players/"+encoded(playerId)+"?updateMask.fieldPaths=name";
-            JSONObject body=new JSONObject();
-            body.put("fields",encodeFields(map("name",newName)));
-            jsonCall("PATCH",uri,body,token);
-            // Keep embedded names in historic rounds compatible with the original web UI.
+    /**
+     * Atomic rename: changing the player and the historical embedded names
+     * either ALL succeeds or NONE succeeds. Never partially rename Firebase.
+     */
+    public void renamePlayer(String playerId,String newName,List<Map<String,Object>> rounds) {
+        write("Player renamed",token->{
+            JSONArray operations=new JSONArray();
+            JSONObject playerUpdate=new JSONObject();
+            playerUpdate.put("name",dbRoot+"/players/"+encoded(playerId));
+            playerUpdate.put("fields",encodeFields(map("name",newName)));
+            operations.put(new JSONObject()
+                    .put("update",playerUpdate)
+                    .put("updateMask",new JSONObject().put("fieldPaths",new JSONArray().put("name")))
+                    .put("currentDocument",new JSONObject().put("exists",true)));
             for(Map<String,Object> round:rounds){
                 String rid=String.valueOf(round.get("id"));
                 Map<String,Object> edits=new LinkedHashMap<>();
-                if(playerId.equals(round.get("hukumId"))) edits.put("hukumName",newName);
-                List<?> partners=round.get("partnerIds") instanceof List?(List<?>)round.get("partnerIds"):Collections.emptyList();
+                if(playerId.equals(round.get("hukumId")))edits.put("hukumName",newName);
+                List<?> partners=round.get("partnerIds") instanceof List?
+                        (List<?>)round.get("partnerIds"):Collections.emptyList();
                 if(partners.contains(playerId)){
                     List<String> names=new ArrayList<>();
-                    for(Object item:partners)names.add(playerId.equals(item)?newName:findRoundName(round,"partnerIds","partnerNames",item));
+                    for(Object item:partners)names.add(playerId.equals(item)?newName:
+                            findRoundName(round,"partnerIds","partnerNames",item));
                     edits.put("partnerNames",names);
                 }
-                List<?> others=round.get("nonPartnerIds") instanceof List?(List<?>)round.get("nonPartnerIds"):Collections.emptyList();
-                if(others.contains(playerId)){
+                List<?> opponents=round.get("nonPartnerIds") instanceof List?
+                        (List<?>)round.get("nonPartnerIds"):Collections.emptyList();
+                if(opponents.contains(playerId)){
                     List<String> names=new ArrayList<>();
-                    for(Object item:others)names.add(playerId.equals(item)?newName:findRoundName(round,"nonPartnerIds","nonPartnerNames",item));
+                    for(Object item:opponents)names.add(playerId.equals(item)?newName:
+                            findRoundName(round,"nonPartnerIds","nonPartnerNames",item));
                     edits.put("nonPartnerNames",names);
                 }
-                if(!edits.isEmpty()) {
-                    StringBuilder url=new StringBuilder(dbRoot+"/rounds/"+encoded(rid)+"?");
-                    for(String key:edits.keySet())url.append("updateMask.fieldPaths=").append(encoded(key)).append("&");
-                    JSONObject doc=new JSONObject();
-                    doc.put("fields",encodeFields(edits));
-                    jsonCall("PATCH",url.toString(),doc,token);
-                }
+                if(edits.isEmpty())continue;
+                if(operations.length()>=500)
+                    throw new IOException("Too many rounds for an atomic rename. No records changed.");
+                JSONObject update=new JSONObject();
+                update.put("name",dbRoot+"/rounds/"+encoded(rid));
+                update.put("fields",encodeFields(edits));
+                JSONArray fields=new JSONArray();
+                for(String field:edits.keySet())fields.put(field);
+                operations.put(new JSONObject()
+                        .put("update",update)
+                        .put("updateMask",new JSONObject().put("fieldPaths",fields))
+                        .put("currentDocument",new JSONObject().put("exists",true)));
             }
+            jsonCall("POST",dbRoot+":commit",new JSONObject().put("writes",operations),token);
         });
     }
     private String findRoundName(Map<String,Object> round,String idsKey,String namesKey,Object target){
@@ -294,20 +311,40 @@ public final class FirebaseGateway {
         });
     }
     public interface Action { void run(String token) throws Exception; }
-    public void write(String success, Action action) {
-        if (!loggedIn()) { notify("Please log in before saving changes"); return; }
-        if(!writeInFlight.compareAndSet(false,true)) {notify("One save is already in progress");return;}
+    public void write(String success,Action action) {
+        write(success,action,null,null);
+    }
+    public void write(String success,Action action,Runnable onSuccess,Runnable onFailure) {
+        if(!loggedIn()){
+            notify("Please log in before saving changes");
+            onUi(onFailure);
+            return;
+        }
+        if(!writeInFlight.compareAndSet(false,true)){
+            notify("Another save is already in progress");
+            onUi(onFailure);
+            return;
+        }
         setBusy(true);
         executor.execute(() -> {
             try {
                 ensureIdToken();
-                if(idToken==null) throw new IOException("Login expired");
+                if(idToken==null)throw new IOException("Login expired");
                 action.run(idToken);
                 notify(success);
+                onUi(onSuccess);
                 load();
-            } catch (Exception ex) { notify("Not saved: " + ex.getMessage()); }
-            finally { writeInFlight.set(false);setBusy(false); }
+            }catch(Exception error){
+                notify("Not saved: "+error.getMessage());
+                onUi(onFailure);
+            }finally{
+                writeInFlight.set(false);
+                setBusy(false);
+            }
         });
+    }
+    private void onUi(Runnable callback){
+        if(callback!=null)ui.post(()->{if(running)callback.run();});
     }
     public static Map<String,Object> map(Object... v) {
         Map<String,Object> m=new LinkedHashMap<>();
@@ -318,13 +355,16 @@ public final class FirebaseGateway {
     public void addDocument(String collection, Map<String,Object> fields,String success) {
         addDocument(collection,fields,success,null);
     }
-    public void addDocument(String collection, Map<String,Object> fields,String success,Runnable onSaved) {
-        write(success,token -> {
+    public void addDocument(String collection,Map<String,Object> fields,String success,Runnable onSaved){
+        addDocument(collection,fields,success,onSaved,null);
+    }
+    public void addDocument(String collection,Map<String,Object> fields,String success,
+                            Runnable onSaved,Runnable onFailed) {
+        write(success,token->{
             JSONObject body=new JSONObject();
             body.put("fields",encodeFields(fields));
             jsonCall("POST",dbRoot+"/"+collection,body,token);
-            if(onSaved!=null)ui.post(()->{if(running)onSaved.run();});
-        });
+        },onSaved,onFailed);
     }
     public void patchDocument(String collection,String id,Map<String,Object> fields,String success) {
         write(success,token -> {

@@ -9,8 +9,8 @@ android {
         applicationId = "com.hozefa.threepattipro.nativeapp"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "1.5.0-native"
+        versionCode = 7
+        versionName = "1.6.0-native"
     }
     buildTypes {
         release {

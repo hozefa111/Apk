@@ -51,6 +51,15 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private final LinkedHashSet<String> partners=new LinkedHashSet<>();
     private String hukum=null, outcome=null;
     private int bid=155;
+
+    // Round form views live across taps; data changes update these controls in place.
+    // Rebuilding the entire Activity on every bid/partner tap caused UI jank.
+    private final Map<String,TextView> roundPlayingButtons=new LinkedHashMap<>();
+    private final Map<String,TextView> roundHukumButtons=new LinkedHashMap<>();
+    private final Map<String,TextView> roundPartnerButtons=new LinkedHashMap<>();
+    private LinearLayout roundHukumSection,roundPartnerSection,roundResultSection,roundPreviewSection;
+    private TextView roundBidView,roundWinView,roundLoseView,roundSaveView,roundHintView;
+    private boolean roundSaving=false;
     private final DateTimeFormatter dateFormat=DateTimeFormatter.ofPattern("dd MMM, hh:mm a").withZone(ZoneId.systemDefault());
 
     @Override public void onCreate(Bundle state) {
@@ -70,8 +79,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         p.sort(Comparator.comparing(a -> str(a,"name").toLowerCase(Locale.ROOT)));
         r.sort((a,b) -> Long.compare(time(b.get("timestamp")),time(a.get("timestamp"))));
         s.sort((a,b) -> Long.compare(time(b.get("startTime")),time(a.get("startTime"))));
-        // No UI re-creation on a no-op Firebase poll. Preserves scrolling and taps.
+        // Preserve every touch target on empty/no-op Firestore polls.
         if(hasData && players.equals(p) && rounds.equals(r) && sessions.equals(s)) return;
+        boolean rosterChanged=!players.equals(p);
         players.clear();players.addAll(p);
         rounds.clear();rounds.addAll(r);
         sessions.clear();sessions.addAll(s);
@@ -97,7 +107,11 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         }
         hasData=true;
         if(playing!=null) playing.retainAll(activeIds());
-        render(false);
+        // New rounds and sessions can arrive while the form is open. Update only
+        // its score preview unless the player roster itself changed.
+        if(tab==2 && !rosterChanged && roundBidView!=null && roundPreviewSection!=null)
+            updateRoundForm();
+        else render(false);
     }
     @Override public void authChanged(boolean value) {
         if(loggedIn==value) return;
@@ -113,6 +127,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     @Override public void busy(boolean b) {
         busy=b;
         updateToolbar();
+        if(tab==2&&roundSaveView!=null&&roundPreviewSection!=null&&roundHintView!=null)
+            updateRoundForm();
     }
     private int dp(int n) {return Math.round(n*getResources().getDisplayMetrics().density);}
     private GradientDrawable shape(int fill,int radius,int stroke) {
@@ -815,86 +831,197 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         AlertDialog.Builder dialog=new AlertDialog.Builder(this)
                 .setTitle("Round · "+when(round.get("timestamp")))
                 .setMessage("Hukum: "+str(round,"hukumName")+
-                        "\nBid: "+str(round,"bid")+
-                        "\nResult: "+str(round,"result")+
-                        "\nPartners: "+android.text.TextUtils.join(", ",strings(round.get("partnerNames")))+
-                        "\nNon-partners: "+android.text.TextUtils.join(", ",strings(round.get("nonPartnerNames"))))
-                .setPositiveButton("Details",(d,w)->roundDetails(round))
-                .setNeutralButton("Share Image",(d,w)->shareRound(round));
-        if(loggedIn)dialog.setNegativeButton("Delete",(d,w)->confirmRemove("rounds",round,"round"));
-        else dialog.setNegativeButton("Close",null);
-        dialog.show();
-    }
+                       
     private void roundPage() {
         if(!loggedIn){empty("Admin login is required to add rounds.");return;}
         title(content,"New Hukum Round","Select players and preview scores before saving");
-        List<Map<String,Object>> active=activePlayers();
+        final List<Map<String,Object>> active=activePlayers();
         if(playing==null)playing=activeIds();
         if(active.size()<3){empty("At least 3 active players are required.");return;}
+        roundPlayingButtons.clear();roundHukumButtons.clear();roundPartnerButtons.clear();
+
         label(content,"01  •  Who's playing");
-        LinearLayout selection=panel();
-        for(Map<String,Object> p:active) {
-            String pid=id(p);
-            boolean on=playing.contains(pid);
-            LinearLayout r=row();
-            TextView name=chip((on?"✓   ":"○   ")+str(p,"name"),on,false,()->{
-                if(playing.contains(pid)) {
-                    playing.remove(pid);if(pid.equals(hukum))hukum=null;partners.remove(pid);
-                }else playing.add(pid);
-                render(false);
+        LinearLayout participants=panel();
+        for(Map<String,Object> player:active){
+            final String pid=id(player);
+            TextView pick=chip(str(player,"name"),playing.contains(pid),false,()->{
+                if(roundSaving||busy)return;
+                if(!playing.add(pid)){
+                    playing.remove(pid);
+                    if(pid.equals(hukum))hukum=null;
+                    partners.remove(pid);
+                }
+                updateRoundForm();
             });
-            r.addView(name,new LinearLayout.LayoutParams(-1,dp(46)));
-            selection.addView(r);gap(selection,7);
+            participants.addView(pick,spacedRow(8));
+            roundPlayingButtons.put(pid,pick);
         }
-        content.addView(selection);gap(content,20);
-        if(playing.size()<3){empty("Select at least 3 players to continue.");return;}
+        content.addView(participants);gap(content,18);
 
         label(content,"02  •  Bid amount");
         LinearLayout bidding=panel();
-        TextView current=text("Bid  "+bid,26,GOLD,true);bidding.addView(current);gap(bidding,12);
-        LinearLayout bidRow=row();
-        bidRow.addView(button("− 5",false,()->{bid=Math.max(155,bid-5);render(false);}),new LinearLayout.LayoutParams(0,dp(50),1));
-        TextView interval=text("155 – 250",13,MUTED,false);
-        interval.setGravity(Gravity.CENTER);bidRow.addView(interval,new LinearLayout.LayoutParams(0,dp(50),1));
-        bidRow.addView(button("+ 5",false,()->{bid=Math.min(250,bid+5);render(false);}),new LinearLayout.LayoutParams(0,dp(50),1));
-        bidding.addView(bidRow);content.addView(bidding);gap(content,20);
+        roundBidView=text("",27,GOLD,true);
+        roundBidView.setClickable(true);
+        roundBidView.setFocusable(true);
+        roundBidView.setContentDescription("Choose bid amount");
+        roundBidView.setOnClickListener(v->chooseBid());
+        bidding.addView(roundBidView);
+        gap(bidding,14);
+        LinearLayout stepper=row();
+        stepper.addView(button("− 5",false,()->{
+            if(roundSaving||busy)return;
+            bid=Math.max(155,bid-5);updateRoundForm();
+        }),new LinearLayout.LayoutParams(0,dp(50),1));
+        TextView label=text("155 – 250",13,MUTED,false);
+        label.setGravity(Gravity.CENTER);
+        stepper.addView(label,new LinearLayout.LayoutParams(0,dp(50),1));
+        stepper.addView(button("+ 5",false,()->{
+            if(roundSaving||busy)return;
+            bid=Math.min(250,bid+5);updateRoundForm();
+        }),new LinearLayout.LayoutParams(0,dp(50),1));
+        bidding.addView(stepper);content.addView(bidding);gap(content,18);
 
-        label(content,"03  •  Choose Hukum");
+        roundHukumSection=column();
+        label(roundHukumSection,"03  •  Choose Hukum");
         LinearLayout hukumBox=panel();
-        for(Map<String,Object> p:active)if(playing.contains(id(p))){
-            String pid=id(p);
-            hukumBox.addView(chip((pid.equals(hukum)?"♛   ":"○   ")+str(p,"name"),
-                    pid.equals(hukum),true,()->{
-                        hukum=pid;partners.remove(pid);render(false);
-                    }),lp(-1,46));
-            gap(hukumBox,8);
+        for(Map<String,Object> player:active){
+            String pid=id(player);
+            TextView pick=chip(str(player,"name"),false,true,()->{
+                if(roundSaving||busy)return;
+                hukum=pid;partners.remove(pid);updateRoundForm();
+            });
+            hukumBox.addView(pick,spacedRow(8));
+            roundHukumButtons.put(pid,pick);
         }
-        content.addView(hukumBox);gap(content,20);
-        if(hukum==null){empty("Select Hukum to choose partners.");return;}
-        label(content,"04  •  Choose Partner(s)");
+        roundHukumSection.addView(hukumBox);gap(roundHukumSection,18);
+        content.addView(roundHukumSection);
+
+        roundPartnerSection=column();
+        label(roundPartnerSection,"04  •  Choose Partner(s)");
         LinearLayout partnerBox=panel();
-        for(Map<String,Object> p:active)if(playing.contains(id(p))&&!id(p).equals(hukum)){
-            String pid=id(p);
-            partnerBox.addView(chip((partners.contains(pid)?"✓   ":"○   ")+str(p,"name"),
-                    partners.contains(pid),false,()->{
-                        if(!partners.add(pid))partners.remove(pid);
-                        render(false);
-                    }),lp(-1,46));
-            gap(partnerBox,8);
+        for(Map<String,Object> player:active){
+            String pid=id(player);
+            TextView pick=chip(str(player,"name"),false,false,()->{
+                if(roundSaving||busy)return;
+                if(!partners.add(pid))partners.remove(pid);
+                updateRoundForm();
+            });
+            partnerBox.addView(pick,spacedRow(8));
+            roundPartnerButtons.put(pid,pick);
         }
-        content.addView(partnerBox);gap(content,20);
-        label(content,"05  •  Hukum result");
+        roundPartnerSection.addView(partnerBox);gap(roundPartnerSection,18);
+        content.addView(roundPartnerSection);
+
+        roundResultSection=column();
+        label(roundResultSection,"05  •  Hukum result");
         LinearLayout results=row();
-        TextView win=chip("✓   Hukum Win","win".equals(outcome),false,()->{outcome="win";render(false);});
-        TextView lose=chip("✕   Hukum Lose","loss".equals(outcome),false,()->{outcome="loss";render(false);});
+        roundWinView=chip("✓   Hukum Win",false,false,()->{
+            if(roundSaving||busy)return;
+            outcome="win";updateRoundForm();
+        });
+        roundLoseView=chip("✕   Hukum Lose",false,false,()->{
+            if(roundSaving||busy)return;
+            outcome="loss";updateRoundForm();
+        });
         LinearLayout.LayoutParams half=new LinearLayout.LayoutParams(0,dp(50),1);
-        half.rightMargin=dp(10);results.addView(win,half);
-        results.addView(lose,new LinearLayout.LayoutParams(0,dp(50),1));
-        content.addView(results);gap(content,22);
-        if(!validRound()){empty("Choose at least one partner, one opponent, and the round result.");return;}
-        label(content,"SCORE PREVIEW");
-        LinearLayout preview=panel();
-        Map<String,Integer> score=scoreChanges();
+        half.rightMargin=dp(10);
+        results.addView(roundWinView,half);
+        results.addView(roundLoseView,new LinearLayout.LayoutParams(0,dp(50),1));
+        roundResultSection.addView(results);gap(roundResultSection,18);
+        content.addView(roundResultSection);
+
+        roundPreviewSection=column();
+        label(roundPreviewSection,"Score preview");
+        content.addView(roundPreviewSection);
+        roundHintView=text("",12,MUTED,false);
+        content.addView(roundHintView);gap(content,14);
+        roundSaveView=button("✓  Save Round to Firebase",true,this::saveRound);
+        content.addView(roundSaveView);gap(content,12);
+        content.addView(text("Uses your existing Firebase data. Saving happens only after confirmation.",11,MUTED,false));
+        updateRoundForm();
+    }
+    private LinearLayout.LayoutParams spacedRow(int spacing){
+        LinearLayout.LayoutParams params=lp(-1,48);
+        params.bottomMargin=dp(spacing);
+        return params;
+    }
+    private void updateRoundChip(TextView view,String label,boolean selected,boolean gold){
+        if(view==null)return;
+        view.setText(label);
+        view.setTextColor(selected?(gold?GOLD:GREEN):WHITE);
+        view.setTypeface(Typeface.create("sans-serif",selected?Typeface.BOLD:Typeface.NORMAL));
+        view.setBackground(shape(selected?(gold?0xFF60492E:0xFF1A4B43):PANEL2,
+                12,selected?(gold?GOLD:GREEN):BORDER));
+    }
+    private void updateRoundForm(){
+        if(roundBidView==null||tab!=2)return;
+        roundBidView.setText("Bid  "+bid+"   ▾");
+        for(Map.Entry<String,TextView> item:roundPlayingButtons.entrySet()){
+            String pid=item.getKey();
+            updateRoundChip(item.getValue(),(playing.contains(pid)?"✓   ":"○   ")+nameOf(pid),
+                    playing.contains(pid),false);
+        }
+        boolean enough=playing!=null && playing.size()>=3;
+        if(!enough) {hukum=null;partners.clear();}
+        roundHukumSection.setVisibility(enough?View.VISIBLE:View.GONE);
+        boolean hasHukum=enough&&hukum!=null&&playing.contains(hukum);
+        roundPartnerSection.setVisibility(hasHukum?View.VISIBLE:View.GONE);
+        roundResultSection.setVisibility(hasHukum?View.VISIBLE:View.GONE);
+        for(Map.Entry<String,TextView> item:roundHukumButtons.entrySet()){
+            String pid=item.getKey();
+            TextView control=item.getValue();
+            control.setVisibility(playing.contains(pid)?View.VISIBLE:View.GONE);
+            updateRoundChip(control,(pid.equals(hukum)?"♛   ":"○   ")+nameOf(pid),
+                    pid.equals(hukum),true);
+        }
+        for(Map.Entry<String,TextView> item:roundPartnerButtons.entrySet()){
+            String pid=item.getKey();
+            TextView control=item.getValue();
+            control.setVisibility(hasHukum&&playing.contains(pid)&&!pid.equals(hukum)?View.VISIBLE:View.GONE);
+            updateRoundChip(control,(partners.contains(pid)?"✓   ":"○   ")+nameOf(pid),
+                    partners.contains(pid),false);
+        }
+        updateRoundChip(roundWinView,"✓   Hukum Win","win".equals(outcome),false);
+        updateRoundChip(roundLoseView,"✕   Hukum Lose","loss".equals(outcome),false);
+        roundPreviewSection.removeViews(1,Math.max(0,roundPreviewSection.getChildCount()-1));
+        boolean ready=validRound();
+        roundPreviewSection.setVisibility(ready?View.VISIBLE:View.GONE);
+        if(ready){
+            LinearLayout card=panel();
+            Map<String,Integer> preview=scoreChanges();
+            for(Map<String,Object> player:activePlayers()){
+                String pid=id(player);
+                if(!playing.contains(pid))continue;
+                int delta=preview.getOrDefault(pid,0);
+                String role=pid.equals(hukum)?"♛ ":partners.contains(pid)?"◈ ":"○ ";
+                line(card,role+str(player,"name"),delta==0?"—":(delta>0?"+":"")+delta,
+                        delta>0?GREEN:delta<0?RED:MUTED);
+            }
+            roundPreviewSection.addView(card);
+        }
+        String hint=!enough?"Select at least 3 players.":!hasHukum?"Choose Hukum to continue.":
+                partners.isEmpty()?"Choose at least one partner.":
+                playing.size()-partners.size()-1<1?"At least one non-partner must be playing.":
+                outcome==null?"Select Hukum Win or Lose.":"Preview verified. Check the scores before saving.";
+        roundHintView.setText(roundSaving?"Saving round to Firebase…":hint);
+        roundSaveView.setVisibility(ready?View.VISIBLE:View.GONE);
+        roundSaveView.setEnabled(ready&&!roundSaving&&!busy);
+        roundSaveView.setAlpha(roundSaving||busy?0.55f:1f);
+        roundSaveView.setText(roundSaving?"Saving…":"✓  Save Round to Firebase");
+    }
+    private void chooseBid(){
+        if(roundSaving||busy)return;
+        String[] values=new String[20];
+        for(int i=0;i<values.length;i++)values[i]=String.valueOf(155+i*5);
+        new AlertDialog.Builder(this)
+                .setTitle("Select Bid")
+                .setSingleChoiceItems(values,(bid-155)/5,(dialog,selected)->{
+                    bid=155+selected*5;
+                    dialog.dismiss();
+                    updateRoundForm();
+                }).setNegativeButton("Cancel",null).show();
+    }
+ing,Integer> score=scoreChanges();
         for(Map<String,Object> p:active)if(playing.contains(id(p))) {
             String pid=id(p),role=pid.equals(hukum)?"♛ ":partners.contains(pid)?"◈ ":"○ ";
             int change=score.getOrDefault(pid,0);
@@ -915,6 +1042,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         return ScoreRules.calculate(new ArrayList<>(playing),bid,hukum,new ArrayList<>(partners),outcome);
     }
     private void saveRound() {
+        if(roundSaving||busy){Toast.makeText(this,"A save is already in progress",Toast.LENGTH_SHORT).show();return;}
         if(!validRound()){Toast.makeText(this,"Complete the round details first",Toast.LENGTH_SHORT).show();return;}
         List<String> pIds=new ArrayList<>(playing), partnerIds=new ArrayList<>(partners), opponentIds=new ArrayList<>();
         List<String> partnerNames=new ArrayList<>(),opponentNames=new ArrayList<>();
@@ -936,7 +1064,10 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                     // Keep the user's form intact until the server confirms successful write.
                     final Map<String,Object> preview=new HashMap<>(body);
                     preview.put("timestamp",java.time.Instant.now().toString());
+                    roundSaving=true;
+                    updateRoundForm();
                     api.addDocument("rounds",body,"Round saved successfully",()->{
+                        roundSaving=false;
                         resetRound();
                         tab=0;
                         render(true);
@@ -946,6 +1077,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                             .setNegativeButton("Not Now",null)
                             .setPositiveButton("Share Result",(dlg,index)->shareRound(preview))
                             .show();
+                    },()->{
+                        roundSaving=false;
+                        updateRoundForm();
                     });
                 }).show();
     }
