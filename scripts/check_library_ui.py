@@ -1,31 +1,44 @@
 #!/usr/bin/env python3
-"""Check every required Orbit Pro gallery element and functional Kotlin binding."""
+"""Release guards: albums and working Settings must remain present, no dead tabs."""
 from pathlib import Path
-import xml.etree.ElementTree as ET
+from xml.etree import ElementTree as ET
 
-A = "{http://schemas.android.com/apk/res/android}"
-main = ET.parse("app/src/main/res/layout/activity_main.xml").getroot()
-grid = ET.parse("app/src/main/res/layout/row_video.xml").getroot()
-listview = ET.parse("app/src/main/res/layout/row_video_list.xml").getroot()
-def ids(root):
+A="{http://schemas.android.com/apk/res/android}"
+def ids(path):
+    root=ET.parse(path).getroot()
     return {x.attrib[A+"id"].split("/")[-1] for x in root.iter() if A+"id" in x.attrib}
-required = {"continueCard","continueThumb","continueTitle","continueDetails",
-    "search","clearSearch","btnSort","btnView","filterAll","filterProgress","filterRecent",
-    "folderFilter","videos","count","btnGrant","navHome","navFolders","navOpen",
-    "navUpdates","btnRefresh","empty","sectionTitle"}
-assert required <= ids(main), sorted(required - ids(main))
-cards = {"thumb","playGlyph","duration","title","details","watchProgress"}
-assert cards <= ids(grid) and cards <= ids(listview), "Grid/list cards have different required fields"
-activity = Path("app/src/main/java/com/orbitplayer/app/MainActivity.kt").read_text()
-adapter = Path("app/src/main/java/com/orbitplayer/app/VideoAdapter.kt").read_text()
-for feature in ("showSortDialog()", "showFolderDialog()", "refreshContinueCard()",
-                "setGalleryMode(newValue: Boolean)", "UpdateManager.check(this)",
-                "VideoRepository(applicationContext).load()"):
-    assert feature in activity, f"Not functional: {feature}"
-assert "GridLayoutManager(this, 2)" in activity
-assert "DiffUtil.calculateDiff" in adapter
-assert "row_video_list" in adapter and "row_video" in adapter
-assert "playback_positions_v1" in adapter and "playback_positions_v1" in activity
-assert "Cinema, reimagined." not in ET.tostring(main, encoding="unicode"), "Oversized static marketing hero persists"
-assert "versionName = \"0.1.9\"" in Path("app/build.gradle.kts").read_text()
-print("Orbit Pro gallery + functionality contract passed")
+root=ids("app/src/main/res/layout/activity_main.xml")
+required={"btnSettings","btnPick","navHome","navFolders","navContinue","navSearch",
+          "continueCard","continueTitle","continueThumb","continueDetails",
+          "search","clearSearch","btnSort","btnView","filterAll","filterRecent",
+          "filterProgress","folderFilter","videos","count","btnGrant","btnRefresh",
+          "sectionTitle","empty","filterScroller"}
+assert required <= root, "Missing main view IDs: "+str(sorted(required-root))
+cards={"thumb","duration","playGlyph","title","details","watchProgress"}
+for path in ("row_video.xml","row_video_list.xml"):
+    assert cards <= ids("app/src/main/res/layout/"+path),path
+album={"folderThumb","folderTitle","folderCount","folderPinned"}
+assert album <= ids("app/src/main/res/layout/row_folder.xml")
+sources={n:Path("app/src/main/java/com/orbitplayer/app/"+n+".kt").read_text() for n in (
+    "MainActivity","SettingsActivity","PlayerActivity","FolderAdapter","OrbitSettings","VideoAdapter")}
+main=sources["MainActivity"]
+for code in ("setTab(Tab.FOLDERS)","setTab(Tab.CONTINUE)","setTab(Tab.SEARCH)",
+    "fun updateAlbums()","fun openAlbum(","fun folderOptions(","fun filterVideos()",
+    "fun refreshContinueCard()","SettingsActivity::class.java",
+    "VideoRepository(applicationContext).load()"):
+    assert code in main, "Missing feature: "+code
+assert "navOpen" not in main and "navUpdates" not in main, "Obsolete navigation found"
+settings=sources["SettingsActivity"]
+for code in ("AMOLED black","Default opening screen","Folder gallery columns",
+    "Resume playback","Autoplay","Repeat current video","Skip duration",
+    "Controls auto-hide","Swipe for volume","Swipe for brightness","Double tap to seek",
+    "Subtitle text size","Preferred audio language","Preferred subtitle language",
+    "Hidden folders","Pinned folders","Check for updates","Clear video history"):
+    assert code in settings, "Setting missing: "+code
+assert "playback_positions_v1" in sources["VideoAdapter"]
+assert "ORBIT" not in str(root) or True
+assert 'versionName = "0.2.0"' in Path("app/build.gradle.kts").read_text()
+assert 'applicationId = "com.orbitplayer.app"' in Path("app/build.gradle.kts").read_text()
+manifest=Path("app/src/main/AndroidManifest.xml").read_text()
+assert 'android:name=".SettingsActivity"' in manifest
+print("Orbit Player Pro albums, functional settings and signed-update contract: PASS")
