@@ -220,6 +220,8 @@ class PlayerActivity : Activity() {
     private fun preparePlayer() {
         if (player != null) return
         val exo = ExoPlayer.Builder(this).build()
+        exo.setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, true)
+        exo.setHandleAudioBecomingNoisy(true)
         player = exo
         playerView.player = exo
         prefs.edit().putString("last_played_uri", videoUri).apply()
@@ -896,6 +898,10 @@ class PlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        // PiP may bypass normal onStop cleanup on some devices.
+        playerView.player = null
+        player?.release()
+        player = null
         sleepTimerRunnable?.let { handler.removeCallbacks(it) }
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()

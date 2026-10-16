@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.database.ContentObserver
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.text.Editable
@@ -73,6 +74,17 @@ class MainActivity : Activity() {
     private var continueVideo: VideoItem? = null
     private var scanGeneration = 0
     private var destroyed = false
+    private var observerActive = false
+    private val refreshLater = Runnable { if (!destroyed && hasLibraryPermission()) scan() }
+    private val mediaObserver = object : ContentObserver(handler) {
+        override fun onChange(selfChange: Boolean) {
+            super.onChange(selfChange)
+            if (preferences.autoRefresh) {
+                handler.removeCallbacks(refreshLater)
+                handler.postDelayed(refreshLater, 1100)
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -141,6 +153,24 @@ class MainActivity : Activity() {
         applyAppearance()
         if (hasLibraryPermission()) scan() else filterVideos()
         showPreviousCrashReport()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (!observerActive) {
+            contentResolver.registerContentObserver(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, mediaObserver)
+            observerActive = true
+        }
+    }
+
+    override fun onStop() {
+        handler.removeCallbacks(refreshLater)
+        if (observerActive) {
+            contentResolver.unregisterContentObserver(mediaObserver)
+            observerActive = false
+        }
+        super.onStop()
     }
 
     override fun onResume() {
@@ -754,6 +784,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         destroyed = true
+        handler.removeCallbacks(refreshLater)
         ++scanGeneration
         executor.shutdownNow()
         adapter.dispose()

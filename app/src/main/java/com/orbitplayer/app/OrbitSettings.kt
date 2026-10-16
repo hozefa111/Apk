@@ -9,6 +9,9 @@ import android.content.SharedPreferences
  */
 class OrbitSettings(context: Context) {
     val prefs: SharedPreferences = context.getSharedPreferences("orbit_preferences_v2", Context.MODE_PRIVATE)
+    var autoRefresh: Boolean
+        get() = prefs.getBoolean("auto_refresh", true)
+        set(value) = prefs.edit().putBoolean("auto_refresh", value).apply()
     var defaultTab: String
         get() = prefs.getString("default_tab", "Folders") ?: "Folders"
         set(value) = prefs.edit().putString("default_tab", value).apply()
