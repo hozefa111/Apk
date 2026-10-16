@@ -218,11 +218,12 @@ class MainActivity : Activity() {
     }
 
     private fun showOpenSourceMenu() {
-        val options = arrayOf("Choose local video", "Open secure video link (HTTPS)", "Browse a connected file provider")
+        val options = arrayOf("Choose local video", "Open secure video link (HTTPS)", "Browse a connected file provider", "Browse SMB2/SMB3 network share")
         AlertDialog.Builder(this).setTitle("Open a video")
             .setItems(options) { _, selected ->
                 when (selected) {
                     0, 2 -> openDocument() // Android SAF supports installed SMB/drive document providers.
+                    3 -> startActivity(Intent(this, SmbBrowserActivity::class.java))
                     1 -> {
                         val field = EditText(this).apply {
                             hint = "https://example.com/video.mp4"
