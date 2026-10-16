@@ -11,7 +11,7 @@ root=ids("app/src/main/res/layout/activity_main.xml")
 required={"btnSettings","btnPick","navHome","navFolders","navContinue","navSearch",
           "continueCard","continueTitle","continueThumb","continueDetails",
           "search","clearSearch","btnSort","btnView","filterAll","filterRecent",
-          "filterProgress","filterHistory","folderFilter","videos","count","btnGrant","btnRefresh",
+          "filterProgress","filterHistory","filterFavorites","btnPlaylists","folderFilter","videos","count","btnGrant","btnRefresh",
           "sectionTitle","empty","filterScroller"}
 assert required <= root, "Missing main view IDs: "+str(sorted(required-root))
 cards={"thumb","duration","playGlyph","title","details","watchProgress"}
@@ -44,3 +44,12 @@ assert 'applicationId = "com.orbitplayer.app"' in Path("app/build.gradle.kts").r
 manifest=Path("app/src/main/AndroidManifest.xml").read_text()
 assert 'android:name=".SettingsActivity"' in manifest
 print("Orbit Player Pro albums, functional settings and signed-update contract: PASS")
+
+collections = Path("app/src/main/java/com/orbitplayer/app/OrbitCollections.kt").read_text()
+queue = Path("app/src/main/java/com/orbitplayer/app/PlaybackQueue.kt").read_text()
+assert "toggleFavorite" in collections and "fun add(" in collections
+assert "autoAdvance" in queue and "fun ensureRestored(" in queue
+assert "QueueNavigation.shouldAutoAdvance" in sources["PlayerActivity"]
+assert "showPlaylists()" in main and "showMultiSelect()" in main
+assert "PlaybackQueue.persist(this)" in main
+print("Orbit Pro playlists, favorites and auto-next release contracts: PASS")
