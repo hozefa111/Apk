@@ -8,8 +8,8 @@
         android:name=".OrbitApp"
         android:allowBackup="false"
         android:label="Orbit Player"
-        android:icon="@drawable/ic_app"
-        android:roundIcon="@drawable/ic_app"
+        android:icon="@drawable/orbit_launcher"
+        android:roundIcon="@drawable/orbit_launcher"
         android:theme="@style/Theme.OrbitPlayer"
         android:usesCleartextTraffic="false">
         <activity

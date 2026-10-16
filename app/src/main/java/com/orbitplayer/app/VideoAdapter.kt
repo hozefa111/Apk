@@ -23,6 +23,9 @@ class VideoAdapter(
     private val onOpen: (VideoItem) -> Unit
 ) : RecyclerView.Adapter<VideoAdapter.VideoViewHolder>() {
     private var items = listOf<VideoItem>()
+    init { setHasStableIds(true) }
+
+    override fun getItemId(position: Int): Long = items[position].uri.toString().hashCode().toLong()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val executor = Executors.newFixedThreadPool(2)
     private val cache = object : LruCache<String, Bitmap>(8 * 1024) {

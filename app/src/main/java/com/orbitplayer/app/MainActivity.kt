@@ -61,13 +61,24 @@ class MainActivity : Activity() {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = this@MainActivity.adapter
             setHasFixedSize(true)
+            setItemViewCacheSize(8)
         }
         findViewById<Button>(R.id.btnPick).setOnClickListener { openDocument() }
         grant.setOnClickListener { requestVideoPermissions() }
-        findViewById<Button>(R.id.btnRefresh).setOnClickListener { scan() }
+        // All bottom navigation actions are functional; this is not a decorative mockup.
+        findViewById<View>(R.id.navHome).setOnClickListener {
+            chosenFolder = "All folders"
+            query = ""
+            folderSpinner.setSelection(0)
+            findViewById<EditText>(R.id.search).setText("")
+            filter()
+        }
+        findViewById<View>(R.id.navFolders).setOnClickListener { folderSpinner.performClick() }
+        findViewById<View>(R.id.navOpen).setOnClickListener { openDocument() }
+        findViewById<View>(R.id.btnRefresh).setOnClickListener { scan() }
         sortButton.setOnClickListener {
             alphabetic = !alphabetic
-            sortButton.text = if (alphabetic) "A–Z" else "Newest"
+            sortButton.text = if (alphabetic) "A–Z ▾" else "Newest ▾"
             filter()
         }
         findViewById<EditText>(R.id.search).addTextChangedListener(object : TextWatcher {
