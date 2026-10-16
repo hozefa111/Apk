@@ -24,19 +24,19 @@
             android:layout_marginTop="6dp" android:layout_marginBottom="18dp"
             android:text="Playback settings" android:textSize="23sp"
             android:fontFamily="sans-serif-medium" android:textColor="#F4F6FF"/>
-        <TextView android:id="@+id/actionTracks" style="@style/Orbit.ProSheetAction"
+        <TextView android:id="@+id/actionTracks" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="51dp"
             android:text="Audio &amp; subtitle tracks"/>
-        <TextView android:id="@+id/actionInformation" style="@style/Orbit.ProSheetAction"
+        <TextView android:id="@+id/actionInformation" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="51dp"
             android:text="Video information"/>
-        <TextView android:id="@+id/actionSleep" style="@style/Orbit.ProSheetAction"
+        <TextView android:id="@+id/actionSleep" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="51dp"
             android:text="Sleep timer"/>
-        <TextView android:id="@+id/actionRotate" style="@style/Orbit.ProSheetAction"
+        <TextView android:id="@+id/actionRotate" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="51dp"
             android:text="Rotate video"/>
-        <TextView android:id="@+id/actionAspect" style="@style/Orbit.ProSheetAction"
+        <TextView android:id="@+id/actionAspect" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="51dp"
             android:text="Fit / crop / stretch"/>
-        <TextView android:id="@+id/actionRepeat" style="@style/Orbit.ProSheetAction"
+        <TextView android:id="@+id/actionRepeat" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="51dp"
             android:text="Repeat video"/>
-        <TextView android:id="@+id/actionPip" style="@style/Orbit.ProSheetAction"
+        <TextView android:id="@+id/actionPip" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="51dp"
             android:text="Picture in picture"/>
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
