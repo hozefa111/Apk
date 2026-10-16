@@ -18,8 +18,10 @@
         android:usesCleartextTraffic="false">
         <activity
             android:name=".PlayerActivity"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
             android:exported="true"
-            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
             android:screenOrientation="unspecified">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

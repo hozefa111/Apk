@@ -1,6 +1,10 @@
 package com.orbitplayer.app
 
 import android.app.Activity
+import android.app.PictureInPictureParams
+import android.content.res.Configuration
+import android.util.Rational
+import android.widget.SeekBar
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -45,6 +49,28 @@ class PlayerActivity : Activity() {
     private lateinit var notice: TextView
     private lateinit var speedButton: TextView
     private lateinit var audioManager: AudioManager
+    private lateinit var topBar: View
+    private lateinit var centerControls: View
+    private lateinit var bottomControls: View
+    private lateinit var unlockButton: View
+    private lateinit var playPauseButton: TextView
+    private lateinit var seekBar: SeekBar
+    private lateinit var currentTimeLabel: TextView
+    private lateinit var durationLabel: TextView
+    private var controlsVisible = true
+    private var touchLocked = false
+    private var userSeeking = false
+    private var gestureSeeking = false
+    private var gestureSeekAnchor = 0L
+    private val hideControlsTask = Runnable {
+        if (player?.isPlaying == true && !userSeeking) hideControls()
+    }
+    private val progressUpdater = object : Runnable {
+        override fun run() {
+            updateProgress()
+            handler.postDelayed(this, if (controlsVisible) 400 else 1000)
+        }
+    }
     private val handler = Handler(Looper.getMainLooper())
     private val prefs by lazy { getSharedPreferences("playback_positions_v1", MODE_PRIVATE) }
     private var player: ExoPlayer? = null
@@ -67,16 +93,15 @@ class PlayerActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_player)
         playerView = findViewById(R.id.playerView)
-        // Keep our custom top and previous/next bars in sync with Media3's auto-hide controls.
-        val topBar = findViewById<View>(R.id.topBar)
-        val bottomControls = findViewById<View>(R.id.bottomControls)
-        playerView.setControllerShowTimeoutMs(3000)
-        playerView.setControllerVisibilityListener(
-            PlayerView.ControllerVisibilityListener { visibility ->
-                topBar.visibility = visibility
-                bottomControls.visibility = visibility
-            }
-        )
+        playerView.useController = false
+        topBar = findViewById(R.id.topBar)
+        centerControls = findViewById(R.id.centerControls)
+        bottomControls = findViewById(R.id.bottomControls)
+        unlockButton = findViewById(R.id.btnUnlock)
+        playPauseButton = findViewById(R.id.btnPlayPause)
+        seekBar = findViewById(R.id.playerSeekBar)
+        currentTimeLabel = findViewById(R.id.timeCurrent)
+        durationLabel = findViewById(R.id.timeDuration)
         playerTitle = findViewById(R.id.playerTitle)
         notice = findViewById(R.id.gestureNotice)
         speedButton = findViewById(R.id.btnSpeed)
@@ -91,6 +116,7 @@ class PlayerActivity : Activity() {
             return
         }
         playerTitle.text = videoTitle
+        enableImmersiveMode()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         findViewById<View>(R.id.back).setOnClickListener { finish() }
         findViewById<View>(R.id.btnTracks).setOnClickListener { showTrackChooser() }
@@ -99,7 +125,35 @@ class PlayerActivity : Activity() {
         findViewById<View>(R.id.btnMore).setOnClickListener { showMoreOptions() }
         findViewById<View>(R.id.btnPrevious).setOnClickListener { switchQueue(-1) }
         findViewById<View>(R.id.btnNext).setOnClickListener { switchQueue(1) }
+        findViewById<View>(R.id.btnRewind).setOnClickListener { seekRelative(-10_000) }
+        findViewById<View>(R.id.btnForward).setOnClickListener { seekRelative(10_000) }
+        playPauseButton.setOnClickListener { togglePlayPause() }
+        findViewById<View>(R.id.btnAspect).setOnClickListener { cycleAspectRatio() }
+        findViewById<View>(R.id.btnRotate).setOnClickListener { rotateVideo() }
+        findViewById<View>(R.id.btnLock).setOnClickListener { setTouchLocked(true) }
+        unlockButton.setOnClickListener { setTouchLocked(false) }
+        findViewById<View>(R.id.btnPip).setOnClickListener { startPictureInPicture() }
+        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onStartTrackingTouch(seekBar: SeekBar) {
+                userSeeking = true
+                handler.removeCallbacks(hideControlsTask)
+            }
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    val duration = player?.duration ?: 0L
+                    if (duration > 0L) currentTimeLabel.text = formatTime(duration * progress / 1000L)
+                }
+            }
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
+                val duration = player?.duration ?: 0L
+                if (duration > 0L) player?.seekTo(duration * seekBar.progress / 1000L)
+                userSeeking = false
+                updateProgress()
+                scheduleAutoHide()
+            }
+        })
         attachGestureZones()
+        showControls()
         if (savedInstanceState != null) {
             lastSavedPosition = savedInstanceState.getLong("position", 0L)
             videoUri = savedInstanceState.getString("uri", videoUri)
@@ -145,7 +199,18 @@ class PlayerActivity : Activity() {
                     .show()
             }
 
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                updatePlayPauseButton()
+                if (isPlaying) scheduleAutoHide() else {
+                    handler.removeCallbacks(hideControlsTask)
+                    if (!touchLocked) showControls()
+                }
+            }
+
             override fun onPlaybackStateChanged(playbackState: Int) {
+                updateProgress()
+                updatePlayPauseButton()
+
                 if (playbackState == Player.STATE_ENDED) {
                     prefs.edit().remove(positionKey(videoUri)).apply()
                     lastSavedPosition = 0L
@@ -165,6 +230,9 @@ class PlayerActivity : Activity() {
         }
         handler.removeCallbacks(progressSaver)
         handler.postDelayed(progressSaver, 5000)
+        handler.removeCallbacks(progressUpdater)
+        handler.post(progressUpdater)
+        scheduleAutoHide()
     }
 
     private fun buildMediaItem(): MediaItem {
@@ -226,7 +294,8 @@ class PlayerActivity : Activity() {
         val captions = arrayOf("0.5×", "0.75×", "1× (Normal)", "1.25×", "1.5×", "2×")
         AlertDialog.Builder(this).setTitle("Playback speed").setItems(captions) { _, selected ->
             player?.setPlaybackSpeed(speeds[selected])
-            speedButton.text = captions[selected].substringBefore(' ')
+            speedButton.text = "${captions[selected].substringBefore(' ')}  Speed"
+            scheduleAutoHide()
         }.show()
     }
 
@@ -348,15 +417,26 @@ class PlayerActivity : Activity() {
         val exo = player ?: return
         val max = if (exo.duration > 0) exo.duration else Long.MAX_VALUE
         exo.seekTo((exo.currentPosition + delta).coerceIn(0L, max))
-        notifyGesture(if (delta > 0) "+10 sec" else "-10 sec")
+        notifyGesture(if (delta > 0) "+10 seconds" else "-10 seconds")
+        updateProgress()
     }
 
     private fun attachGestureZones() {
-        val frame = playerView.parent as? FrameLayout ?: return
-        listOf(false, true).forEach { right ->
-            val zone = PlayerGestureZone(this, right,
-                onDoubleTap = { seekRelative(if (right) 10_000L else -10_000L) },
-                onVerticalScroll = { delta ->
+        val layer = findViewById<FrameLayout>(R.id.gestureLayer)
+        val zone = PlayerGestureZone(
+            this,
+            onTap = { if (touchLocked) showUnlockButton() else toggleControls() },
+            onDoubleTap = { fraction ->
+                if (!touchLocked) {
+                    when {
+                        fraction < 0.36f -> seekRelative(-10_000L)
+                        fraction > 0.64f -> seekRelative(10_000L)
+                        else -> togglePlayPause()
+                    }
+                }
+            },
+            onVerticalScroll = { right, delta ->
+                if (!touchLocked) {
                     if (right) {
                         val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
                         val current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
@@ -370,15 +450,42 @@ class PlayerActivity : Activity() {
                         window.attributes = params
                         notifyGesture("Brightness ${(brightness * 100).roundToInt()}%")
                     }
-                },
-                onTap = { playerView.showController() }
-            )
-            frame.addView(zone, FrameLayout.LayoutParams(
-                (resources.displayMetrics.widthPixels * 0.23f).toInt().coerceAtLeast(50),
-                (resources.displayMetrics.heightPixels * 0.48f).toInt().coerceAtLeast(100),
-                Gravity.CENTER_VERTICAL or (if (right) Gravity.RIGHT else Gravity.LEFT)
-            ))
-        }
+                }
+            },
+            onHorizontalSeek = { amount, completed ->
+                if (!touchLocked) {
+                    val exo = player
+                    val duration = exo?.duration ?: 0L
+                    if (exo != null && duration > 0L) {
+                        if (!gestureSeeking) {
+                            gestureSeeking = true
+                            gestureSeekAnchor = exo.currentPosition.coerceAtLeast(0L)
+                        }
+                        // A full-screen horizontal swipe spans at most half the video.
+                        val target = (gestureSeekAnchor + (amount * duration * 0.50f).toLong())
+                            .coerceIn(0L, duration)
+                        if (completed) {
+                            exo.seekTo(target)
+                            gestureSeeking = false
+                            scheduleAutoHide()
+                        }
+                        notifyGesture("Seek ${formatTime(target)} / ${formatTime(duration)}")
+                    }
+                }
+            },
+            onPinch = { zoomIn ->
+                if (!touchLocked) {
+                    resizeMode = if (zoomIn) AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                 else AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    playerView.resizeMode = resizeMode
+                    notifyGesture(if (zoomIn) "Fill screen" else "Fit to screen")
+                }
+            }
+        )
+        layer.addView(zone, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ))
     }
 
     private fun notifyGesture(message: String) {
@@ -390,6 +497,163 @@ class PlayerActivity : Activity() {
         handler.postDelayed(runnable, 900)
     }
 
+
+    private fun togglePlayPause() {
+        val exo = player ?: return
+        if (exo.isPlaying) exo.pause() else exo.play()
+        updatePlayPauseButton()
+        showControls()
+    }
+
+    private fun updatePlayPauseButton() {
+        if (!::playPauseButton.isInitialized) return
+        val isPlaying = player?.isPlaying == true
+        playPauseButton.text = if (isPlaying) "Ⅱ" else "▶"
+        playPauseButton.contentDescription = if (isPlaying) "Pause video" else "Play video"
+    }
+
+    private fun updateProgress() {
+        val exo = player ?: return
+        if (!::seekBar.isInitialized) return
+        val duration = exo.duration
+        val position = exo.currentPosition.coerceAtLeast(0L)
+        if (duration > 0L) {
+            durationLabel.text = formatTime(duration)
+            if (!userSeeking) {
+                currentTimeLabel.text = formatTime(position)
+                seekBar.progress = (position * 1000 / duration).toInt().coerceIn(0, 1000)
+            }
+        } else {
+            durationLabel.text = "--:--"
+            if (!userSeeking) currentTimeLabel.text = "00:00"
+        }
+    }
+
+    private fun formatTime(millis: Long): String {
+        val seconds = (millis.coerceAtLeast(0L) / 1000)
+        val minutes = seconds / 60
+        val hours = minutes / 60
+        return if (hours > 0)
+            String.format(java.util.Locale.US, "%d:%02d:%02d", hours, minutes % 60, seconds % 60)
+        else String.format(java.util.Locale.US, "%02d:%02d", minutes, seconds % 60)
+    }
+
+    private fun animateControls(view: View, visible: Boolean) {
+        view.animate().cancel()
+        if (visible) {
+            view.visibility = View.VISIBLE
+            view.animate().alpha(1f).setDuration(160).start()
+        } else if (view.visibility == View.VISIBLE) {
+            view.animate().alpha(0f).setDuration(160).withEndAction {
+                if (!controlsVisible || touchLocked) view.visibility = View.GONE
+            }.start()
+        }
+    }
+
+    private fun showControls() {
+        if (touchLocked) { showUnlockButton(); return }
+        controlsVisible = true
+        unlockButton.visibility = View.GONE
+        listOf(topBar, centerControls, bottomControls).forEach { animateControls(it, true) }
+        scheduleAutoHide()
+    }
+
+    private fun hideControls() {
+        controlsVisible = false
+        handler.removeCallbacks(hideControlsTask)
+        listOf(topBar, centerControls, bottomControls).forEach { animateControls(it, false) }
+        unlockButton.visibility = View.GONE
+    }
+
+    private fun toggleControls() {
+        if (controlsVisible) hideControls() else showControls()
+    }
+
+    private fun scheduleAutoHide() {
+        handler.removeCallbacks(hideControlsTask)
+        if (player?.isPlaying == true && controlsVisible && !touchLocked && !userSeeking)
+            handler.postDelayed(hideControlsTask, 3000)
+    }
+
+    private fun setTouchLocked(locked: Boolean) {
+        touchLocked = locked
+        hideControls()
+        if (locked) {
+            showUnlockButton()
+            notifyGesture("Controls locked")
+        } else {
+            showControls()
+            notifyGesture("Controls unlocked")
+        }
+    }
+
+    private fun showUnlockButton() {
+        unlockButton.visibility = View.VISIBLE
+        handler.removeCallbacks(hideControlsTask)
+        handler.postDelayed({ if (touchLocked) unlockButton.visibility = View.GONE }, 3500)
+    }
+
+    private fun cycleAspectRatio() {
+        resizeMode = when (resizeMode) {
+            AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+            else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+        }
+        playerView.resizeMode = resizeMode
+        val caption = when (resizeMode) {
+            AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> "Crop"
+            AspectRatioFrameLayout.RESIZE_MODE_FILL -> "Stretch"
+            else -> "Fit"
+        }
+        findViewById<TextView>(R.id.btnAspect).text = "▣  $caption"
+        notifyGesture("Screen: $caption")
+        scheduleAutoHide()
+    }
+
+    private fun rotateVideo() {
+        requestedOrientation = if (requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE)
+            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        showControls()
+    }
+
+    private fun enableImmersiveMode() {
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility = (
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        )
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) enableImmersiveMode()
+    }
+
+    private fun startPictureInPicture() {
+        if (Build.VERSION.SDK_INT < 26) return
+        val videoSize = player?.videoSize
+        val width = videoSize?.width?.takeIf { it > 0 } ?: 16
+        val height = videoSize?.height?.takeIf { it > 0 } ?: 9
+        runCatching {
+            enterPictureInPictureMode(
+                PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational(width, height).let { ratio ->
+                        if (ratio.toFloat() in (1f / 2.39f)..2.39f) ratio else Rational(16, 9)
+                    })
+                    .build()
+            )
+        }.onFailure { notifyGesture("PiP not supported on this device") }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        findViewById<View>(R.id.gestureLayer).visibility =
+            if (isInPictureInPictureMode) View.GONE else View.VISIBLE
+        if (isInPictureInPictureMode) hideControls()
+        else { enableImmersiveMode(); showControls() }
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         savePosition()
         outState.putLong("position", lastSavedPosition)
@@ -399,7 +663,13 @@ class PlayerActivity : Activity() {
     }
 
     override fun onStop() {
+        if (Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode) {
+            super.onStop()
+            return
+        }
         handler.removeCallbacks(progressSaver)
+        handler.removeCallbacks(progressUpdater)
+        handler.removeCallbacks(hideControlsTask)
         savePosition()
         playerView.player = null
         player?.release()
