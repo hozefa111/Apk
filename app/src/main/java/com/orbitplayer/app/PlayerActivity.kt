@@ -564,7 +564,14 @@ class PlayerActivity : Activity() {
         Thread {
             val decoded = runCatching {
                 val bytes = contentResolver.openInputStream(uri)?.use { input ->
-                    input.readNBytes(4 * 1024 * 1024 + 1)
+                    val out = java.io.ByteArrayOutputStream()
+                    val chunk = ByteArray(8192)
+                    while (out.size() <= 4 * 1024 * 1024) {
+                        val got = input.read(chunk)
+                        if (got < 0) break
+                        out.write(chunk, 0, got)
+                    }
+                    out.toByteArray()
                 } ?: error("Cannot read subtitle file")
                 require(bytes.size <= 4 * 1024 * 1024) { "Subtitle file exceeds 4 MB" }
                 SubtitleTimeline.parse(String(bytes, Charsets.UTF_8))
