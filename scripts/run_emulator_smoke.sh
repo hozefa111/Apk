@@ -33,7 +33,7 @@ ID=""
 for attempt in $(seq 1 25); do
   adb shell content query --uri content://media/external/video/media \
     --projection _id:_display_name > qa/media-rows.txt
-  ID="$(grep -F '_display_name=orbit_smoke.mp4' qa/media-rows.txt | sed -nE 's/.*_id=([0-9]+).*/\1/p' | head -n1)"
+  ID="$(grep -F '_display_name=orbit_smoke.mp4' qa/media-rows.txt | sed -nE 's/.*_id=([0-9]+).*/\1/p' | head -n1 || true)"
   [[ -n "$ID" ]] && break
   sleep 2
 done
@@ -57,13 +57,13 @@ adb shell am start -W -n "$PACKAGE/.PlayerActivity" --es video_uri "$URI" | tee 
 sleep 2
 for attempt in $(seq 1 25); do
   adb logcat -d -v brief > qa/player-logcat.txt
-  if grep -F 'OrbitPlayerQA: STATE_READY' qa/player-logcat.txt >/dev/null; then break; fi
-  if grep -E 'FATAL EXCEPTION|OrbitPlayerQA: PLAYER_ERROR' qa/player-logcat.txt >/dev/null; then
+  if grep -E 'OrbitPlayerQA.*STATE_READY' qa/player-logcat.txt >/dev/null; then break; fi
+  if grep -E 'FATAL EXCEPTION|OrbitPlayerQA.*PLAYER_ERROR' qa/player-logcat.txt >/dev/null; then
     echo "Player reported an error before reaching READY"; exit 1
   fi
   sleep 2
 done
-grep -F 'OrbitPlayerQA: STATE_READY' qa/player-logcat.txt >/dev/null || {
+grep -E 'OrbitPlayerQA.*STATE_READY' qa/player-logcat.txt >/dev/null || {
   echo "Player did not reach READY after opening smoke video"; exit 1;
 }
 adb shell dumpsys activity activities > qa/player-activity.txt
@@ -93,7 +93,7 @@ grep -F "$PACKAGE/.PlayerActivity" qa/rotation-activity.txt >/dev/null || {
   echo "PlayerActivity lost on rotation"; exit 1;
 }
 adb logcat -d -v brief > qa/player-logcat.txt
-if grep -E 'FATAL EXCEPTION.*|OrbitPlayerQA: PLAYER_ERROR' qa/player-logcat.txt; then
+if grep -E 'FATAL EXCEPTION.*|OrbitPlayerQA.*PLAYER_ERROR' qa/player-logcat.txt; then
   echo "Playback smoke contains fatal/error event"; exit 1;
 fi
 adb shell pidof "$PACKAGE" >/dev/null
