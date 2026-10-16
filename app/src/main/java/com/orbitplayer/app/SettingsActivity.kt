@@ -127,6 +127,23 @@ class SettingsActivity : Activity() {
             settings.gestureHoldSpeed) { settings.gestureHoldSpeed = it }
 
         section("SUBTITLES & AUDIO")
+        choose("Subtitle colour", when (settings.subtitleColor) {
+            android.graphics.Color.YELLOW -> "Yellow"
+            android.graphics.Color.CYAN -> "Cyan"
+            else -> "White"
+        }, listOf("White", "Yellow", "Cyan")) {
+            settings.subtitleColor = when (it) {
+                "Yellow" -> android.graphics.Color.YELLOW
+                "Cyan" -> android.graphics.Color.CYAN
+                else -> android.graphics.Color.WHITE
+            }
+        }
+        toggle("Subtitle background", "Show a soft dark background behind external captions",
+            settings.subtitleBackground) { settings.subtitleBackground = it }
+        choose("External subtitle sync offset", "${settings.subtitleDelayMs} ms",
+            listOf("-2000 ms", "-1000 ms", "-500 ms", "0 ms", "500 ms", "1000 ms", "2000 ms")) {
+            settings.subtitleDelayMs = it.substringBefore(' ').toLong()
+        }
         choose("Subtitle text size", "${(settings.subtitleScale * 100).toInt()}%",
             listOf("75%", "90%", "100%", "120%", "140%", "160%")) {
             settings.subtitleScale = it.removeSuffix("%").toFloat() / 100f
