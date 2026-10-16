@@ -1,0 +1,61 @@
+name: Test 3 Patti PRO APK opening
+
+on:
+  push:
+    branches: [three-patti-pro-android]
+    paths: ['.github/workflows/test-three-patti-apk.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  launch-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout test files
+        uses: actions/checkout@v4
+      - name: Download compiled v2 APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p test-apk
+          gh run download 38849505914 -n 3-Patti-PRO-FIXED-APK -D test-apk
+          sha256sum test-apk/app-debug.apk
+      - name: Enable emulator acceleration
+        run: |
+          sudo chmod 666 /dev/kvm
+      - name: Boot Android 11 and verify game starts
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            adb install test-apk/app-debug.apk
+            adb shell am start -W -n com.hozefa.threepattipro.stable/com.hozefa.threepattipro.MainActivity
+            sleep 15
+            adb shell dumpsys activity activities > activity.txt
+            adb logcat -d -v brief -s AndroidRuntime:E > crashlog.txt
+            adb shell screencap -p /sdcard/patti-screen.png
+            adb pull /sdcard/patti-screen.png patti-screen.png
+            if grep -A 3 'FATAL EXCEPTION' crashlog.txt | grep -q 'com.hozefa.threepattipro'; then cat crashlog.txt; exit 1; fi
+            if ! grep -q 'com.hozefa.threepattipro.stable' activity.txt; then
+              cat activity.txt
+              exit 1
+            fi
+            echo 'APK installed and 3 Patti PRO activity started without AndroidRuntime fatal crash'
+      - name: Upload screen for inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3-Patti-PRO-launch-screen
+          path: |
+            patti-screen.png
+            crashlog.txt
+            activity.txt
+          if-no-files-found: ignore
