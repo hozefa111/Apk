@@ -3,6 +3,8 @@ name: Emulator Playback Smoke Test
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -31,7 +33,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg
-          ffmpeg -nostdin -hide_banner -loglevel error -f lavfi -i testsrc=size=320x240:rate=15 -t 3 -c:v mpeg4 -q:v 8 -pix_fmt yuv420p -y smoke.mp4
+          ffmpeg -nostdin -hide_banner -loglevel error -f lavfi -i testsrc=size=320x240:rate=15 -t 24 -c:v mpeg4 -q:v 8 -pix_fmt yuv420p -y smoke.mp4
       - name: Launch on Android emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -56,8 +58,16 @@ jobs:
             sleep 8
             adb shell dumpsys activity activities > activity-state.txt
             adb logcat -d -v time > emulator-logcat.txt
+            adb shell input tap 180 400 || true
+            sleep 1
             adb shell screencap -p /sdcard/Download/orbit_screenshot.png || true
             adb pull /sdcard/Download/orbit_screenshot.png orbit-smoke-screen.png || true
+            adb shell settings put system accelerometer_rotation 0 || true
+            adb shell settings put system user_rotation 1 || true
+            sleep 4
+            adb shell input tap 400 180 || true
+            adb shell screencap -p /sdcard/Download/orbit_landscape.png || true
+            adb pull /sdcard/Download/orbit_landscape.png orbit-landscape-screen.png || true
             if grep -E 'FATAL EXCEPTION|Process: com\.orbitplayer\.app' emulator-logcat.txt; then
               echo "Detected fatal Android exception"
               exit 1
@@ -76,4 +86,5 @@ jobs:
             emulator-logcat.txt
             activity-state.txt
             orbit-smoke-screen.png
+            orbit-landscape-screen.png
           if-no-files-found: ignore
