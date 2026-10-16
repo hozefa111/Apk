@@ -5,6 +5,9 @@ import android.app.PictureInPictureParams
 import android.content.res.Configuration
 import android.util.Rational
 import android.widget.SeekBar
+import android.widget.ImageView
+import android.widget.ProgressBar
+import android.view.HapticFeedbackConstants
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -47,13 +50,19 @@ class PlayerActivity : Activity() {
     private lateinit var playerView: PlayerView
     private lateinit var playerTitle: TextView
     private lateinit var notice: TextView
+    private lateinit var gestureHud: View
+    private lateinit var gestureMeter: ProgressBar
+    private var showRemainingTime = false
+    private var holdSpeedRestore: Float? = null
+    private var sleepTimerMinutes = 0
+    private var sleepTimerRunnable: Runnable? = null
     private lateinit var speedButton: TextView
     private lateinit var audioManager: AudioManager
     private lateinit var topBar: View
     private lateinit var centerControls: View
     private lateinit var bottomControls: View
     private lateinit var unlockButton: View
-    private lateinit var playPauseButton: TextView
+    private lateinit var playPauseButton: ImageView
     private lateinit var seekBar: SeekBar
     private lateinit var currentTimeLabel: TextView
     private lateinit var durationLabel: TextView
@@ -104,6 +113,8 @@ class PlayerActivity : Activity() {
         durationLabel = findViewById(R.id.timeDuration)
         playerTitle = findViewById(R.id.playerTitle)
         notice = findViewById(R.id.gestureNotice)
+        gestureHud = findViewById(R.id.gestureHud)
+        gestureMeter = findViewById(R.id.gestureMeter)
         speedButton = findViewById(R.id.btnSpeed)
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         videoUri = intent?.data?.toString()
@@ -133,6 +144,11 @@ class PlayerActivity : Activity() {
         findViewById<View>(R.id.btnLock).setOnClickListener { setTouchLocked(true) }
         unlockButton.setOnClickListener { setTouchLocked(false) }
         findViewById<View>(R.id.btnPip).setOnClickListener { startPictureInPicture() }
+        findViewById<View>(R.id.btnInfo).setOnClickListener { showVideoInfo() }
+        durationLabel.setOnClickListener {
+            showRemainingTime = !showRemainingTime
+            updateProgress()
+        }
         seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onStartTrackingTouch(seekBar: SeekBar) {
                 userSeeking = true
@@ -141,13 +157,18 @@ class PlayerActivity : Activity() {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                 if (fromUser) {
                     val duration = player?.duration ?: 0L
-                    if (duration > 0L) currentTimeLabel.text = formatTime(duration * progress / 1000L)
+                    if (duration > 0L) {
+                        val target = duration * progress / 1000L
+                        currentTimeLabel.text = formatTime(target)
+                        showGestureHud("Seek · " + formatTime(target), progress / 10)
+                    }
                 }
             }
             override fun onStopTrackingTouch(seekBar: SeekBar) {
                 val duration = player?.duration ?: 0L
                 if (duration > 0L) player?.seekTo(duration * seekBar.progress / 1000L)
                 userSeeking = false
+                hideGestureHudSoon()
                 updateProgress()
                 scheduleAutoHide()
             }
@@ -393,30 +414,96 @@ class PlayerActivity : Activity() {
     }
 
     private fun showMoreOptions() {
-        val captions = arrayOf("Fit video", "Crop/zoom video", "Stretch video",
-            "Rotate screen", if (repeatOne) "Repeat: ON" else "Repeat: OFF", "Rewind 10 seconds", "Forward 10 seconds")
-        AlertDialog.Builder(this).setTitle("Player options").setItems(captions) { _, which ->
-            when (which) {
-                0 -> { resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT; playerView.resizeMode = resizeMode }
-                1 -> { resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM; playerView.resizeMode = resizeMode }
-                2 -> { resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FILL; playerView.resizeMode = resizeMode }
-                3 -> requestedOrientation = if (requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE)
-                    ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                4 -> {
-                    repeatOne = !repeatOne
-                    player?.repeatMode = if (repeatOne) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
-                    notifyGesture(if (repeatOne) "Repeat on" else "Repeat off")
+        val captions = arrayOf("Video details", "Sleep timer" + if (sleepTimerMinutes > 0) " · $sleepTimerMinutes min" else "",
+            "Fit screen", "Crop to fill", "Stretch", "Rotate",
+            if (repeatOne) "Repeat video · On" else "Repeat video · Off")
+        AlertDialog.Builder(this).setTitle("Orbit cinema")
+            .setItems(captions) { _, which ->
+                when (which) {
+                    0 -> showVideoInfo()
+                    1 -> showSleepTimer()
+                    2 -> setAspectRatio(AspectRatioFrameLayout.RESIZE_MODE_FIT)
+                    3 -> setAspectRatio(AspectRatioFrameLayout.RESIZE_MODE_ZOOM)
+                    4 -> setAspectRatio(AspectRatioFrameLayout.RESIZE_MODE_FILL)
+                    5 -> rotateVideo()
+                    6 -> {
+                        repeatOne = !repeatOne
+                        player?.repeatMode = if (repeatOne) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+                        notifyGesture(if (repeatOne) "Repeat on" else "Repeat off")
+                    }
                 }
-                5 -> seekRelative(-10_000)
-                6 -> seekRelative(10_000)
-            }
-        }.show()
+            }.show()
+    }
+
+    private fun setAspectRatio(mode: Int) {
+        resizeMode = mode
+        playerView.resizeMode = mode
+        val caption = when (mode) {
+            AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> "Crop"
+            AspectRatioFrameLayout.RESIZE_MODE_FILL -> "Stretch"
+            else -> "Fit"
+        }
+        findViewById<TextView>(R.id.btnAspect).text = "▣  $caption"
+        notifyGesture("Screen: $caption")
+        scheduleAutoHide()
+    }
+
+    private fun showVideoInfo() {
+        val exo = player ?: return
+        val size = exo.videoSize
+        val resolution = if (size.width > 0 && size.height > 0)
+            "${size.width} × ${size.height}" else "Not reported"
+        val video = exo.currentTracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO }
+            ?.let { group -> (0 until group.length).firstOrNull { group.isTrackSelected(it) }
+                ?.let { group.getTrackFormat(it) } }
+        val audio = exo.currentTracks.groups.firstOrNull { it.type == C.TRACK_TYPE_AUDIO }
+            ?.let { group -> (0 until group.length).firstOrNull { group.isTrackSelected(it) }
+                ?.let { group.getTrackFormat(it) } }
+        val mime = video?.sampleMimeType?.substringAfter('/') ?: "Unknown"
+        val audioType = audio?.sampleMimeType?.substringAfter('/') ?: "Unknown"
+        val info = buildString {
+            appendLine(videoTitle)
+            appendLine()
+            appendLine("Resolution: $resolution")
+            appendLine("Video: $mime")
+            appendLine("Audio: $audioType")
+            appendLine("Duration: ${if (exo.duration > 0) formatTime(exo.duration) else "Unknown"}")
+            appendLine("Playback speed: ${exo.playbackParameters.speed}×")
+            appendLine("Decoder: Android Media3 ExoPlayer")
+        }
+        AlertDialog.Builder(this).setTitle("Video information")
+            .setMessage(info).setPositiveButton("Done", null).show()
+    }
+
+    private fun showSleepTimer() {
+        val options = arrayOf("Off", "15 minutes", "30 minutes", "45 minutes", "60 minutes", "90 minutes")
+        val values = intArrayOf(0, 15, 30, 45, 60, 90)
+        AlertDialog.Builder(this).setTitle("Sleep timer")
+            .setSingleChoiceItems(options, values.indexOf(sleepTimerMinutes).coerceAtLeast(0)) { dialog, which ->
+                sleepTimerRunnable?.let { handler.removeCallbacks(it) }
+                sleepTimerRunnable = null
+                sleepTimerMinutes = values[which]
+                if (sleepTimerMinutes > 0) {
+                    val task = Runnable {
+                        player?.pause()
+                        sleepTimerMinutes = 0
+                        sleepTimerRunnable = null
+                        showControls()
+                        notifyGesture("Sleep timer finished")
+                    }
+                    sleepTimerRunnable = task
+                    handler.postDelayed(task, sleepTimerMinutes * 60_000L)
+                }
+                notifyGesture(if (sleepTimerMinutes > 0) "Timer: $sleepTimerMinutes min" else "Sleep timer off")
+                dialog.dismiss()
+            }.setNegativeButton("Cancel", null).show()
     }
 
     private fun seekRelative(delta: Long) {
         val exo = player ?: return
         val max = if (exo.duration > 0) exo.duration else Long.MAX_VALUE
         exo.seekTo((exo.currentPosition + delta).coerceIn(0L, max))
+        playPauseButton.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
         notifyGesture(if (delta > 0) "+10 seconds" else "-10 seconds")
         updateProgress()
     }
@@ -442,13 +529,15 @@ class PlayerActivity : Activity() {
                         val current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
                         val next = (current + delta * max).roundToInt().coerceIn(0, max)
                         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, next, 0)
-                        notifyGesture("Volume ${(100f * next / max).roundToInt()}%")
+                        val percent = (100f * next / max).roundToInt()
+                        showGestureHud("Volume  $percent%", percent)
                     } else {
                         brightness = (brightness + delta).coerceIn(0.05f, 1f)
                         val params = window.attributes
                         params.screenBrightness = brightness
                         window.attributes = params
-                        notifyGesture("Brightness ${(brightness * 100).roundToInt()}%")
+                        val percent = (brightness * 100).roundToInt()
+                        showGestureHud("Brightness  $percent%", percent)
                     }
                 }
             },
@@ -469,7 +558,9 @@ class PlayerActivity : Activity() {
                             gestureSeeking = false
                             scheduleAutoHide()
                         }
-                        notifyGesture("Seek ${formatTime(target)} / ${formatTime(duration)}")
+                        showGestureHud("Seek  ${formatTime(target)} / ${formatTime(duration)}",
+                            (100.0 * target.toDouble() / duration.toDouble()).toInt().coerceIn(0, 100))
+                        if (completed) hideGestureHudSoon()
                     }
                 }
             },
@@ -480,7 +571,23 @@ class PlayerActivity : Activity() {
                     playerView.resizeMode = resizeMode
                     notifyGesture(if (zoomIn) "Fill screen" else "Fit to screen")
                 }
-            }
+            },
+            onHoldBoost = { pressed ->
+                if (!touchLocked) {
+                    val exo = player
+                    if (pressed && exo?.isPlaying == true && holdSpeedRestore == null) {
+                        holdSpeedRestore = exo.playbackParameters.speed
+                        exo.setPlaybackSpeed(2f)
+                        showGestureHud("⏩  2× speed · Hold", -1)
+                        playPauseButton.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    } else if (!pressed) {
+                        holdSpeedRestore?.let { original -> exo?.setPlaybackSpeed(original) }
+                        holdSpeedRestore = null
+                        hideGestureHudSoon()
+                    }
+                }
+            },
+            onGestureCancelled = { gestureSeeking = false }
         )
         layer.addView(zone, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -489,12 +596,27 @@ class PlayerActivity : Activity() {
     }
 
     private fun notifyGesture(message: String) {
-        notice.text = message
-        notice.visibility = View.VISIBLE
+        showGestureHud(message, -1)
+        hideGestureHudSoon()
+    }
+
+    private fun showGestureHud(message: String, percentage: Int) {
+        if (notice.text.toString() != message) notice.text = message
+        gestureMeter.visibility = if (percentage in 0..100) View.VISIBLE else View.GONE
+        if (percentage in 0..100) gestureMeter.progress = percentage
         toastHide?.let { handler.removeCallbacks(it) }
-        val runnable = Runnable { notice.visibility = View.GONE }
-        toastHide = runnable
-        handler.postDelayed(runnable, 900)
+        gestureHud.visibility = View.VISIBLE
+        if (gestureHud.alpha < 1f) gestureHud.animate().alpha(1f).setDuration(120).start()
+    }
+
+    private fun hideGestureHudSoon() {
+        toastHide?.let { handler.removeCallbacks(it) }
+        val hide = Runnable {
+            gestureHud.animate().alpha(0f).setDuration(220)
+                .withEndAction { gestureHud.visibility = View.GONE }.start()
+        }
+        toastHide = hide
+        handler.postDelayed(hide, 950)
     }
 
 
@@ -508,7 +630,7 @@ class PlayerActivity : Activity() {
     private fun updatePlayPauseButton() {
         if (!::playPauseButton.isInitialized) return
         val isPlaying = player?.isPlaying == true
-        playPauseButton.text = if (isPlaying) "Ⅱ" else "▶"
+        playPauseButton.setImageResource(if (isPlaying) R.drawable.orbit_ic_pause else R.drawable.orbit_ic_play)
         playPauseButton.contentDescription = if (isPlaying) "Pause video" else "Play video"
     }
 
@@ -518,9 +640,14 @@ class PlayerActivity : Activity() {
         val duration = exo.duration
         val position = exo.currentPosition.coerceAtLeast(0L)
         if (duration > 0L) {
-            durationLabel.text = formatTime(duration)
+            val totalText = if (showRemainingTime) "−" + formatTime((duration - position).coerceAtLeast(0L))
+                else formatTime(duration)
+            if (durationLabel.text.toString() != totalText) durationLabel.text = totalText
+            val buffered = (exo.bufferedPosition.coerceIn(0L, duration) * 1000 / duration).toInt().coerceIn(0, 1000)
+            seekBar.secondaryProgress = buffered
             if (!userSeeking) {
-                currentTimeLabel.text = formatTime(position)
+                val newTime = formatTime(position)
+                if (currentTimeLabel.text.toString() != newTime) currentTimeLabel.text = newTime
                 seekBar.progress = (position * 1000 / duration).toInt().coerceIn(0, 1000)
             }
         } else {
@@ -671,6 +798,8 @@ class PlayerActivity : Activity() {
         handler.removeCallbacks(progressUpdater)
         handler.removeCallbacks(hideControlsTask)
         savePosition()
+        holdSpeedRestore?.let { player?.setPlaybackSpeed(it) }
+        holdSpeedRestore = null
         playerView.player = null
         player?.release()
         player = null
@@ -678,6 +807,7 @@ class PlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        sleepTimerRunnable?.let { handler.removeCallbacks(it) }
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
