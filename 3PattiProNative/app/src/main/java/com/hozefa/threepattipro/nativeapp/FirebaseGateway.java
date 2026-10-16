@@ -20,6 +20,8 @@ import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 
 public final class FirebaseGateway {
     public interface Listener {
@@ -63,6 +65,7 @@ public final class FirebaseGateway {
         // A stored refresh token is not proof of a valid admin session.
         ui.post(() -> listener.authChanged(false));
         executor.execute(() -> {
+            readCachedSnapshot();
             if (refreshToken != null) {
                 try { ensureIdToken(); }
                 catch (Exception ex) {
@@ -165,6 +168,7 @@ public final class FirebaseGateway {
             List<Map<String,Object>> p=fetchCollection("players");
             List<Map<String,Object>> r=fetchCollection("rounds");
             List<Map<String,Object>> s=fetchCollection("sessions");
+            saveCachedSnapshot(p,r,s);
             ui.post(() -> { if(running) listener.dataUpdated(p,r,s); });
         } catch (Exception ex) {
             notify("Sync issue: " + ex.getMessage());
@@ -173,6 +177,80 @@ public final class FirebaseGateway {
             if (running && reloadRequested){reloadRequested=false;ui.removeCallbacks(refreshLoop);executor.execute(this::load);}
             else if(running) scheduleNext();
         }
+    }
+    // A private read-only offline snapshot. It NEVER queues or replays mutations.
+    private File snapshotFile(){return new File(context.getFilesDir(),"3patti_snapshot.json");}
+    private void saveCachedSnapshot(List<Map<String,Object>> players,
+                                    List<Map<String,Object>> rounds,
+                                    List<Map<String,Object>> sessions) {
+        File temp=new File(context.getFilesDir(),"3patti_snapshot.tmp");
+        try{
+            JSONObject all=new JSONObject();
+            all.put("players",new JSONArray(players));
+            all.put("rounds",new JSONArray(rounds));
+            all.put("sessions",new JSONArray(sessions));
+            all.put("savedAt",System.currentTimeMillis());
+            byte[] bytes=all.toString().getBytes(StandardCharsets.UTF_8);
+            if(bytes.length>8_000_000)return; // keep app startup fast on very large histories
+            try(FileOutputStream stream=new FileOutputStream(temp)){
+                stream.write(bytes);
+                stream.getFD().sync();
+            }
+            Files.move(temp.toPath(),snapshotFile().toPath(),StandardCopyOption.REPLACE_EXISTING);
+        }catch(Exception ex){
+            // Cache failure never prevents a successful live Firebase load.
+            temp.delete();
+        }
+    }
+    private void readCachedSnapshot(){
+        File file=snapshotFile();
+        if(!file.isFile()||file.length()>8_000_000||file.length()==0)return;
+        try{
+            byte[] raw=Files.readAllBytes(file.toPath());
+            JSONObject snapshot=new JSONObject(new String(raw,StandardCharsets.UTF_8));
+            List<Map<String,Object>> p=decodeCachedCollection(snapshot.getJSONArray("players"));
+            List<Map<String,Object>> r=decodeCachedCollection(snapshot.getJSONArray("rounds"));
+            List<Map<String,Object>> ss=decodeCachedCollection(snapshot.getJSONArray("sessions"));
+            ui.post(()->{
+                if(running){
+                    listener.dataUpdated(p,r,ss);
+                    listener.notice("Showing saved scores. Checking live updates…");
+                }
+            });
+        }catch(Exception ex){
+            // A corrupt or incompatible snapshot is ignored, not interpreted as empty data.
+            file.delete();
+        }
+    }
+    @SuppressWarnings("unchecked")
+    private List<Map<String,Object>> decodeCachedCollection(JSONArray json) throws Exception{
+        List<Map<String,Object>> out=new ArrayList<>();
+        for(int i=0;i<json.length();i++){
+            Object row=unwrapCached(json.get(i));
+            if(!(row instanceof Map))throw new IOException("Invalid cached collection");
+            out.add((Map<String,Object>)row);
+        }
+        return out;
+    }
+    private Object unwrapCached(Object value) throws Exception{
+        if(value==null||value==JSONObject.NULL)return null;
+        if(value instanceof JSONArray){
+            JSONArray arr=(JSONArray)value;
+            List<Object> decoded=new ArrayList<>();
+            for(int i=0;i<arr.length();i++)decoded.add(unwrapCached(arr.get(i)));
+            return decoded;
+        }
+        if(value instanceof JSONObject){
+            JSONObject obj=(JSONObject)value;
+            Map<String,Object> decoded=new LinkedHashMap<>();
+            Iterator<String> keys=obj.keys();
+            while(keys.hasNext()){
+                String key=keys.next();
+                decoded.put(key,unwrapCached(obj.get(key)));
+            }
+            return decoded;
+        }
+        return value;
     }
     private List<Map<String,Object>> fetchCollection(String name) throws Exception {
         ArrayList<Map<String,Object>> result=new ArrayList<>();

@@ -82,9 +82,12 @@ public final class NativeImageShare {
             p.setTextAlign(align);
             p.setStyle(Paint.Style.FILL);
             String render=value==null?"":value;
+            while(p.measureText(render)>maximum && p.getTextSize()>18)
+                p.setTextSize(Math.max(18,p.getTextSize()-1));
             while(render.length()>1 && p.measureText(render)>maximum)
                 render=render.substring(0,render.length()-1);
-            if(value!=null && !render.equals(value) && render.length()>2)render=render.substring(0,render.length()-1)+"…";
+            if(value!=null && !render.equals(value) && render.length()>2)
+                render=render.substring(0,render.length()-1)+"…";
             canvas.drawText(render,x,base,p);
         }
         void header(String title,String subtitle){
@@ -119,34 +122,39 @@ public final class NativeImageShare {
         RENDERER.execute(()->renderRound(activity,date,hukum,result,bid,snapshot));
     }
     private static void renderRound(Activity activity,String date,String hukum,String result,int bid,List<ScoreRow> rows){
-        if(rows==null)rows=Collections.emptyList();
-        int playerCount=Math.min(rows.size(),45);
-        int details=255;
-        int scores=94+playerCount*75;
-        Art card=new Art(370+details+scores+125);
-        card.header("Round Result","📅  "+date);
-        int t=card.y;
-        card.sectionStart("ROUND DETAILS",details);
-        card.draw("♛  Hukum: "+hukum,PAD+32,t+105,32,WHITE,true,Paint.Align.LEFT,530);
-        boolean win="win".equals(result);
-        card.rect(RIGHT-268,t+70,RIGHT-30,t+129,16,win?0xFF1D503B:0xFF572B35);
-        card.draw(win?"HUKUM WIN ✓":"HUKUM LOSE ✕",RIGHT-149,t+108,26,win?GREEN:RED,true,Paint.Align.CENTER,225);
-        card.line(PAD+32,t+152,RIGHT-32,LINE);
-        card.draw("💰  Bid",PAD+32,t+203,28,WHITE,false,Paint.Align.LEFT,450);
-        card.draw(bid+" points",RIGHT-32,t+203,28,GOLD,true,Paint.Align.RIGHT,280);
-        card.y=t+details+25;
-
-        t=card.y;
-        card.sectionStart("SCORE CHANGES  •  "+playerCount+" PLAYERS",scores);
-        for(int i=0;i<playerCount;i++){
-            ScoreRow player=rows.get(i);
-            String symbol="hukum".equals(player.role)?"♛":("partner".equals(player.role)?"◆":"◎");
-            card.row(symbol+"  "+player.name,score(player.delta),
-                    player.delta>0?GREEN:player.delta<0?RED:MUTED,51,t+69+i*75,75);
-        }
-        card.y=t+scores;
-        card.foot();
-        deliver(activity,card.bitmap,"3 Patti PRO - Round Result");
+        try{
+            final int perPage=26;
+            final int pages=Math.max(1,(rows.size()+perPage-1)/perPage);
+            List<Uri> images=new ArrayList<>();
+            for(int page=0;page<pages;page++){
+                int start=page*perPage,count=Math.min(perPage,rows.size()-start);
+                int details=255,scores=94+count*75;
+                Art card=new Art(370+details+scores+125);
+                card.header(pages>1?"Round Result  ·  "+(page+1)+"/"+pages:"Round Result","📅  "+date);
+                int t=card.y;card.sectionStart("ROUND DETAILS",details);
+                card.draw("♛  Hukum: "+hukum,PAD+32,t+105,32,WHITE,true,Paint.Align.LEFT,530);
+                boolean victory="win".equals(result);
+                card.rect(RIGHT-268,t+70,RIGHT-30,t+129,16,victory?0xFF1D503B:0xFF572B35);
+                card.draw(victory?"HUKUM WIN ✓":"HUKUM LOSE ✕",RIGHT-149,t+108,26,
+                        victory?GREEN:RED,true,Paint.Align.CENTER,225);
+                card.line(PAD+32,t+152,RIGHT-32,LINE);
+                card.draw("💰  Bid",PAD+32,t+203,28,WHITE,false,Paint.Align.LEFT,450);
+                card.draw(bid+" points",RIGHT-32,t+203,28,GOLD,true,Paint.Align.RIGHT,280);
+                card.y=t+details+25;
+                t=card.y;card.sectionStart("SCORE CHANGES  •  "+rows.size()+" PLAYERS",scores);
+                for(int i=0;i<count;i++){
+                    ScoreRow person=rows.get(start+i);
+                    String symbol="hukum".equals(person.role)?"♛":
+                            "partner".equals(person.role)?"◆":"◎";
+                    card.row(symbol+"  "+person.name,score(person.delta),
+                            person.delta>0?GREEN:person.delta<0?RED:MUTED,
+                            51,t+69+i*75,75);
+                }
+                card.y=t+scores;card.foot();
+                images.add(writePng(activity,card.bitmap));
+            }
+            openShare(activity,images,"3 Patti PRO - Round Result");
+        }catch(Exception ex){errorToast(activity,ex);}
     }
 
     public static void leaderboard(Activity activity,String filter,List<RankRow> rows){
@@ -154,25 +162,33 @@ public final class NativeImageShare {
         RENDERER.execute(()->renderLeaderboard(activity,filter,snapshot));
     }
     private static void renderLeaderboard(Activity activity,String filter,List<RankRow> rows){
-        if(rows==null)rows=Collections.emptyList();
-        int count=Math.min(rows.size(),65);
-        int section=90+count*105;
-        Art card=new Art(370+section+135);
-        card.header("Rankings","📅  "+filter);
-        int t=card.y;card.sectionStart("LEADERBOARD  •  "+count+" PLAYERS",section);
-        for(int i=0;i<count;i++){
-            RankRow r=rows.get(i);
-            int at=t+100+i*105;
-            String medal=i==0?"🥇":i==1?"🥈":i==2?"🥉":"#"+(i+1);
-            card.draw(medal+"  "+r.name,PAD+32,at,31,WHITE,true,Paint.Align.LEFT,550);
-            card.draw(score(r.score),RIGHT-32,at,32,r.score>=0?GREEN:RED,true,Paint.Align.RIGHT,215);
-            card.draw(r.rounds+"R    "+r.wins+"W/"+r.losses+"L     ♛"+r.hukum+"    ◆"+r.partners,
-                    PAD+95,at+37,23,MUTED,false,Paint.Align.LEFT,720);
-            card.line(PAD+32,at+49,RIGHT-32,0x24FFFFFF);
-        }
-        card.y=t+section;
-        card.foot();
-        deliver(activity,card.bitmap,"3 Patti PRO - Rankings");
+        try {
+            final int pageSize=30;
+            final int pages=Math.max(1,(rows.size()+pageSize-1)/pageSize);
+            List<Uri> images=new ArrayList<>();
+            for(int page=0;page<pages;page++) {
+                int start=page*pageSize, count=Math.min(pageSize,rows.size()-start);
+                int section=90+count*105;
+                Art card=new Art(370+section+135);
+                card.header(pages>1?"Rankings  ·  "+(page+1)+"/"+pages:"Rankings",
+                        "📅  "+filter);
+                int t=card.y;
+                card.sectionStart("LEADERBOARD  •  "+rows.size()+" PLAYERS",section);
+                for(int i=0;i<count;i++){
+                    RankRow r=rows.get(start+i);
+                    int at=t+100+i*105,position=start+i;
+                    String medal=position==0?"🥇":position==1?"🥈":position==2?"🥉":"#"+(position+1);
+                    card.draw(medal+"  "+r.name,PAD+32,at,31,WHITE,true,Paint.Align.LEFT,550);
+                    card.draw(score(r.score),RIGHT-32,at,32,r.score>=0?GREEN:RED,true,Paint.Align.RIGHT,215);
+                    card.draw(r.rounds+"R    "+r.wins+"W/"+r.losses+"L     ♛"+r.hukum+"    ◆"+r.partners,
+                            PAD+95,at+37,23,MUTED,false,Paint.Align.LEFT,720);
+                    card.line(PAD+32,at+49,RIGHT-32,0x24FFFFFF);
+                }
+                card.y=t+section;card.foot();
+                images.add(writePng(activity,card.bitmap));
+            }
+            openShare(activity,images,"3 Patti PRO - Rankings");
+        }catch(Exception error){errorToast(activity,error);}
     }
 
     public static void session(Activity activity,String title,String date,
@@ -182,36 +198,80 @@ public final class NativeImageShare {
         RENDERER.execute(()->renderSession(activity,title,date,badges,scores));
     }
     private static void renderSession(Activity activity,String title,String date,
-                               List<AwardRow> awards,List<RankRow> ranked){
-        if(awards==null)awards=Collections.emptyList();
-        if(ranked==null)ranked=Collections.emptyList();
-        int awardsCount=Math.min(awards.size(),25),count=Math.min(ranked.size(),65);
-        int awardsHeight=awardsCount==0?0:85+awardsCount*75;
-        int ranksHeight=90+count*86;
-        Art card=new Art(370+awardsHeight+ranksHeight+155);
-        card.header("Session Summary","📅  "+date);
-        if(awardsCount>0) {
-            int t=card.y;
-            card.sectionStart("🏆  SESSION AWARDS",awardsHeight);
-            for(int i=0;i<awardsCount;i++){
-                AwardRow a=awards.get(i);
-                card.row(a.title,a.value,GOLD,55,t+63+i*75,75);
+                                List<AwardRow> awards,List<RankRow> ranked){
+        try{
+            List<Uri> images=new ArrayList<>();
+            int awardPosition=0,rankPosition=0,page=0;
+            // 12 award and 14 ranking records per first page; subsequent pages
+            // cover every remaining entry instead of silently discarding them.
+            do {
+                int awardCount=Math.min(12,awards.size()-awardPosition);
+                boolean moreAwards=awardPosition+awardCount<awards.size();
+                int rankCapacity=awardCount>0?14:28;
+                int rankCount=moreAwards?0:Math.min(rankCapacity,ranked.size()-rankPosition);
+                int awardsHeight=awardCount==0?0:85+awardCount*75;
+                int rankHeight=90+rankCount*86;
+                Art card=new Art(370+awardsHeight+rankHeight+155);
+                card.header(page==0?"Session Summary":"Session Summary  •  Page "+(page+1),"📅  "+date);
+                if(awardCount>0){
+                    int at=card.y;card.sectionStart("🏆  SESSION AWARDS",awardsHeight);
+                    for(int i=0;i<awardCount;i++){
+                        AwardRow award=awards.get(awardPosition+i);
+                        card.row(award.title,award.value,GOLD,55,at+63+i*75,75);
+                    }
+                    card.y=at+awardsHeight+26;
+                }
+                int at=card.y;
+                card.sectionStart("🏆  LEADERBOARD  •  "+ranked.size()+" PLAYERS",rankHeight);
+                for(int i=0;i<rankCount;i++){
+                    RankRow person=ranked.get(rankPosition+i);
+                    int top=at+105+i*86,position=rankPosition+i;
+                    String prefix=position==0?"🥇":position==1?"🥈":position==2?"🥉":"#"+(position+1);
+                    card.draw(prefix+"  "+person.name,PAD+35,top,29,WHITE,true,Paint.Align.LEFT,530);
+                    card.draw(score(person.score),RIGHT-33,top,29,
+                            person.score>=0?GREEN:RED,true,Paint.Align.RIGHT,225);
+                    card.line(PAD+35,top+17,RIGHT-35,0x18FFFFFF);
+                }
+                card.y=at+rankHeight;card.foot();
+                images.add(writePng(activity,card.bitmap));
+                awardPosition+=awardCount;rankPosition+=rankCount;page++;
+            }while(awardPosition<awards.size()||rankPosition<ranked.size());
+            openShare(activity,images,"3 Patti PRO - "+title);
+        }catch(Exception error){errorToast(activity,error);}
+    }
+
+    private static Uri writePng(Activity activity,Bitmap bitmap) throws Exception{
+        try {
+            File dir=new File(activity.getCacheDir(),"share");
+            if(!dir.exists()&&!dir.mkdirs())throw new IOException("Could not create image folder");
+            File file=new File(dir,"3patti-"+System.nanoTime()+".png");
+            try(FileOutputStream output=new FileOutputStream(file)){
+                if(!bitmap.compress(Bitmap.CompressFormat.PNG,100,output))
+                    throw new IOException("PNG could not be saved");
             }
-            card.y=t+awardsHeight+26;
-        }
-        int t=card.y;
-        card.sectionStart("🏆  LEADERBOARD",ranksHeight);
-        for(int i=0;i<count;i++){
-            RankRow p=ranked.get(i);
-            int top=t+105+i*86;
-            String prefix=i==0?"🥇":i==1?"🥈":i==2?"🥉":"#"+(i+1);
-            card.draw(prefix+"  "+p.name,PAD+35,top,29,WHITE,true,Paint.Align.LEFT,530);
-            card.draw(score(p.score),RIGHT-33,top,29,p.score>=0?GREEN:RED,true,Paint.Align.RIGHT,225);
-            card.line(PAD+35,top+17,RIGHT-35,0x18FFFFFF);
-        }
-        card.y=t+ranksHeight;
-        card.foot();
-        deliver(activity,card.bitmap,"3 Patti PRO - "+title);
+            return FileProvider.getUriForFile(activity,activity.getPackageName()+".fileprovider",file);
+        }finally {bitmap.recycle();}
+    }
+    private static void openShare(Activity activity,List<Uri> images,String title){
+        if(images.isEmpty())return;
+        activity.runOnUiThread(()->{
+            if(activity.isFinishing()||activity.isDestroyed())return;
+            Intent intent=new Intent(images.size()==1?Intent.ACTION_SEND:Intent.ACTION_SEND_MULTIPLE);
+            intent.setType("image/png");
+            if(images.size()==1)intent.putExtra(Intent.EXTRA_STREAM,images.get(0));
+            else intent.putParcelableArrayListExtra(Intent.EXTRA_STREAM,new ArrayList<>(images));
+            ClipData clips=ClipData.newRawUri(title,images.get(0));
+            for(int i=1;i<images.size();i++)clips.addItem(new ClipData.Item(images.get(i)));
+            intent.setClipData(clips);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            activity.startActivity(Intent.createChooser(intent,title));
+        });
+    }
+    private static void errorToast(Activity activity,Exception ex){
+        activity.runOnUiThread(()->{
+            if(!activity.isFinishing())android.widget.Toast.makeText(activity,
+                    "Image export failed: "+ex.getMessage(),android.widget.Toast.LENGTH_LONG).show();
+        });
     }
 
     private static void deliver(Activity activity,Bitmap bitmap,String title){

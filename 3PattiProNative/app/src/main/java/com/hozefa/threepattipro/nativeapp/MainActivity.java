@@ -206,6 +206,17 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         }
         return n;
     }
+    private int winningStreak(String pid,List<Map<String,Object>> source){
+        int streak=0;
+        for(Map<String,Object> round:source){
+            if(!strings(round.get("playerIds")).contains(pid))continue;
+            boolean onHukumSide=pid.equals(str(round,"hukumId"))||
+                    strings(round.get("partnerIds")).contains(pid);
+            if("win".equals(str(round,"result"))==onHukumSide)streak++;
+            else break;
+        }
+        return streak;
+    }
     private boolean idIsHukum(Map<String,Object> r,String pid) {return str(r,"hukumId").equals(pid);}
     private TextView text(String label,int size,int color,boolean bold) {
         TextView t=new TextView(this);
@@ -531,7 +542,16 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             }
             case "month":start.set(java.util.Calendar.DAY_OF_MONTH,1);min=start.getTimeInMillis();break;
             case "year":start.set(java.util.Calendar.DAY_OF_YEAR,1);min=start.getTimeInMillis();break;
-            case "custom":min=customStart;max=customEnd>0?customEnd+86400000L:Long.MAX_VALUE;break;
+            case "custom":{
+                min=customStart;
+                if(customEnd>0){
+                    java.util.Calendar e=java.util.Calendar.getInstance();
+                    e.setTimeInMillis(customEnd);
+                    e.add(java.util.Calendar.DAY_OF_YEAR,1);
+                    max=e.getTimeInMillis();
+                }
+                break;
+            }
             default:return gameRounds();
         }
         final long from=min,to=max;
@@ -579,8 +599,15 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         android.app.DatePickerDialog dialog=new android.app.DatePickerDialog(this,(picker,year,month,day)->{
             java.util.Calendar picked=java.util.Calendar.getInstance();
             picked.clear();picked.set(year,month,day);
-            if(isStart)customStart=picked.getTimeInMillis();
-            else customEnd=picked.getTimeInMillis();
+            long value=picked.getTimeInMillis();
+            if(isStart&&customEnd>0&&value>customEnd){
+                Toast.makeText(this,"Start date must be before end date",Toast.LENGTH_LONG).show();return;
+            }
+            if(!isStart&&customStart>0&&value<customStart){
+                Toast.makeText(this,"End date must be after start date",Toast.LENGTH_LONG).show();return;
+            }
+            if(isStart)customStart=value;
+            else customEnd=value;
             render(false);
         },c.get(java.util.Calendar.YEAR),c.get(java.util.Calendar.MONTH),c.get(java.util.Calendar.DAY_OF_MONTH));
         dialog.show();
@@ -594,6 +621,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         TextView back=button("←  Back to Ranks",false,()->{tab=3;render(true);});
         content.addView(back);gap(content,16);
         title(content,"♛ "+str(target,"name"),"Player profile · Detailed statistics");
+        int streak=winningStreak(pid,filteredRounds());
+        if(streak>=2){content.addView(text("🔥  "+streak+"-round winning streak",14,GOLD,true));gap(content,12);}
         dateFilterBar(content);
         List<Map<String,Object>> filtered=filteredRounds();
         List<Map<String,Object>> individual=new ArrayList<>();
@@ -624,7 +653,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             }
         }
         LinearLayout stats=panel();
-        line(stats,"Rank",String.valueOf(Math.max(1,rankedFor(filtered).indexOf(target)+1)),GOLD);
+        int rankIndex=rankedFor(filtered).indexOf(target);
+        line(stats,"Rank",rankIndex<0?"—":"#"+(rankIndex+1),GOLD);
         line(stats,"Total Score",(totalScore>=0?"+":"")+totalScore,totalScore>=0?GREEN:RED);
         line(stats,"Rounds",String.valueOf(individual.size()),WHITE);
         line(stats,"Wins / Losses",wins+"W / "+losses+"L",WHITE);
@@ -712,7 +742,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         LinearLayout middle=column();
         middle.addView(text(str(p,"name"),16,WHITE,true));gap(middle,5);
         List<Map<String,Object>> source=(tab==3 && currentRankData!=null)?currentRankData:gameRounds();
-        middle.addView(text(played(id(p),source)+" rounds played",12,MUTED,false));
+        int streak=winningStreak(id(p),source);
+        middle.addView(text(played(id(p),source)+" played"+
+                (streak>=2?"  ·  🔥 "+streak+" streak":""),12,MUTED,false));
         r.addView(middle,new LinearLayout.LayoutParams(0,-2,1));
         int score=scoreOf(id(p),source);
         r.addView(text((score>=0?"+":"")+score,19,score>=0?GREEN:RED,true));
@@ -1147,39 +1179,68 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 .show();
     }
     private void showSessionSummary(Map<String,Object> session) {
-        StringBuilder message=new StringBuilder();
-        message.append("Date: ").append(when(session.get("startTime")))
-                .append("\nEnded: ").append(session.get("endTime")==null?"Active":when(session.get("endTime")))
-                .append("\nRounds: ").append(num(session.get("totalRounds")));
-        long dur=session.get("duration") instanceof Number?
-                ((Number)session.get("duration")).longValue():0L;
-        if(dur>0)message.append("\nDuration: ").append(dur/3600000).append("h ").append((dur/60000)%60).append("m");
+        ScrollView scroller=new ScrollView(this);
+        scroller.setFillViewport(true);
+        LinearLayout display=column();pad(display,18,14,18,18);
+        scroller.addView(display);
+        display.addView(text("♛  "+str(session,"sessionName"),23,GOLD,true));
+        gap(display,8);
+        display.addView(text("Complete Session Overview",12,MUTED,true));
+        gap(display,20);
+
+        LinearLayout overview=panel();
+        overview.addView(text("OVERVIEW",12,GOLD,true));gap(overview,12);
+        line(overview,"Started",when(session.get("startTime")),WHITE);
+        line(overview,"Ended",session.get("endTime")==null?"Active":when(session.get("endTime")),WHITE);
+        line(overview,"Rounds",String.valueOf(num(session.get("totalRounds"))),GOLD);
+        long length=session.get("duration") instanceof Number?
+                ((Number)session.get("duration")).longValue():0;
+        if(length>0)
+            line(overview,"Duration",(length/3600000)+"h "+(length/60000)%60+"m",WHITE);
+        display.addView(overview);gap(display,14);
+
+        LinearLayout awards=panel();
+        awards.addView(text("🏆  SESSION AWARDS",12,GOLD,true));gap(awards,12);
         Map<String,Object> mvp=map(session.get("mvp"));
-        if(!mvp.isEmpty())message.append("\nMVP: ").append(str(mvp,"name")).append(" (").append(str(mvp,"score")).append(")");
-        Map<String,Object> best=map(session.get("bestHukum"));
-        if(!best.isEmpty())message.append("\nBest Hukum: ").append(str(best,"name")).append(" · ").append(num(best.get("winRate"))).append("%");
-        Map<String,Object> biggest=map(session.get("biggestWin"));
-        if(!biggest.isEmpty())message.append("\nBiggest Win: ").append(str(biggest,"name")).append(" +").append(str(biggest,"score"));
-        Map<String,Object> smallest=map(session.get("biggestLoss"));
-        if(!smallest.isEmpty())message.append("\nBiggest Loss: ").append(str(smallest,"name")).append(" ").append(str(smallest,"score"));
-        message.append("\n\nLEADERBOARD\n");
-        Object board=session.get("leaderboard");
-        if(board instanceof List)for(Object item:(List<?>)board) {
-            Map<String,Object> row=map(item);
-            message.append(str(row,"rank")).append(". ").append(str(row,"name"))
-                    .append("  ").append(str(row,"score")).append("\n");
-        }
+        Map<String,Object> bestHukum=map(session.get("bestHukum"));
+        Map<String,Object> top=map(session.get("biggestWin"));
+        Map<String,Object> bottom=map(session.get("biggestLoss"));
+        if(!mvp.isEmpty())line(awards,"★ MVP",str(mvp,"name")+"  +"+str(mvp,"score"),GREEN);
+        if(!bestHukum.isEmpty())line(awards,"♛ Best Hukum",
+                str(bestHukum,"name")+" · "+str(bestHukum,"winRate")+"%",GOLD);
+        if(!top.isEmpty()&&!"-".equals(str(top,"name")))
+            line(awards,"↑ Biggest Win",str(top,"name")+" +"+str(top,"score"),GREEN);
+        if(!bottom.isEmpty()&&!"-".equals(str(bottom,"name")))
+            line(awards,"↓ Biggest Loss",str(bottom,"name")+" "+str(bottom,"score"),RED);
+        String[][] labels={{"hukumKing","Hukum King"},{"hotStreak","Hot Streak"},
+                {"unlucky","Unlucky"},{"sharpPartner","Sharp Partner"},
+                {"mvp","Session MVP"},{"riskTaker","Risk Taker"}};
         Map<String,Object> badges=map(session.get("badges"));
-        for(Map.Entry<String,Object> entry:badges.entrySet()){
-            List<String> ids=strings(entry.getValue());
+        for(String[] label:labels){
+            List<String> ids=strings(badges.get(label[0]));
             if(ids.isEmpty())continue;
-            message.append("\n").append(entry.getKey()).append(": ");
-            for(String playerId:ids)message.append(nameOf(playerId)).append(" ");
+            List<String> names=new ArrayList<>();
+            for(String pid:ids)names.add(nameOf(pid));
+            line(awards,label[1],android.text.TextUtils.join(", ",names),GOLD);
         }
-        String detail=message.toString();
-        new AlertDialog.Builder(this).setTitle(str(session,"sessionName"))
-                .setMessage(detail)
-                .setNeutralButton("Share Image", (d,w)->shareSession(session))
+        display.addView(awards);gap(display,14);
+        LinearLayout leaderboard=panel();
+        leaderboard.addView(text("🏅  SESSION LEADERBOARD",12,GOLD,true));gap(leaderboard,12);
+        Object items=session.get("leaderboard");
+        int place=0;
+        if(items instanceof List)for(Object item:(List<?>)items) {
+            Map<String,Object> record=map(item);
+            int points=num(record.get("score"));
+            place++;
+            String name=str(record,"name");
+            line(leaderboard,(place<=3?new String[]{"🥇","🥈","🥉"}[place-1]:"#"+place)+"  "+name,
+                    (points>=0?"+":"")+points,points>0?GREEN:points<0?RED:MUTED);
+        }
+        if(place==0)leaderboard.addView(text("No rounds recorded",14,MUTED,false));
+        display.addView(leaderboard);
+        new AlertDialog.Builder(this).setTitle("SESSION SUMMARY")
+                .setView(scroller)
+                .setNeutralButton("Share Image",(dialog,which)->shareSession(session))
                 .setPositiveButton("Close",null).show();
     }
     private void confirmPlayerStatus(Map<String,Object> p,boolean activate) {
@@ -1233,11 +1294,27 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 }).show();
     }
     private void endSessionDialog() {
-        Map<String,Object> s=activeSession();if(s==null)return;
+        Map<String,Object> active=activeSession();
+        if(active==null||busy)return;
+        long since=time(active.get("startTime"));
+        int count=0;
+        for(Map<String,Object> round:gameRounds()){
+            long t=time(round.get("timestamp"));
+            if(t>=since&&t<=System.currentTimeMillis())count++;
+        }
+        if(count==0){
+            new AlertDialog.Builder(this).setTitle("End empty session?")
+                    .setMessage("No rounds were played in this session. End anyway? Your existing rounds remain unchanged.")
+                    .setNegativeButton("Keep Active",null)
+                    .setPositiveButton("End Session",(d,w)->api.patchDocument(
+                            "sessions",id(active),FirebaseGateway.map("endTime",FirebaseGateway.now()),
+                            "Empty session ended")).show();
+            return;
+        }
         new AlertDialog.Builder(this).setTitle("End Session?")
-                .setMessage("Final scores will be saved to this session. No player or round data will be deleted.")
+                .setMessage(count+" rounds will be summarized. No player or round data will be deleted.")
                 .setNegativeButton("Cancel",null)
-                .setPositiveButton("End Session",(d,w)->completeSession(s)).show();
+                .setPositiveButton("End Session",(d,w)->completeSession(active)).show();
     }
     @SuppressWarnings("unchecked")
     private List<String> stringsMutable(Map<String,Object> owner,String key) {

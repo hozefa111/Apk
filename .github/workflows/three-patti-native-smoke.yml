@@ -1,40 +1,64 @@
-name: Native 3 Patti PRO Emulator Smoke
+name: 3 Patti PRO Native Android Smoke
 
 on:
   push:
     branches: [three-patti-pro-native]
-    paths: ['.github/workflows/three-patti-native-smoke.yml']
+    paths:
+      - '3PattiProNative/**'
+      - '.github/workflows/three-patti-native-smoke.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - name: Download previously built native APK
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
-          run-id: 38851686016
-          github-token: ${{ github.token }}
-          name: 3-Patti-PRO-NATIVE-APK
-          path: native-apk
-      - name: Android emulator launch and crash check
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build CURRENT source and run scoring tests
+        run: gradle --no-daemon --project-dir 3PattiProNative testDebugUnitTest assembleDebug
+      - name: Boot Android and exercise native navigation
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 34
-          target: google_apis
+          api-level: 29
           arch: x86_64
-          profile: pixel_4
+          profile: pixel_2
           disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
           script: |
-            adb install native-apk/app-debug.apk
-            adb shell am start -n com.hozefa.threepattipro.nativeapp/.MainActivity
-            sleep 22
+            set -euo pipefail
+            adb install 3PattiProNative/app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -W -n com.hozefa.threepattipro.nativeapp/.MainActivity
+            sleep 6
             adb shell pidof com.hozefa.threepattipro.nativeapp
-            adb shell uiautomator dump /sdcard/hierarchy.xml >/dev/null
-            adb shell cat /sdcard/hierarchy.xml | grep -q '3 PATTI PRO'
-            adb shell cat /sdcard/hierarchy.xml | grep -q 'HOME\|Home\|YOUR TABLE\|Your table'
-            echo 'Android native app launch verified'
+            adb shell uiautomator dump /sdcard/window.xml >/dev/null
+            adb exec-out cat /sdcard/window.xml > window.xml
+            python3 - <<'PY'
+            import re, subprocess, xml.etree.ElementTree as ET
+            def tap(label):
+                subprocess.run(['adb','shell','uiautomator','dump','/sdcard/window.xml'],capture_output=True,check=True)
+                xml=subprocess.check_output(['adb','exec-out','cat','/sdcard/window.xml']).decode()
+                for item in ET.fromstring(xml).iter('node'):
+                    if item.attrib.get('text') == label:
+                        nums=list(map(int,re.findall(r'\d+',item.attrib.get('bounds',''))))
+                        if len(nums)!=4: continue
+                        x=(nums[0]+nums[2])//2;y=(nums[1]+nums[3])//2
+                        subprocess.run(['adb','shell','input','tap',str(x),str(y)],check=True)
+                        return
+                raise AssertionError('Missing native navigation label: '+label)
+            tap('Ranks')
+            subprocess.run(['adb','shell','pidof','com.hozefa.threepattipro.nativeapp'],check=True)
+            tap('Home')
+            subprocess.run(['adb','shell','pidof','com.hozefa.threepattipro.nativeapp'],check=True)
+            print('Native install, launch, Ranks and Home taps passed')
+            PY
+            echo "This is an offline UI smoke check, not an Auth/Firestore integration test"
