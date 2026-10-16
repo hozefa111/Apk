@@ -29,6 +29,8 @@ jobs:
       - run: gradle --no-daemon :app:assembleDebug
       - name: Create sample video
         run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
           ffmpeg -nostdin -hide_banner -loglevel error -f lavfi -i testsrc=size=320x240:rate=15 -t 3 -c:v mpeg4 -q:v 8 -pix_fmt yuv420p -y smoke.mp4
       - name: Launch on Android emulator
         uses: reactivecircus/android-emulator-runner@v2
