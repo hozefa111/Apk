@@ -221,10 +221,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         b.setForeground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x40FFFFFF),null,null));
         b.setClickable(true);
         b.setFocusable(true);
-        b.setOnClickListener(v->{
-            if(busy){Toast.makeText(this,"Saving in progress. Please try again.",Toast.LENGTH_SHORT).show();return;}
-            if(action!=null) action.run();
-        });
+        b.setOnClickListener(v->{if(action!=null) action.run();});
         return b;
     }
     private TextView chip(String name,boolean selected,boolean gold,Runnable action) {
@@ -278,7 +275,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         TextView appName=text("♠  3 PATTI PRO",21,GOLD,true);
         heading.addView(appName);
         gap(heading,5);
-        heading.addView(text("NATIVE SCORE TRACKER",9,MUTED,true));
+        heading.addView(text("SCORE TRACKER",9,MUTED,true));
         toolbar.addView(heading,new LinearLayout.LayoutParams(0,-2,1));
         TextView status=text(busy?"SAVING…":loggedIn?"ADMIN":"LOGIN",11,loggedIn?GREEN:GOLD,true);
         status.setGravity(Gravity.CENTER);pad(status,12,10,12,10);
@@ -455,16 +452,33 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             int score=scoreOf(id,rounds);
             top.addView(text((score>=0?"+":"")+score,17,score>=0?GREEN:RED,true));
             card.addView(top);
+            card.setClickable(true);
+            card.setFocusable(true);
+            card.setOnClickListener(v->playerActions(p));
             if(loggedIn) {
-                gap(card,12);
-                card.addView(button("Edit Name",false,()->editPlayerDialog(p)));
-                gap(card,8);
-                card.addView(button(active?"Bench Player":"Restore Player",false,()->confirmPlayerStatus(p,!active)));
-                gap(card,8);
-                card.addView(button("Remove Player",false,()->confirmRemove("players",p,"player")));
+                gap(card,9);
+                card.addView(text("Tap for player options  ›",12,GOLD,false));
             }
             content.addView(card);gap(content,12);
         }
+    }
+    private void playerActions(Map<String,Object> player) {
+        if(!loggedIn) {
+            profileId=id(player);tab=5;render(true);
+            return;
+        }
+        boolean active=!Boolean.FALSE.equals(player.get("active"));
+        String[] options={"View Profile","Edit Name",active?"Bench Player":"Restore Player","Remove Player"};
+        new AlertDialog.Builder(this)
+                .setTitle(str(player,"name"))
+                .setItems(options,(dialog,choice)->{
+                    switch(choice) {
+                        case 0:profileId=id(player);tab=5;render(true);break;
+                        case 1:editPlayerDialog(player);break;
+                        case 2:confirmPlayerStatus(player,!active);break;
+                        case 3:confirmRemove("players",player,"player");break;
+                    }
+                }).setNegativeButton("Close",null).show();
     }
     private String initials(String name) {
         String[] parts=name.trim().split("\\s+");
@@ -589,8 +603,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 if(other.equals(pid))continue;
                 boolean otherSide=other.equals(str(r,"hukumId"))||strings(r.get("partnerIds")).contains(other);
                 int[] h=head.computeIfAbsent(other,k->new int[4]);
-                if(otherSide==(roleH||roleP))h[0]++;else h[1]++;
-                if(win)h[2]++;else h[3]++;
+                if(otherSide==(roleH||roleP))h[0]++;
+                else {h[1]++;if(win)h[2]++;else h[3]++;}
             }
         }
         LinearLayout stats=panel();
@@ -746,14 +760,10 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 line(card,"Rounds",String.valueOf(num(s.get("totalRounds"))),GOLD);
                 Map<String,Object> mvp=map(s.get("mvp"));
                 if(!mvp.isEmpty())line(card,"MVP",str(mvp,"name"),GREEN);
-                gap(card,8);
-                card.addView(button("View Session Summary",false,()->showSessionSummary(s)));
-                if(loggedIn) {
-                    gap(card,8);
-                    card.addView(button("Edit Session Name",false,()->editSessionDialog(s)));
-                    gap(card,8);
-                    card.addView(button("Delete Session",false,()->confirmRemove("sessions",s,"session")));
-                }
+                gap(card,9);
+                card.addView(text(loggedIn?"Tap for session options  ›":"Tap to view summary  ›",12,GOLD,false));
+                card.setClickable(true);
+                card.setOnClickListener(v->sessionActions(s));
                 content.addView(card);gap(content,12);
             }
             if(count<sessions.size()) {
@@ -763,33 +773,57 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             }
         }
     }
+    private void sessionActions(Map<String,Object> session) {
+        if(!loggedIn){showSessionSummary(session);return;}
+        new AlertDialog.Builder(this)
+                .setTitle(str(session,"sessionName"))
+                .setItems(new String[]{"View Summary","Share Summary Image","Edit Session Name","Delete Session"},
+                        (dialog,which)->{
+                            switch(which){
+                                case 0:showSessionSummary(session);break;
+                                case 1:shareSession(session);break;
+                                case 2:editSessionDialog(session);break;
+                                case 3:confirmRemove("sessions",session,"session");break;
+                            }
+                        }).setNegativeButton("Close",null).show();
+    }
     private void addRoundCard(Map<String,Object> r) {
         LinearLayout card=panel();
-        String outcome=str(r,"result");
-        if("settlement".equals(str(r,"type"))) {
-            card.addView(text("↔  Score settlement",16,BLUE,true));
-        } else {
-            LinearLayout row=row();
-            TextView main=text("♛  "+str(r,"hukumName"),16,WHITE,true);
-            row.addView(main,new LinearLayout.LayoutParams(0,-2,1));
-            TextView badge=text("win".equals(outcome)?"WIN":"LOSE",12,"win".equals(outcome)?GREEN:RED,true);
-            badge.setGravity(Gravity.CENTER);pad(badge,10,7,10,7);
-            badge.setBackground(shape("win".equals(outcome)?0xFF1C443B:0xFF492633,10,0));
-            row.addView(badge);card.addView(row);gap(card,10);
-            line(card,"Bid",String.valueOf(num(r.get("bid"))),GOLD);
-            String party=strings(r.get("partnerNames")).toString().replace("[","").replace("]","");
-            line(card,"Partner",party.isEmpty()?"—":party,WHITE);
-        }
-        line(card,"Played on",when(r.get("timestamp")),MUTED);
+        LinearLayout head=row();
+        boolean victory="win".equals(str(r,"result"));
+        TextView title=text("♛  "+str(r,"hukumName"),15,WHITE,true);
+        title.setSingleLine(true);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        head.addView(title,new LinearLayout.LayoutParams(0,dp(36),1));
+        TextView flag=text(victory?"WIN":"LOSE",12,victory?GREEN:RED,true);
+        flag.setGravity(Gravity.CENTER);
+        flag.setBackground(shape(victory?0xFF1C443B:0xFF492633,9,0));
+        pad(flag,10,7,10,7);
+        head.addView(flag);
+        card.addView(head);gap(card,5);
+        card.addView(text("Bid "+str(r,"bid")+"  •  "+when(r.get("timestamp")),12,MUTED,false));
         gap(card,8);
-        card.addView(button("Round Details",false,()->roundDetails(r)));
-        gap(card,8);
-        card.addView(button("Share Round",false,()->shareRound(r)));
-        if(loggedIn) {
-            gap(card,8);
-            card.addView(button("Delete Round",false,()->confirmRemove("rounds",r,"round")));
-        }
-        content.addView(card);gap(content,12);
+        String team=android.text.TextUtils.join(", ",strings(r.get("partnerNames")));
+        card.addView(text("Partners: "+(team.isEmpty()?"—":team),12,MUTED,false));
+        card.setClickable(true);card.setFocusable(true);
+        card.setForeground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(0x25FFFFFF),null,null));
+        card.setOnClickListener(v->roundActions(r));
+        content.addView(card);gap(content,10);
+    }
+    private void roundActions(Map<String,Object> round) {
+        AlertDialog.Builder dialog=new AlertDialog.Builder(this)
+                .setTitle("Round · "+when(round.get("timestamp")))
+                .setMessage("Hukum: "+str(round,"hukumName")+
+                        "\nBid: "+str(round,"bid")+
+                        "\nResult: "+str(round,"result")+
+                        "\nPartners: "+android.text.TextUtils.join(", ",strings(round.get("partnerNames")))+
+                        "\nNon-partners: "+android.text.TextUtils.join(", ",strings(round.get("nonPartnerNames"))))
+                .setPositiveButton("Details",(d,w)->roundDetails(round))
+                .setNeutralButton("Share Image",(d,w)->shareRound(round));
+        if(loggedIn)dialog.setNegativeButton("Delete",(d,w)->confirmRemove("rounds",round,"round"));
+        else dialog.setNegativeButton("Close",null);
+        dialog.show();
     }
     private void roundPage() {
         if(!loggedIn){empty("Admin login is required to add rounds.");return;}
@@ -817,7 +851,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
 
         label(content,"02  •  Bid amount");
         LinearLayout bidding=panel();
-        TextView current=text("₹  "+bid,26,GOLD,true);bidding.addView(current);gap(bidding,12);
+        TextView current=text("Bid  "+bid,26,GOLD,true);bidding.addView(current);gap(bidding,12);
         LinearLayout bidRow=row();
         bidRow.addView(button("− 5",false,()->{bid=Math.max(155,bid-5);render(false);}),new LinearLayout.LayoutParams(0,dp(50),1));
         TextView interval=text("155 – 250",13,MUTED,false);
@@ -1162,8 +1196,22 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             String playerId=str(round,"hukumId");
             if(!stringsMutable(badges,"riskTaker").contains(playerId))stringsMutable(badges,"riskTaker").add(playerId);
         }
+        List<Map<String,Object>> streaks=new ArrayList<>();
+        for(Map<String,Object> player:players){
+            String pid=id(player);
+            int streak=0;
+            for(Map<String,Object> round:r){
+                if(!strings(round.get("playerIds")).contains(pid))continue;
+                boolean onHukumSide=pid.equals(str(round,"hukumId"))||
+                        strings(round.get("partnerIds")).contains(pid);
+                boolean won="win".equals(str(round,"result"))==onHukumSide;
+                if(won)streak++;else break;
+            }
+            if(streak>=2)streaks.add(FirebaseGateway.map("name",str(player,"name"),"streak",streak));
+        }
+        streaks.sort((a,b)->Integer.compare(num(b.get("streak")),num(a.get("streak"))));
         Map<String,Object> update=FirebaseGateway.map(
-                "bestHukum",bestHukum,"badges",badges,"streaks",new ArrayList<>(),
+                "bestHukum",bestHukum,"badges",badges,"streaks",streaks,
                 "endTime",FirebaseGateway.now(),
                 "duration",end-start,"totalRounds",r.size(),
                 "leaderboard",leaderboard,"mvp",mvp,
@@ -1241,7 +1289,6 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     @Override public void onBackPressed() {
         if(tab==5){tab=3;render(true);}
-        else if(tab==5){tab=3;render(true);}
         else if(tab!=0){tab=0;render(true);}
         else new AlertDialog.Builder(this).setTitle("Exit 3 Patti PRO?")
                 .setNegativeButton("Stay",null).setPositiveButton("Exit",(d,w)->finish()).show();

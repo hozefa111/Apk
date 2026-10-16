@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class FirebaseGateway {
     public interface Listener {
@@ -43,6 +44,7 @@ public final class FirebaseGateway {
     private long expireAt;
     private boolean running;
     private boolean loading;
+    private final AtomicBoolean writeInFlight=new AtomicBoolean(false);
     private boolean reloadRequested=false;
     private final Runnable refreshLoop=() -> executor.execute(this::load);
     private final String dbRoot;
@@ -57,13 +59,13 @@ public final class FirebaseGateway {
     }
     public void start() {
         running = true;
-        ui.post(() -> listener.authChanged(refreshToken != null));
+        // A stored refresh token is not proof of a valid admin session.
+        ui.post(() -> listener.authChanged(false));
         executor.execute(() -> {
             if (refreshToken != null) {
                 try { ensureIdToken(); }
                 catch (Exception ex) {
-                    // A failed refresh does not erase stored credentials or any server data.
-                    notify("Saved login could not be refreshed. Try logging in again.");
+                    notify("Saved login could not be verified. Log in again if needed.");
                 }
             }
             load();
@@ -108,7 +110,7 @@ public final class FirebaseGateway {
         prefs.edit().putString("refresh_token",refreshToken).apply();
         ui.post(() -> { if (running) listener.authChanged(true); });
     }
-    public boolean loggedIn() { return refreshToken != null; }
+    public boolean loggedIn() { return refreshToken != null && idToken != null; }
     public void signIn(String email,String password) {
         setBusy(true);
         executor.execute(() -> {
@@ -154,7 +156,10 @@ public final class FirebaseGateway {
         loading=true;
         try {
             if (refreshToken != null) {
-                try { ensureIdToken(); } catch (Exception ex) { idToken=null; }
+                try { ensureIdToken(); } catch (Exception ex) {
+                    idToken=null;
+                    ui.post(()->{if(running) listener.authChanged(false);});
+                }
             }
             List<Map<String,Object>> p=fetchCollection("players");
             List<Map<String,Object>> r=fetchCollection("rounds");
@@ -290,7 +295,8 @@ public final class FirebaseGateway {
     }
     public interface Action { void run(String token) throws Exception; }
     public void write(String success, Action action) {
-        if (!loggedIn()) { notify("Admin login required to save changes"); return; }
+        if (!loggedIn()) { notify("Please log in before saving changes"); return; }
+        if(!writeInFlight.compareAndSet(false,true)) {notify("One save is already in progress");return;}
         setBusy(true);
         executor.execute(() -> {
             try {
@@ -300,7 +306,7 @@ public final class FirebaseGateway {
                 notify(success);
                 load();
             } catch (Exception ex) { notify("Not saved: " + ex.getMessage()); }
-            finally { setBusy(false); }
+            finally { writeInFlight.set(false);setBusy(false); }
         });
     }
     public static Map<String,Object> map(Object... v) {
