@@ -93,6 +93,8 @@ class PlayerActivity : Activity() {
     private var videoTitle = "Video"
     private var subtitleUri: Uri? = null
     private var lastSavedPosition = 0L
+    // Preserve a user's manual pause/play choice across Activity onStop/onStart.
+    private var savedPlayWhenReady: Boolean? = null
     private var repeatOne = false
     private var resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
     private var brightness = 0.5f
@@ -192,6 +194,9 @@ class PlayerActivity : Activity() {
         showControls()
         if (savedInstanceState != null) {
             lastSavedPosition = savedInstanceState.getLong("position", 0L)
+            if (savedInstanceState.containsKey("play_when_ready")) {
+                savedPlayWhenReady = savedInstanceState.getBoolean("play_when_ready")
+            }
             videoUri = savedInstanceState.getString("uri", videoUri)
             videoTitle = savedInstanceState.getString("title", videoTitle)
             playerTitle.text = videoTitle
@@ -291,7 +296,7 @@ class PlayerActivity : Activity() {
         try {
             exo.setMediaItem(buildMediaItem(), lastSavedPosition.coerceAtLeast(0L))
             exo.prepare()
-            exo.playWhenReady = userOptions.autoplay
+            exo.playWhenReady = savedPlayWhenReady ?: userOptions.autoplay
         } catch (ex: Exception) {
             AlertDialog.Builder(this)
                 .setTitle("Could not open video")
@@ -893,6 +898,8 @@ class PlayerActivity : Activity() {
     override fun onSaveInstanceState(outState: Bundle) {
         savePosition()
         outState.putLong("position", lastSavedPosition)
+        outState.putBoolean("play_when_ready",
+            player?.playWhenReady ?: savedPlayWhenReady ?: userOptions.autoplay)
         outState.putString("uri", videoUri)
         outState.putString("title", videoTitle)
         super.onSaveInstanceState(outState)
@@ -906,6 +913,7 @@ class PlayerActivity : Activity() {
         handler.removeCallbacks(progressSaver)
         handler.removeCallbacks(progressUpdater)
         handler.removeCallbacks(hideControlsTask)
+        savedPlayWhenReady = player?.playWhenReady ?: savedPlayWhenReady
         savePosition()
         holdSpeedRestore?.let { player?.setPlaybackSpeed(it) }
         holdSpeedRestore = null
