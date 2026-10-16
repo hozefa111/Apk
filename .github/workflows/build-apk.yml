@@ -31,6 +31,8 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
+      - name: Verify required Android layout attributes
+        run: python3 scripts/check_layouts.py
       - name: Build debug APK and test
         run: gradle --no-daemon :app:assembleDebug :app:testDebugUnitTest
       - name: Upload installable APK
