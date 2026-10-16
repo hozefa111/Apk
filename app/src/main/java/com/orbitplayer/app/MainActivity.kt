@@ -47,6 +47,7 @@ class MainActivity : Activity() {
     private val preferences by lazy { OrbitSettings(this) }
     private val collections by lazy { OrbitCollections(this) }
     private var currentPlaylist: String? = null
+    private var advanced = OrbitSearchFilter()
     private lateinit var albumAdapter: FolderAdapter
     private var tab = Tab.FOLDERS
     private var albums = emptyList<FolderAlbum>()
@@ -118,6 +119,7 @@ class MainActivity : Activity() {
         }
         findViewById<View>(R.id.btnPick).setOnClickListener { openDocument() }
         findViewById<View>(R.id.btnPlaylists).setOnClickListener { showPlaylists() }
+        findViewById<View>(R.id.btnAdvancedFilters).setOnClickListener { showAdvancedFilters() }
         videos.setItemViewCacheSize(8)
 
         findViewById<View>(R.id.btnRefresh).setOnClickListener {
@@ -334,6 +336,7 @@ class MainActivity : Activity() {
             .filter { !preferences.hasFolder("hidden", it.folder) }
             .filter { chosenFolder == "All folders" || it.folder == chosenFolder }
             .filter { playlistOrder == null || it.uri.toString() in playlistOrder }
+            .filter { advanced.matches(it) }
             .filter { query.isBlank() || it.title.contains(query, ignoreCase = true) ||
                 it.folder.contains(query, ignoreCase = true) }
             .filter {
@@ -374,7 +377,8 @@ class MainActivity : Activity() {
             filter == Filter.FAVORITES -> "No favorite videos yet. Long press any video to add one."
             else -> "Nothing matches this folder or search."
         }
-        status.text = "${visibleVideos.size} videos  ·  ${allVideos.size} total"
+        status.text = "${visibleVideos.size} videos  ·  ${allVideos.size} total" +
+            if (advanced.active) "  ·  FILTERED" else ""
         findViewById<TextView>(R.id.sectionTitle).text = when {
             currentPlaylist != null -> "Playlist: $currentPlaylist"
             filter == Filter.FAVORITES -> "Favorite Videos"
@@ -612,6 +616,41 @@ class MainActivity : Activity() {
         search.setText("")
         filterVideos()
         videos.scrollToPosition(0)
+    }
+
+    private fun showAdvancedFilters() {
+        val fields = arrayOf(
+            "File format · ${if (advanced.extension.isBlank()) "Any" else advanced.extension.uppercase()}",
+            "Minimum resolution · ${if (advanced.minimumHeight == 0) "Any" else "${advanced.minimumHeight}p"}",
+            "Duration · ${listOf("Any", "Under 5 min", "5–30 min", "30+ min")[advanced.durationGroup]}",
+            "File size · ${listOf("Any", "Under 100 MB", "Over 1 GB")[advanced.sizeGroup]}",
+            "Clear all filters"
+        )
+        AlertDialog.Builder(this).setTitle("Advanced video search")
+            .setItems(fields) { _, index ->
+                when (index) {
+                    0 -> pickSearchOption("Video format", listOf("Any","MP4","MKV","MOV","AVI","WEBM","3GP")) { selected ->
+                        advanced = advanced.copy(extension = if (selected == "Any") "" else selected.lowercase())
+                    }
+                    1 -> pickSearchOption("Minimum video resolution", listOf("Any","480p","720p","1080p","2160p")) {
+                        advanced = advanced.copy(minimumHeight = if (it == "Any") 0 else it.removeSuffix("p").toInt())
+                    }
+                    2 -> pickSearchOption("Duration", listOf("Any","Under 5 min","5–30 min","30+ min")) {
+                        advanced = advanced.copy(durationGroup = listOf("Any","Under 5 min","5–30 min","30+ min").indexOf(it))
+                    }
+                    3 -> pickSearchOption("File size", listOf("Any","Under 100 MB","Over 1 GB")) {
+                        advanced = advanced.copy(sizeGroup = listOf("Any","Under 100 MB","Over 1 GB").indexOf(it))
+                    }
+                    else -> { advanced = OrbitSearchFilter(); filterVideos() }
+                }
+            }.setNegativeButton("Close", null).show()
+    }
+
+    private fun pickSearchOption(title: String, options: List<String>, select: (String) -> Unit) {
+        AlertDialog.Builder(this).setTitle(title).setItems(options.toTypedArray()) { _, which ->
+            select(options[which])
+            filterVideos()
+        }.setNegativeButton("Cancel", null).show()
     }
 
     private fun showPreviousCrashReport() {
