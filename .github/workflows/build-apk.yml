@@ -1,5 +1,10 @@
 name: Build Android APK
 
+# Each new PR revision supersedes unfinished smoke/compile runs from its predecessor.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   pull_request:
