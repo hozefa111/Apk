@@ -109,5 +109,8 @@ Tap Open Video above to get started." android:textSize="14sp"
         <TextView android:id="@+id/navOpen" android:layout_width="0dp" android:layout_weight="1"
             android:layout_height="match_parent" android:gravity="center"
             android:text="＋  Open" android:textColor="@color/text_secondary" android:textSize="14sp" />
+        <TextView android:id="@+id/navUpdates" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="match_parent" android:gravity="center"
+            android:text="↑ Updates" android:textColor="@color/accent_cyan" android:textSize="13sp" />
     </LinearLayout>
 </LinearLayout>

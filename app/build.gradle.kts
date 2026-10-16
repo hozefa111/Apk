@@ -10,11 +10,27 @@ android {
         applicationId = "com.orbitplayer.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.1.4"
+        versionCode = 6
+        versionName = "0.1.5"
+    }
+    // Release credentials are read only from private GitHub Actions secrets.
+    val orbitSigningPath = System.getenv("ORBIT_KEYSTORE_PATH")
+    val orbitSigningPassword = System.getenv("ORBIT_SIGN_PASSWORD")
+    val canSignRelease = !orbitSigningPath.isNullOrBlank() && !orbitSigningPassword.isNullOrBlank()
+    signingConfigs {
+        if (canSignRelease) {
+            create("orbitRelease") {
+                storeFile = file(orbitSigningPath!!)
+                storePassword = orbitSigningPassword
+                keyAlias = "orbitplayer"
+                keyPassword = orbitSigningPassword
+                storeType = "PKCS12"
+            }
+        }
     }
     buildTypes {
         release {
+            if (canSignRelease) signingConfig = signingConfigs.getByName("orbitRelease")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -25,7 +41,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { viewBinding = true }
+    buildFeatures { viewBinding = true; buildConfig = true }
 }
 
 dependencies {

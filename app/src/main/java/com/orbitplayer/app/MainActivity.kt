@@ -75,6 +75,7 @@ class MainActivity : Activity() {
         }
         findViewById<View>(R.id.navFolders).setOnClickListener { folderSpinner.performClick() }
         findViewById<View>(R.id.navOpen).setOnClickListener { openDocument() }
+        findViewById<View>(R.id.navUpdates).setOnClickListener { UpdateManager.check(this) }
         findViewById<View>(R.id.btnRefresh).setOnClickListener { scan() }
         sortButton.setOnClickListener {
             alphabetic = !alphabetic
