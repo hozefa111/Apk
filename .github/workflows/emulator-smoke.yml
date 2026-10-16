@@ -29,82 +29,36 @@ jobs:
         with:
           gradle-version: '8.13'
       - run: gradle --no-daemon :app:assembleDebug
-      - name: Create sample video
+      - name: Create playable H264/AAC test media
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg
-          ffmpeg -nostdin -hide_banner -loglevel error -f lavfi -i testsrc=size=320x240:rate=15 -t 24 -c:v mpeg4 -q:v 8 -pix_fmt yuv420p -y smoke.mp4
+          ffmpeg -nostdin -hide_banner -loglevel error \
+            -f lavfi -i testsrc=size=320x240:rate=15 \
+            -f lavfi -i sine=frequency=440:sample_rate=44100 \
+            -t 28 -c:v libx264 -preset ultrafast -profile:v baseline \
+            -pix_fmt yuv420p -c:a aac -b:a 64k -movflags +faststart -y smoke.mp4
       - name: Check KVM acceleration
         run: |
-          if [ -e /dev/kvm ]; then
-            sudo chmod a+rw /dev/kvm
-            ls -l /dev/kvm
-          else
-            echo "KVM not available; Android emulator may be slow or unavailable"
-          fi
-      - name: Launch on Android emulator
+          if [ -e /dev/kvm ]; then sudo chmod a+rw /dev/kvm; fi
+      - name: Native playback and UX smoke
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 33
           arch: x86_64
           target: default
           profile: pixel_2
-          ram-size: 1536M
+          ram-size: 2048M
           heap-size: 256M
           emulator-boot-timeout: 1200
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -camera-back none -gpu swiftshader_indirect
           disk-size: 4096M
           disable-animations: true
-          # Emulator runner evaluates script commands individually, not as a single persistent shell.
-          # Avoid multi-line for/if constructs and shell variables spanning separate commands.
-          script: |
-            adb wait-for-device
-            adb install app/build/outputs/apk/debug/app-debug.apk
-            adb shell pm grant com.orbitplayer.app android.permission.READ_MEDIA_VIDEO || true
-            adb shell mkdir -p /sdcard/Download
-            adb push smoke.mp4 /sdcard/Download/orbit_smoke.mp4 || adb push smoke.mp4 /sdcard/Download/orbit_smoke.mp4 || adb push smoke.mp4 /sdcard/Download/orbit_smoke.mp4
-            adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Download/orbit_smoke.mp4 || true
-            sleep 8
-            adb logcat -c
-            adb shell am start -n com.orbitplayer.app/.MainActivity
-            sleep 3
-            python3 scripts/tap_android_view.py com.orbitplayer.app:id/btnSettings
-            sleep 2
-            adb shell dumpsys activity activities > settings-activity.txt
-            grep -F '.SettingsActivity' settings-activity.txt
-            adb shell screencap -p /sdcard/Download/orbit_settings.png
-            adb pull /sdcard/Download/orbit_settings.png orbit-settings-screen.png
-            adb shell input keyevent 4
-            adb shell content query --uri content://media/external/video/media --projection _id:_display_name > media-rows.txt
-            grep -F 'orbit_smoke.mp4' media-rows.txt
-            adb shell am start -n com.orbitplayer.app/.PlayerActivity --es video_uri "content://media/external/video/media/$(grep -F 'orbit_smoke.mp4' media-rows.txt | sed -E 's/.*_id=([0-9]+).*/\1/' | head -1 | tr -d '\r')"
-            sleep 8
-            adb shell dumpsys activity activities > activity-state.txt
-            adb logcat -d -v time > emulator-logcat.txt
-            adb shell input tap 180 400 || true
-            sleep 1
-            adb shell screencap -p /sdcard/Download/orbit_screenshot.png || true
-            adb pull /sdcard/Download/orbit_screenshot.png orbit-smoke-screen.png || true
-            adb shell settings put system accelerometer_rotation 0 || true
-            adb shell settings put system user_rotation 1 || true
-            sleep 4
-            adb shell input tap 400 180 || true
-            adb shell screencap -p /sdcard/Download/orbit_landscape.png || true
-            adb pull /sdcard/Download/orbit_landscape.png orbit-landscape-screen.png || true
-            ! grep -E 'FATAL EXCEPTION|Process: com\\.orbitplayer\\.app' emulator-logcat.txt
-            adb shell pidof com.orbitplayer.app
-            echo "App survived library, settings and player startup"
-      - name: Upload emulator logs
+          script: bash scripts/run_emulator_smoke.sh
+      - name: Upload emulator QA diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: emulator-playback-smoke-logs
-          path: |
-            emulator-logcat.txt
-            media-rows.txt
-            orbit-settings-screen.png
-            settings-activity.txt
-            activity-state.txt
-            orbit-smoke-screen.png
-            orbit-landscape-screen.png
+          path: qa/
           if-no-files-found: ignore
