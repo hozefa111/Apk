@@ -52,8 +52,8 @@ grep -F "$PACKAGE/.SettingsActivity" qa/settings-activity.txt >/dev/null || {
 adb shell input keyevent 4
 sleep 1
 
-# Exercise explicit native playback route and verify actual player readiness, not just a screen.
-adb shell am start -W -n "$PACKAGE/.PlayerActivity" --es video_uri "$URI" | tee qa/player-launch.txt
+# Exercise exported ACTION_VIEW route (required by Android 13+ intent-filter enforcement).
+adb shell am start -W -a android.intent.action.VIEW -c android.intent.category.DEFAULT -d "$URI" -t video/mp4 -n "$PACKAGE/.PlayerActivity" | tee qa/player-launch.txt
 sleep 2
 for attempt in $(seq 1 25); do
   adb logcat -d -v brief > qa/player-logcat.txt
