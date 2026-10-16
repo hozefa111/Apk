@@ -86,6 +86,8 @@ class PlayerActivity : Activity() {
     }
     private val handler = Handler(Looper.getMainLooper())
     private val prefs by lazy { getSharedPreferences("playback_positions_v1", MODE_PRIVATE) }
+    private val userOptions by lazy { OrbitSettings(this) }
+    private fun skipMs() = userOptions.seekSeconds * 1000L
     private var player: ExoPlayer? = null
     private var videoUri = ""
     private var videoTitle = "Video"
@@ -131,6 +133,10 @@ class PlayerActivity : Activity() {
             return
         }
         playerTitle.text = videoTitle
+        repeatOne = userOptions.repeat
+        runCatching {
+            playerView.subtitleView?.setFractionalTextSize(0.0533f * userOptions.subtitleScale)
+        }
         enableImmersiveMode()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         findViewById<View>(R.id.back).setOnClickListener { finish() }
@@ -140,8 +146,8 @@ class PlayerActivity : Activity() {
         findViewById<View>(R.id.btnMore).setOnClickListener { showMoreOptions() }
         findViewById<View>(R.id.btnPrevious).setOnClickListener { switchQueue(-1) }
         findViewById<View>(R.id.btnNext).setOnClickListener { switchQueue(1) }
-        findViewById<View>(R.id.btnRewind).setOnClickListener { seekRelative(-10_000) }
-        findViewById<View>(R.id.btnForward).setOnClickListener { seekRelative(10_000) }
+        findViewById<View>(R.id.btnRewind).setOnClickListener { seekRelative(-skipMs()) }
+        findViewById<View>(R.id.btnForward).setOnClickListener { seekRelative(skipMs()) }
         playPauseButton.setOnClickListener { togglePlayPause() }
         findViewById<View>(R.id.btnAspect).setOnClickListener { cycleAspectRatio() }
         findViewById<View>(R.id.btnLock).setOnClickListener { setTouchLocked(true) }
@@ -184,7 +190,7 @@ class PlayerActivity : Activity() {
             videoTitle = savedInstanceState.getString("title", videoTitle)
             playerTitle.text = videoTitle
         } else {
-            lastSavedPosition = savedProgress(videoUri)
+            lastSavedPosition = if (userOptions.resume) savedProgress(videoUri) else 0L
         }
     }
 
@@ -211,6 +217,14 @@ class PlayerActivity : Activity() {
         player = exo
         playerView.player = exo
         prefs.edit().putString("last_played_uri", videoUri).apply()
+        exo.setPlaybackSpeed(userOptions.playbackSpeed)
+        speedButton.text = "${userOptions.playbackSpeed}×"
+        val params = exo.trackSelectionParameters.buildUpon()
+        if (userOptions.preferredAudio.isNotBlank())
+            params.setPreferredAudioLanguage(userOptions.preferredAudio)
+        if (userOptions.preferredSubtitle.isNotBlank())
+            params.setPreferredTextLanguage(userOptions.preferredSubtitle)
+        exo.trackSelectionParameters = params.build()
         playerView.resizeMode = resizeMode
         exo.repeatMode = if (repeatOne) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         exo.addListener(object : Player.Listener {
@@ -245,7 +259,7 @@ class PlayerActivity : Activity() {
         try {
             exo.setMediaItem(buildMediaItem(), lastSavedPosition.coerceAtLeast(0L))
             exo.prepare()
-            exo.playWhenReady = true
+            exo.playWhenReady = userOptions.autoplay
         } catch (ex: Exception) {
             AlertDialog.Builder(this)
                 .setTitle("Could not open video")
@@ -320,6 +334,7 @@ class PlayerActivity : Activity() {
         val captions = arrayOf("0.5×", "0.75×", "1× (Normal)", "1.25×", "1.5×", "2×")
         AlertDialog.Builder(this).setTitle("Playback speed").setItems(captions) { _, selected ->
             player?.setPlaybackSpeed(speeds[selected])
+            userOptions.playbackSpeed = speeds[selected]
             speedButton.text = captions[selected].substringBefore(' ')
             scheduleAutoHide()
         }.show()
@@ -445,6 +460,7 @@ class PlayerActivity : Activity() {
         action(R.id.actionRepeat) {
             repeatOne = !repeatOne
             player?.repeatMode = if (repeatOne) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+            userOptions.repeat = repeatOne
             notifyGesture(if (repeatOne) "Repeat on" else "Repeat off")
         }
         action(R.id.actionPip) { startPictureInPicture() }
@@ -526,7 +542,8 @@ class PlayerActivity : Activity() {
         val max = if (exo.duration > 0) exo.duration else Long.MAX_VALUE
         exo.seekTo((exo.currentPosition + delta).coerceIn(0L, max))
         playPauseButton.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-        notifyGesture(if (delta > 0) "+10 seconds" else "-10 seconds")
+        notifyGesture(if (delta > 0) "+${kotlin.math.abs(delta) / 1000} seconds"
+            else "-${kotlin.math.abs(delta) / 1000} seconds")
         updateProgress()
     }
 
@@ -536,24 +553,24 @@ class PlayerActivity : Activity() {
             this,
             onTap = { if (touchLocked) showUnlockButton() else toggleControls() },
             onDoubleTap = { fraction ->
-                if (!touchLocked) {
+                if (!touchLocked && userOptions.gestureDoubleTap) {
                     when {
-                        fraction < 0.36f -> seekRelative(-10_000L)
-                        fraction > 0.64f -> seekRelative(10_000L)
+                        fraction < 0.36f -> seekRelative(-skipMs())
+                        fraction > 0.64f -> seekRelative(skipMs())
                         else -> togglePlayPause()
                     }
                 }
             },
             onVerticalScroll = { right, delta ->
                 if (!touchLocked) {
-                    if (right) {
+                    if (right && userOptions.gestureVolume) {
                         val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
                         val current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
                         val next = (current + delta * max).roundToInt().coerceIn(0, max)
                         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, next, 0)
                         val percent = (100f * next / max).roundToInt()
                         showGestureHud("Volume  $percent%", percent)
-                    } else {
+                    } else if (!right && userOptions.gestureBrightness) {
                         brightness = (brightness + delta).coerceIn(0.05f, 1f)
                         val params = window.attributes
                         params.screenBrightness = brightness
@@ -595,7 +612,7 @@ class PlayerActivity : Activity() {
                 }
             },
             onHoldBoost = { pressed ->
-                if (!touchLocked) {
+                if (!touchLocked && userOptions.gestureHoldSpeed) {
                     val exo = player
                     if (pressed && exo?.isPlaying == true && holdSpeedRestore == null) {
                         holdSpeedRestore = exo.playbackParameters.speed
@@ -721,7 +738,9 @@ class PlayerActivity : Activity() {
     private fun scheduleAutoHide() {
         handler.removeCallbacks(hideControlsTask)
         if (controlsVisible && !touchLocked && !userSeeking)
-            handler.postDelayed(hideControlsTask, if (player?.isPlaying == true) 3300 else 6000)
+            handler.postDelayed(hideControlsTask,
+                (if (player?.isPlaying == true) userOptions.controlsTimeout
+                    else userOptions.controlsTimeout + 3) * 1000L)
     }
 
     private fun setTouchLocked(locked: Boolean) {
