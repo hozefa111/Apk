@@ -67,6 +67,16 @@ class PlayerActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_player)
         playerView = findViewById(R.id.playerView)
+        // Keep our custom top and previous/next bars in sync with Media3's auto-hide controls.
+        val topBar = findViewById<View>(R.id.topBar)
+        val bottomControls = findViewById<View>(R.id.bottomControls)
+        playerView.setControllerShowTimeoutMs(3000)
+        playerView.setControllerVisibilityListener(
+            PlayerView.ControllerVisibilityListener { visibility ->
+                topBar.visibility = visibility
+                bottomControls.visibility = visibility
+            }
+        )
         playerTitle = findViewById(R.id.playerTitle)
         notice = findViewById(R.id.gestureNotice)
         speedButton = findViewById(R.id.btnSpeed)
