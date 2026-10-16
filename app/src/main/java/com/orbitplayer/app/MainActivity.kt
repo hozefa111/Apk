@@ -388,6 +388,7 @@ class MainActivity : Activity() {
 
     private fun open(item: VideoItem) {
         progress.edit().putString("last_played_uri", item.uri.toString()).apply()
+        recordWatchHistory(item.uri.toString())
         PlaybackQueue.replace(visibleVideos)
         startActivity(Intent(this, PlayerActivity::class.java).apply {
             putExtra(PlayerActivity.EXTRA_URI, item.uri.toString())
@@ -410,6 +411,7 @@ class MainActivity : Activity() {
                 }
             }.getOrNull()
             progress.edit().putString("last_played_uri", uri.toString()).apply()
+            recordWatchHistory(uri.toString())
             startActivity(Intent(this, PlayerActivity::class.java).apply {
                 putExtra(PlayerActivity.EXTRA_URI, uri.toString())
                 putExtra(PlayerActivity.EXTRA_TITLE, display ?: uri.lastPathSegment ?: "Selected video")
@@ -446,6 +448,13 @@ class MainActivity : Activity() {
     }
 
 
+    private fun recordWatchHistory(uri: String) {
+        val old = progress.getString("recently_watched", "")?.split("|")
+            ?.filter { it.isNotBlank() } ?: emptyList()
+        progress.edit().putString("recently_watched",
+            (listOf(uri) + old).distinct().take(100).joinToString("|")).apply()
+    }
+
     private fun applyAppearance() {
         val dark = if (preferences.amoled) Color.BLACK else Color.rgb(8, 12, 23)
         findViewById<View>(R.id.mainRoot).setBackgroundColor(dark)
@@ -457,7 +466,9 @@ class MainActivity : Activity() {
         tab = next
         preferences.lastTab = next.name
         filter = if (next == Tab.CONTINUE) Filter.CONTINUE else Filter.ALL
-        chosenFolder = "All folders"
+        chosenFolder = if (next == Tab.VIDEOS) preferences.lastFolder
+            .takeIf { it in folderOptions } ?: "All folders"
+            else "All folders"
         search.setText("")
         filterVideos()
         videos.scrollToPosition(0)
@@ -475,7 +486,17 @@ class MainActivity : Activity() {
     private fun renderChrome() {
         val folders = tab == Tab.FOLDERS
         findViewById<View>(R.id.filterScroller).visibility =
-            if (folders || tab == Tab.CONTINUE) View.GONE else View.VISIBLE
+            if (folders) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.filterAll).visibility =
+            if (tab == Tab.CONTINUE) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.filterRecent).visibility =
+            if (tab == Tab.CONTINUE) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.folderFilter).visibility =
+            if (tab == Tab.CONTINUE) View.GONE else View.VISIBLE
+        findViewById<TextView>(R.id.filterProgress).text =
+            if (tab == Tab.CONTINUE) "Unfinished" else "Continue"
+        findViewById<View>(R.id.filterHistory).visibility =
+            if (tab == Tab.CONTINUE) View.VISIBLE else View.GONE
         findViewById<View>(R.id.btnView).visibility = if (folders) View.GONE else View.VISIBLE
         if (folders) findViewById<TextView>(R.id.sectionTitle).text = "Albums"
         val bar = mapOf(
@@ -530,6 +551,7 @@ class MainActivity : Activity() {
     private fun openAlbum(album: FolderAlbum) {
         tab = Tab.VIDEOS
         chosenFolder = album.path
+        preferences.lastFolder = album.path
         filter = Filter.ALL
         search.setText("")
         filterVideos()
