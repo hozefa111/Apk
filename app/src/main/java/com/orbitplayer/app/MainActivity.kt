@@ -2,6 +2,11 @@ package com.orbitplayer.app
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -82,6 +87,7 @@ class MainActivity : Activity() {
         }
         updatePermissionsUi()
         if (hasLibraryPermission()) scan() else filter()
+        showPreviousCrashReport()
     }
 
     override fun onResume() {
@@ -200,6 +206,24 @@ class MainActivity : Activity() {
             updatePermissionsUi()
             scan()
         }
+    }
+
+
+    private fun showPreviousCrashReport() {
+        val prefs = getSharedPreferences("orbit_diagnostics", MODE_PRIVATE)
+        val report = prefs.getString("last_error", null) ?: return
+        prefs.edit().remove("last_error").apply()
+        if (isFinishing || isDestroyed) return
+        AlertDialog.Builder(this)
+            .setTitle("Orbit Player stopped unexpectedly")
+            .setMessage("The player crashed on its previous run. You can copy the error and share it for fixing. No information is uploaded automatically.\\n\\n" + report.take(2400))
+            .setPositiveButton("Copy full error") { _, _ ->
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("Orbit Player crash report", report))
+                Toast.makeText(this, "Error copied", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Close", null)
+            .show()
     }
 
     override fun onDestroy() {

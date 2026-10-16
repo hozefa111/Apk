@@ -102,7 +102,19 @@ class PlayerActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
-        if (videoUri.isNotBlank()) preparePlayer()
+        if (videoUri.isNotBlank()) {
+            try {
+                preparePlayer()
+            } catch (error: Exception) {
+                android.util.Log.e("OrbitPlayer", "Player startup failed", error)
+                AlertDialog.Builder(this)
+                    .setTitle("Player could not start")
+                    .setMessage((error.message ?: error.javaClass.simpleName).take(1200) + "\\n\\nPlease copy any error report shown after reopening the app.")
+                    .setPositiveButton("Close") { _, _ -> finish() }
+                    .setCancelable(false)
+                    .show()
+            }
+        }
     }
 
     private fun preparePlayer() {
