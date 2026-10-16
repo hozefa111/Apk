@@ -9,8 +9,8 @@ android {
         applicationId = "com.hozefa.threepattipro.nativeapp"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0-native"
+        versionCode = 2
+        versionName = "1.1.0-native"
     }
     buildTypes {
         release {
@@ -24,4 +24,5 @@ android {
 }
 dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("androidx.core:core:1.15.0")
 }

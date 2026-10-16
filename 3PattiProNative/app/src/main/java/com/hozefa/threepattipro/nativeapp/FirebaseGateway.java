@@ -43,6 +43,8 @@ public final class FirebaseGateway {
     private long expireAt;
     private boolean running;
     private boolean loading;
+    private boolean reloadRequested=false;
+    private final Runnable refreshLoop=() -> executor.execute(this::load);
     private final String dbRoot;
 
     public FirebaseGateway(Context c, Listener l, String key) {
@@ -82,7 +84,8 @@ public final class FirebaseGateway {
         if(body!=null) {
             RequestBody rb=RequestBody.create(body, MediaType.parse(contentType));
             req.method(method,rb);
-        } else req.get();
+        } else if("GET".equals(method)) req.get();
+        else req.method(method,null);
         try (Response response=http.newCall(req.build()).execute()) {
             String content=response.body()==null?"":response.body().string();
             JSONObject obj=content.isEmpty()?new JSONObject():new JSONObject(content);
@@ -137,15 +140,17 @@ public final class FirebaseGateway {
             load();
         });
     }
-    public void refresh() { executor.execute(this::load); }
+    public void refresh() {
+        ui.removeCallbacks(refreshLoop);
+        executor.execute(this::load);
+    }
     private void scheduleNext() {
-        ui.postDelayed(() -> {
-            if (!running) return;
-            executor.execute(this::load);
-        }, 18000);
+        ui.removeCallbacks(refreshLoop);
+        ui.postDelayed(refreshLoop, 30000);
     }
     private void load() {
-        if (!running || loading) return;
+        if (!running) return;
+        if (loading) { reloadRequested=true; return; }
         loading=true;
         try {
             if (refreshToken != null) {
@@ -159,7 +164,8 @@ public final class FirebaseGateway {
             notify("Sync issue: " + ex.getMessage());
         } finally {
             loading=false;
-            if (running) scheduleNext();
+            if (running && reloadRequested){reloadRequested=false;ui.removeCallbacks(refreshLoop);executor.execute(this::load);}
+            else if(running) scheduleNext();
         }
     }
     private List<Map<String,Object>> fetchCollection(String name) throws Exception {
@@ -234,6 +240,53 @@ public final class FirebaseGateway {
             out.put("arrayValue",arr);
         } else out.put("stringValue",String.valueOf(value));
         return out;
+    }
+    public void renamePlayer(String playerId,String newName,List<Map<String,Object>> rounds){
+        write("Player renamed", token -> {
+            String uri=dbRoot+"/players/"+encoded(playerId)+"?updateMask.fieldPaths=name";
+            JSONObject body=new JSONObject();
+            body.put("fields",encodeFields(map("name",newName)));
+            jsonCall("PATCH",uri,body,token);
+            // Keep embedded names in historic rounds compatible with the original web UI.
+            for(Map<String,Object> round:rounds){
+                String rid=String.valueOf(round.get("id"));
+                Map<String,Object> edits=new LinkedHashMap<>();
+                if(playerId.equals(round.get("hukumId"))) edits.put("hukumName",newName);
+                List<?> partners=round.get("partnerIds") instanceof List?(List<?>)round.get("partnerIds"):Collections.emptyList();
+                if(partners.contains(playerId)){
+                    List<String> names=new ArrayList<>();
+                    for(Object item:partners)names.add(playerId.equals(item)?newName:findRoundName(round,"partnerIds","partnerNames",item));
+                    edits.put("partnerNames",names);
+                }
+                List<?> others=round.get("nonPartnerIds") instanceof List?(List<?>)round.get("nonPartnerIds"):Collections.emptyList();
+                if(others.contains(playerId)){
+                    List<String> names=new ArrayList<>();
+                    for(Object item:others)names.add(playerId.equals(item)?newName:findRoundName(round,"nonPartnerIds","nonPartnerNames",item));
+                    edits.put("nonPartnerNames",names);
+                }
+                if(!edits.isEmpty()) {
+                    StringBuilder url=new StringBuilder(dbRoot+"/rounds/"+encoded(rid)+"?");
+                    for(String key:edits.keySet())url.append("updateMask.fieldPaths=").append(encoded(key)).append("&");
+                    JSONObject doc=new JSONObject();
+                    doc.put("fields",encodeFields(edits));
+                    jsonCall("PATCH",url.toString(),doc,token);
+                }
+            }
+        });
+    }
+    private String findRoundName(Map<String,Object> round,String idsKey,String namesKey,Object target){
+        Object ids=round.get(idsKey),names=round.get(namesKey);
+        if(ids instanceof List && names instanceof List){
+            int i=((List<?>)ids).indexOf(target);
+            if(i>=0 && i<((List<?>)names).size())return String.valueOf(((List<?>)names).get(i));
+        }
+        return "Unknown";
+    }
+    public void deleteDocument(String collection,String id,String success){
+        write(success,token->{
+            String url=dbRoot+"/"+collection+"/"+encoded(id);
+            jsonCall("DELETE",url,null,token);
+        });
     }
     public interface Action { void run(String token) throws Exception; }
     public void write(String success, Action action) {
