@@ -44,6 +44,10 @@ jobs:
           ORBIT_SIGN_PASSWORD: ${{ secrets.ORBIT_SIGN_PASSWORD }}
         shell: bash
         run: |
+          # Text file copy/paste can accidentally include a CR/LF at the end of the password.
+          # Normalize only line endings; never print or commit the signing secret.
+          ORBIT_SIGN_PASSWORD="$(printf '%s' "$ORBIT_SIGN_PASSWORD" | tr -d '\\r\\n')"
+          export ORBIT_SIGN_PASSWORD
           if [ -z "$ORBIT_KEYSTORE_B64" ] || [ -z "$ORBIT_SIGN_PASSWORD" ]; then
             echo "Signing secrets not yet configured. Release skipped; debug build workflow remains usable."
             echo "ready=false" >> "$GITHUB_OUTPUT"
@@ -52,6 +56,7 @@ jobs:
           umask 077
           printf '%s' "$ORBIT_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/orbit-player-release.p12"
           export ORBIT_KEYSTORE_PATH="$RUNNER_TEMP/orbit-player-release.p12"
+          keytool -list -storetype PKCS12 -keystore "$ORBIT_KEYSTORE_PATH" -storepass "$ORBIT_SIGN_PASSWORD" -alias orbitplayer >/dev/null
           gradle --no-daemon :app:assembleRelease :app:testReleaseUnitTest
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
           echo "ready=true" >> "$GITHUB_OUTPUT"
