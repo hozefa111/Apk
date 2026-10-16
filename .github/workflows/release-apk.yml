@@ -56,6 +56,15 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
+      - name: Upload signed APK artifact
+        if: steps.signing.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrbitPlayer-SIGNED-v0.1.5
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 60
+
       - name: Publish update to GitHub Releases
         if: steps.signing.outputs.ready == 'true'
         env:
