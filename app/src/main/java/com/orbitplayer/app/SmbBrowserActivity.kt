@@ -47,7 +47,7 @@ class SmbBrowserActivity : Activity() {
                 it.setTextColor(Color.WHITE)
                 it.setHintTextColor(0xFF7687A1.toInt())
                 it.textSize = 15f
-                it.singleLine = true
+                it.setSingleLine(true)
                 it.inputType = if (masked)
                     InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
                     else InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_NORMAL
