@@ -84,7 +84,7 @@ class VideoAdapter(
         holder.thumb.tag = key
         holder.thumb.setImageDrawable(null)
         holder.glyph.visibility = View.VISIBLE
-        cache.get(key)?.let { image ->
+        synchronized(cache) { cache.get(key) }?.let { image ->
             holder.thumb.setImageBitmap(image)
             holder.glyph.visibility = View.GONE
         } ?: run {

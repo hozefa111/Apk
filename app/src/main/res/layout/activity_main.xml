@@ -110,9 +110,9 @@
         <ImageView android:id="@+id/btnView" android:layout_width="40dp"
             android:layout_height="38dp" android:padding="10dp"
             android:layout_marginStart="8dp"
-            android:src="@drawable/orbit_nav_grid"
+            android:src="@drawable/orbit_nav_list"
             android:background="@drawable/orbit_chip_bg"
-            android:contentDescription="Switch between gallery and list" />
+            android:contentDescription="Switch to compact list" />
     </LinearLayout>
 
     <HorizontalScrollView android:layout_width="match_parent"
@@ -121,16 +121,16 @@
         <LinearLayout android:layout_width="wrap_content" android:layout_height="match_parent"
             android:gravity="center_vertical" android:orientation="horizontal"
             android:paddingEnd="17dp">
-            <TextView android:id="@+id/filterAll" style="@style/Orbit.LibraryChip"
+            <TextView android:id="@+id/filterAll" style="@style/OrbitLibraryChip"
                 android:layout_width="wrap_content" android:layout_height="36dp"
                 android:text="All videos"/>
-            <TextView android:id="@+id/filterProgress" style="@style/Orbit.LibraryChip"
+            <TextView android:id="@+id/filterProgress" style="@style/OrbitLibraryChip"
                 android:layout_width="wrap_content" android:layout_height="36dp"
                 android:text="Continue" />
-            <TextView android:id="@+id/filterRecent" style="@style/Orbit.LibraryChip"
+            <TextView android:id="@+id/filterRecent" style="@style/OrbitLibraryChip"
                 android:layout_width="wrap_content" android:layout_height="36dp"
                 android:text="Recent" />
-            <TextView android:id="@+id/folderFilter" style="@style/Orbit.LibraryChip"
+            <TextView android:id="@+id/folderFilter" style="@style/OrbitLibraryChip"
                 android:layout_width="wrap_content" android:layout_height="36dp"
                 android:text="All folders  ▾" />
         </LinearLayout>
@@ -169,7 +169,7 @@
         android:layout_marginBottom="10dp" android:paddingHorizontal="8dp"
         android:gravity="center" android:orientation="horizontal"
         android:background="@drawable/orbit_bottom_nav_bg">
-        <LinearLayout android:id="@+id/navHome" style="@style/Orbit.BottomNavItem"
+        <LinearLayout android:id="@+id/navHome" style="@style/OrbitBottomNavItem"
             android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1">
             <ImageView android:layout_width="20dp" android:layout_height="20dp"
                 android:src="@drawable/orbit_nav_library"
@@ -178,7 +178,7 @@
                 android:layout_marginTop="4dp" android:text="Library" android:textSize="10sp"
                 android:textColor="#AE98FF"/>
         </LinearLayout>
-        <LinearLayout android:id="@+id/navFolders" style="@style/Orbit.BottomNavItem"
+        <LinearLayout android:id="@+id/navFolders" style="@style/OrbitBottomNavItem"
             android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1">
             <ImageView android:layout_width="20dp" android:layout_height="20dp"
                 android:src="@drawable/orbit_nav_folder" android:tint="#9AA9C4"
@@ -187,7 +187,7 @@
                 android:layout_marginTop="4dp" android:text="Folders" android:textSize="10sp"
                 android:textColor="#9AA9C4"/>
         </LinearLayout>
-        <LinearLayout android:id="@+id/navOpen" style="@style/Orbit.BottomNavItem"
+        <LinearLayout android:id="@+id/navOpen" style="@style/OrbitBottomNavItem"
             android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1">
             <ImageView android:layout_width="20dp" android:layout_height="20dp"
                 android:src="@drawable/orbit_nav_open" android:tint="#9AA9C4"
@@ -196,7 +196,7 @@
                 android:layout_marginTop="4dp" android:text="Open" android:textSize="10sp"
                 android:textColor="#9AA9C4"/>
         </LinearLayout>
-        <LinearLayout android:id="@+id/navUpdates" style="@style/Orbit.BottomNavItem"
+        <LinearLayout android:id="@+id/navUpdates" style="@style/OrbitBottomNavItem"
             android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1">
             <ImageView android:layout_width="20dp" android:layout_height="20dp"
                 android:src="@drawable/orbit_nav_update" android:tint="#9AA9C4"
