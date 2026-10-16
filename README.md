@@ -1,77 +1,53 @@
-# Orbit Player Lite — Android Offline Video Player
+# Orbit Player Pro — native Android video player
 
-**Status: source code prepared, APK not compiled or device-tested in the authoring environment.**
+**Project:** Kotlin + AndroidX Media3 ExoPlayer • package `com.orbitplayer.app` • Android 8.0+ (API 26)
 
-Orbit Player Lite is a small, ad-free, offline Android video player written in Kotlin and using AndroidX Media3 ExoPlayer. This is an initial implementation, **not a finished MX Player equivalent**. There is no LibVLC/FFmpeg software decoder fallback in this version.
+This is a **native APK**, not a website packaged in a WebView. All local video playback runs on the Android device. No advertising, login or media uploads.
 
-## Implemented in the source
+## Releases and verification
 
-- MediaStore video library with alphabetical/newest ordering, folder filter, search, asynchronous thumbnails.
-- Android Storage Access Framework video picker (works even when library permission is denied).
-- Android 13+ video library permission and Android 14+ selected-video permission handling.
-- ExoPlayer hardware/media-device-supported video playback with built-in seek bar, pause and play.
-- Playback resume position saved on lifecycle transitions and every 5 seconds.
-- Playback speed, audio track selection, internal subtitle track selection.
-- Manual SRT / ASS / SSA / VTT subtitle picker (where ExoPlayer supports the format).
-- Aspect fit, crop and stretch, screen rotation, repeat video.
-- Double tap ±10 seconds and swipe brightness (left) or volume (right) in edge gesture regions.
-- Previous/next video when opened from the in-app library in the same process.
-- No advertisements, network permissions, accounts, or analytics.
-- GitHub Actions workflow that builds and uploads a **debug-signed, installable APK**.
+- Latest previously published signed version: [v0.3.0](https://github.com/hozefa111/Apk/releases/tag/v0.3.0).
+- The current source targets **v0.3.1**. Do not treat it as an installable signed release until a corresponding verified GitHub Release exists.
+- The native build workflow compiles debug/release variants, checks resource/layout contracts and runs unit tests.
+- The emulator smoke workflow starts the Android library, opens Settings via a real tap, plays generated H.264/AAC media from MediaStore, checks Player readiness and accessible controls, then rotates the screen.
+- The signed-release workflow publishes only after the main-branch emulator test succeeds, or when an authorized maintainer explicitly dispatches a release.
+- **Important:** CI/emulator tests cannot establish hardware codec support or smooth performance on every physical phone. Real-device checks are a required release quality gate.
 
-## Important limitations
+## Current features
 
-- **Not all video/audio codecs work.** Playback depends on Android system decoders and Media3's demuxers. Some AVI, VC-1, DTS, E-AC-3, AC-3, older codecs, or unusual video profile files might not play or might have no sound. MKV extension alone is not a guarantee of playback.
-- No LibVLC engine fallback, picture-in-picture, background playback, playlists, or automatic external subtitle search yet.
-- Online streaming is deliberately not included; app has no internet permission.
-- APK size cannot be established without a successful build.
-- API 26+ (Android 8+) is configured; actual target devices are untested.
-- Content URI picker and media permissions are OEM/Android-version dependent and should be tested on physical devices.
-- Debug APK is signed with the Android debug keystore, not a personal production release signing key.
-- User-contributed media files remain unchanged; the app only reads them.
+- Video library with folder/album thumbnails, folder counts, sort, pin/hide/unhide, gallery and list modes.
+- Search by file/folder name, recent videos, watch history, continue watching.
+- Favorites, ordered playlists and multi-select list management.
+- Play All with next-video playback, repeat-one support, stable/persisted queues and recovery from unreadable files.
+- Native full-screen playback with bottom transport/timeline, touch lock, pinch/gesture seeking, volume and brightness gestures.
+- Playback speed, audio and subtitle tracks, external subtitle picker (SRT/ASS/SSA/VTT depending on Media3/device support), fit/crop/stretch and orientation.
+- Picture-in-picture, configurable settings, sleep timer and saved playback progress.
+- Android 13+ video permission flow, partial selected-video permission on Android 14+, and Android file picker.
+- Optional **user-initiated** GitHub update checks; other local playback is offline.
 
-## Easiest way to obtain APK (GitHub Actions)
+## Known limitations — not promised
 
-1. Create a new GitHub repository (private is fine) and upload **all files and folders** from this project, including `.github/workflows/build-apk.yml` (the `.github` folder must not be omitted).
-2. Set the default branch to `main`, or push to `main`/`master`.
-3. Open the repository → **Actions** → **Build Android APK** → **Run workflow**.
-4. After the run succeeds, click the workflow run and download `OrbitPlayer-Lite-APK` under **Artifacts**.
-5. Extract the downloaded ZIP to get `app-debug.apk`. Copy it to your Android phone and install it. Android may ask you to permit installs from that source.
+- There is **no LibVLC/FFmpeg codec fallback**. Unsupported video/audio codecs can still fail or be silent.
+- Subtitle timing offset and fine-grained typography controls, chapter selection, advanced filter syntax, background MediaSession/headset notification control, NAS/SMB folders and import/export are not complete.
+- Actual-device QA is outstanding. Tests should include Android 8, 13 and 14+, small and large libraries, rotation, PiP, subtitle timing, seek, queue transition, and corrupt media.
+- The web version is not used at runtime. Design/function parity should be audited against the actual web source rather than assumed.
 
-The Action must be enabled in repository settings. If the build fails, open its logs: the APK **was not produced**, and failures need resolving before installation.
+## Build locally
 
-## Alternative: Android Studio
+Requires Java 17, Gradle 8.13 and Android SDK 36.
 
-1. Install Android Studio with Android SDK Platform 36 and SDK Build Tools 36.x, and use JDK 17.
-2. Open the **OrbitPlayerAndroid** folder as a Gradle Android project. Use Gradle **8.13** (select a local Gradle 8.13 distribution if Android Studio asks; this project intentionally does not include the official Gradle wrapper binary).
-3. Allow it to download plugin and AndroidX dependencies.
-4. Select **Build → Build APK(s)** (debug).
-5. Result: `app/build/outputs/apk/debug/app-debug.apk`.
+```bash
+python3 scripts/check_layouts.py
+python3 scripts/check_library_ui.py
+gradle --no-daemon :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest
+```
 
-CLI with Gradle 8.13 on PATH: `gradle :app:assembleDebug :app:testDebugUnitTest`.
+Debug APK: `app/build/outputs/apk/debug/app-debug.apk`.
 
-## Technology versions
+**Signed releases** use a private PKCS12 keystore via GitHub Actions secrets. Debug builds do not use the production signing identity and may not upgrade an installed signed APK. Preserve the app ID, signing identity and increasing versionCode for update compatibility. Never delete app data just to update.
 
-- Kotlin 2.2.20
-- Android Gradle Plugin 8.13.2
-- Gradle 8.13
-- compile SDK 36, target 35, min 26
-- AndroidX Media3 1.11.1
-- RecyclerView 1.4.0
-- Java 17
+## Privacy
 
-## Privacy & permissions
+Local files remain where they are. Favorite/playlist metadata and resume positions are stored locally. The internet permission exists only to support a user-triggered GitHub update check. The app does not have accounts or telemetry.
 
-- `READ_MEDIA_VIDEO` (Android 13+): optional library listing.
-- `READ_MEDIA_VISUAL_USER_SELECTED` (Android 14+): partial video access.
-- `READ_EXTERNAL_STORAGE` (Android 12 and earlier): optional library listing.
-- `ACTION_OPEN_DOCUMENT`: system video picker without library permission.
-- No `INTERNET` permission and no tracking SDKs.
-
-## Source tree
-
-`MainActivity` and `VideoRepository` provide the local video library. `VideoAdapter` generates/cache thumbnails. `PlayerActivity` handles video playback, tracks, subtitle picking, gestures, and resume. `PlaybackQueue` supports list navigation within the running app. `PlayerGestureZone` manages touch events. More details are in `BUILD_NOTES.md`.
-
-## Required pre-release checks
-
-Complete a successful GitHub Actions or local build; test MP4/H.264/AAC, MKV/H.265, external .srt, internal subtitles, rotation, seek, volume and brightness gestures, app background/resume, library permission partial/full/denied, and file picker on at least one Android device. Fix reported problems and run a code/security review before publishing.
+See [the release acceptance checklist](docs/ORBIT_PRO_MASTER_RELEASE_PLAN.md) for what still needs verification.
