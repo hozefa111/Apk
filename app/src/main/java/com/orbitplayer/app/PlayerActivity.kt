@@ -52,6 +52,7 @@ class PlayerActivity : Activity() {
     private lateinit var gestureHud: View
     private lateinit var gestureMeter: ProgressBar
     private var showRemainingTime = false
+    private var holdSpeedRestore: Float? = null
     private var sleepTimerMinutes = 0
     private var sleepTimerRunnable: Runnable? = null
     private lateinit var speedButton: TextView
@@ -569,7 +570,23 @@ class PlayerActivity : Activity() {
                     playerView.resizeMode = resizeMode
                     notifyGesture(if (zoomIn) "Fill screen" else "Fit to screen")
                 }
-            }
+            },
+            onHoldBoost = { pressed ->
+                if (!touchLocked) {
+                    val exo = player
+                    if (pressed && exo?.isPlaying == true && holdSpeedRestore == null) {
+                        holdSpeedRestore = exo.playbackParameters.speed
+                        exo.setPlaybackSpeed(2f)
+                        showGestureHud("⏩  2× speed · Hold", -1)
+                        playPauseButton.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    } else if (!pressed) {
+                        holdSpeedRestore?.let { original -> exo?.setPlaybackSpeed(original) }
+                        holdSpeedRestore = null
+                        hideGestureHudSoon()
+                    }
+                }
+            },
+            onGestureCancelled = { gestureSeeking = false }
         )
         layer.addView(zone, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -780,6 +797,8 @@ class PlayerActivity : Activity() {
         handler.removeCallbacks(progressUpdater)
         handler.removeCallbacks(hideControlsTask)
         savePosition()
+        holdSpeedRestore?.let { player?.setPlaybackSpeed(it) }
+        holdSpeedRestore = null
         playerView.player = null
         player?.release()
         player = null
