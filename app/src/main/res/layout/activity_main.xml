@@ -11,7 +11,7 @@
         <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
             android:orientation="vertical" android:layout_marginStart="11dp">
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:text="Orbit Player" android:textColor="@color/text_main"
+                android:text="Orbit Player Pro" android:textColor="@color/text_main"
                 android:textSize="24sp" android:fontFamily="sans-serif-medium" />
             <TextView android:id="@+id/subtitle" android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:text="YOUR PERSONAL CINEMA" android:letterSpacing="0.16" android:textSize="10sp"
@@ -31,12 +31,12 @@
                 android:text="YOUR MOVIES, YOUR SPACE" android:letterSpacing="0.11"
                 android:textColor="@color/accent_cyan" android:textSize="10sp" android:fontFamily="sans-serif-medium" />
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:text="Beautifully simple." android:textColor="@color/text_main"
+                android:text="Cinema, reimagined." android:textColor="@color/text_main"
                 android:textSize="22sp" android:fontFamily="sans-serif-medium" android:layout_marginTop="5dp" />
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="5dp">
                 <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-                    android:text="Enjoy every frame, offline." android:textSize="12sp" android:textColor="#C8D5F3" />
+                    android:text="Your movies. Zero distractions." android:textSize="12sp" android:textColor="#C8D5F3" />
                 <Button android:id="@+id/btnPick" android:layout_width="wrap_content" android:layout_height="42dp"
                     android:minHeight="0dp" android:minWidth="0dp" android:paddingStart="13dp" android:paddingEnd="13dp"
                     android:background="@drawable/accent_bg" android:text="＋  Open Video"
