@@ -7,3 +7,6 @@
 
 # SMBJ chooses NTLM authentication factories dynamically on Android.
 -keep class com.hierynomus.smbj.auth.NtlmAuthenticator$Factory { *; }
+
+# SMBJ excludes Kerberos/SPNEGO on Android and uses NTLM instead; GSS classes are JRE-only.
+-dontwarn org.ietf.jgss.**
