@@ -133,6 +133,11 @@ class PlayerActivity : Activity() {
             return
         }
         playerTitle.text = videoTitle
+        requestedOrientation = when (userOptions.defaultOrientation) {
+            "Landscape" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            "Portrait" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
         repeatOne = userOptions.repeat
         runCatching {
             playerView.subtitleView?.setFractionalTextSize(0.0533f * userOptions.subtitleScale)
@@ -217,6 +222,7 @@ class PlayerActivity : Activity() {
         player = exo
         playerView.player = exo
         prefs.edit().putString("last_played_uri", videoUri).apply()
+        recordWatchHistory(videoUri)
         exo.setPlaybackSpeed(userOptions.playbackSpeed)
         speedButton.text = "${userOptions.playbackSpeed}×"
         val params = exo.trackSelectionParameters.buildUpon()
@@ -301,6 +307,13 @@ class PlayerActivity : Activity() {
         lastSavedPosition = save
     }
 
+    private fun recordWatchHistory(uri: String) {
+        val old = prefs.getString("recently_watched", "")?.split("|")
+            ?.filter { it.isNotBlank() } ?: emptyList()
+        prefs.edit().putString("recently_watched",
+            (listOf(uri) + old).distinct().take(100).joinToString("|")).apply()
+    }
+
     private fun switchQueue(direction: Int) {
         val adjacent = PlaybackQueue.adjacent(videoUri, direction)
         if (adjacent == null) {
@@ -310,6 +323,7 @@ class PlayerActivity : Activity() {
         savePosition()
         videoUri = adjacent.uri.toString()
         prefs.edit().putString("last_played_uri", videoUri).apply()
+        recordWatchHistory(videoUri)
         videoTitle = adjacent.title
         playerTitle.text = videoTitle
         subtitleUri = null
