@@ -38,6 +38,11 @@
             android:src="@drawable/orbit_nav_open"
             android:background="@drawable/orbit_icon_surface"
             android:contentDescription="Open a video from device" />
+        <ImageView android:id="@+id/btnPlaylists" android:layout_width="42dp"
+            android:layout_height="43dp" android:padding="11dp" android:layout_marginEnd="8dp"
+            android:src="@drawable/orbit_nav_list"
+            android:background="@drawable/orbit_icon_surface"
+            android:contentDescription="My playlists" />
         <ImageView android:id="@+id/btnSettings" android:layout_width="43dp"
             android:layout_height="43dp" android:padding="11dp" android:layout_marginEnd="8dp"
             android:src="@drawable/orbit_ic_settings"
@@ -134,6 +139,9 @@
             <TextView android:id="@+id/filterAll" style="@style/OrbitLibraryChip"
                 android:layout_width="wrap_content" android:layout_height="36dp"
                 android:text="All videos"/>
+            <TextView android:id="@+id/filterFavorites" style="@style/OrbitLibraryChip"
+                android:layout_width="wrap_content" android:layout_height="36dp"
+                android:text="★ Favorites" />
             <TextView android:id="@+id/filterProgress" style="@style/OrbitLibraryChip"
                 android:layout_width="wrap_content" android:layout_height="36dp"
                 android:text="Continue" />
