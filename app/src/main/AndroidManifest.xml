@@ -11,7 +11,7 @@
     <application
         android:name=".OrbitApp"
         android:allowBackup="false"
-        android:label="Orbit Player"
+        android:label="Orbit Player Pro"
         android:icon="@drawable/orbit_launcher"
         android:roundIcon="@drawable/orbit_launcher"
         android:theme="@style/Theme.OrbitPlayer"
