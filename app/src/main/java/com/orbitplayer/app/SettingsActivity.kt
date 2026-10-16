@@ -147,6 +147,9 @@ class SettingsActivity : Activity() {
         row("Pinned folders", "${settings.folders("pinned").size} pinned · Manage favorites") {
             manageFolders("pinned", "Unpin folders")
         }
+        toggle("Automatically refresh library", "Update Albums when videos are added or removed", settings.autoRefresh) {
+            settings.autoRefresh = it
+        }
         row("Rescan videos", "Refresh the accessible local video library") {
             settings.prefs.edit().putBoolean("needs_rescan", true).apply()
             finish()

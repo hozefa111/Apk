@@ -139,6 +139,7 @@ class PlayerActivity : Activity() {
             else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
         repeatOne = userOptions.repeat
+        PlaybackQueue.ensureRestored(this)
         runCatching {
             playerView.subtitleView?.setFractionalTextSize(0.0533f * userOptions.subtitleScale)
         }
@@ -219,6 +220,8 @@ class PlayerActivity : Activity() {
     private fun preparePlayer() {
         if (player != null) return
         val exo = ExoPlayer.Builder(this).build()
+        exo.setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, true)
+        exo.setHandleAudioBecomingNoisy(true)
         player = exo
         playerView.player = exo
         prefs.edit().putString("last_played_uri", videoUri).apply()
@@ -239,7 +242,7 @@ class PlayerActivity : Activity() {
                 AlertDialog.Builder(this@PlayerActivity)
                     .setTitle("Unable to play this video")
                     .setMessage("Decoder or file problem: ${error.errorCodeName}.\n\n" +
-                        "This Lite build uses Android-supported codecs. Some formats need a different decoder.")
+                        "Orbit Pro uses the decoders available on your device. This codec might require an additional decoder.")
                     .setPositiveButton("OK", null)
                     .show()
             }
@@ -259,6 +262,14 @@ class PlayerActivity : Activity() {
                 if (playbackState == Player.STATE_ENDED) {
                     prefs.edit().remove(positionKey(videoUri)).apply()
                     lastSavedPosition = 0L
+                    val finishedUri = videoUri
+                    val canAdvance = PlaybackQueue.adjacent(finishedUri, 1) != null
+                    if (QueueNavigation.shouldAutoAdvance(repeatOne, PlaybackQueue.autoAdvance, canAdvance)) {
+                        // Media3 listener callbacks may run during transitions; avoid re-entrant setMediaItem.
+                        handler.post {
+                            if (!isFinishing && !isDestroyed && videoUri == finishedUri) switchQueue(1)
+                        }
+                    }
                 }
             }
         })
@@ -315,6 +326,7 @@ class PlayerActivity : Activity() {
     }
 
     private fun switchQueue(direction: Int) {
+        PlaybackQueue.ensureRestored(this)
         val adjacent = PlaybackQueue.adjacent(videoUri, direction)
         if (adjacent == null) {
             Toast.makeText(this, "No ${if (direction > 0) "next" else "previous"} video in this list", Toast.LENGTH_SHORT).show()
@@ -327,7 +339,7 @@ class PlayerActivity : Activity() {
         videoTitle = adjacent.title
         playerTitle.text = videoTitle
         subtitleUri = null
-        lastSavedPosition = savedProgress(videoUri)
+        lastSavedPosition = if (userOptions.resume) savedProgress(videoUri) else 0L
         try {
             player?.apply {
                 trackSelectionParameters = trackSelectionParameters.buildUpon()
@@ -886,6 +898,10 @@ class PlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        // PiP may bypass normal onStop cleanup on some devices.
+        playerView.player = null
+        player?.release()
+        player = null
         sleepTimerRunnable?.let { handler.removeCallbacks(it) }
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()
