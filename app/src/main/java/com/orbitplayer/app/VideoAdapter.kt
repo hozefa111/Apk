@@ -17,6 +17,7 @@ import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import java.util.concurrent.Executors
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Orbit's offline gallery: two view modes, stable IDs, bounded thumbnails and diff-based updates.
@@ -33,6 +34,7 @@ class VideoAdapter(
     private val prefs = context.getSharedPreferences("playback_positions_v1", Context.MODE_PRIVATE)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val executor = Executors.newFixedThreadPool(2)
+    private val decoding = ConcurrentHashMap.newKeySet<String>()
     private val cache = object : LruCache<String, Bitmap>(12 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) =
             (value.byteCount / 1024).coerceAtLeast(1)
@@ -89,7 +91,7 @@ class VideoAdapter(
             holder.thumb.setImageBitmap(image)
             holder.glyph.visibility = View.GONE
         } ?: run {
-            executor.execute {
+            if (decoding.add(key)) executor.execute {
                 val bitmap = try {
                     if (Build.VERSION.SDK_INT >= 29) {
                         context.contentResolver.loadThumbnail(item.uri, Size(384, 216), null)
@@ -99,6 +101,7 @@ class VideoAdapter(
                             MediaStore.Video.Thumbnails.MINI_KIND, null)
                     }
                 } catch (_: Exception) { null }
+                decoding.remove(key)
                 if (bitmap != null) {
                     synchronized(cache) { cache.put(key, bitmap) }
                     mainHandler.post {

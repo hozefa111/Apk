@@ -12,6 +12,7 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.DiffUtil
 import java.util.concurrent.Executors
 import android.os.Handler
 import android.os.Looper
@@ -32,8 +33,21 @@ class FolderAdapter(
     override fun getItemId(position: Int) = items[position].path.hashCode().toLong()
     override fun getItemCount() = items.size
     fun submit(next: List<FolderAlbum>) {
-        items = next
-        notifyDataSetChanged()
+        val old = items
+        val newer = next.toList()
+        val changes = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+            override fun getOldListSize() = old.size
+            override fun getNewListSize() = newer.size
+            override fun areItemsTheSame(i: Int, j: Int) = old[i].path == newer[j].path
+            override fun areContentsTheSame(i: Int, j: Int): Boolean {
+                val before = old[i]
+                val after = newer[j]
+                return before.count == after.count && before.pinned == after.pinned &&
+                    before.cover.uri == after.cover.uri && before.displayName == after.displayName
+            }
+        })
+        items = newer
+        changes.dispatchUpdatesTo(this)
     }
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder =
         Holder(LayoutInflater.from(parent.context).inflate(R.layout.row_folder, parent, false))
