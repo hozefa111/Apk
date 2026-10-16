@@ -41,8 +41,8 @@ assert "defaultOrientation" in sources["PlayerActivity"] and "defaultOrientation
 assert "ORBIT" not in str(root) or True
 import re
 gradle = Path("app/build.gradle.kts").read_text()
-assert re.search(r'versionName\\s*=\\s*"\\d+\\.\\d+\\.\\d+"', gradle), "Invalid versionName"
-assert re.search(r'versionCode\\s*=\\s*[1-9]\\d*', gradle), "Missing positive versionCode"
+assert re.search(r'versionName\s*=\s*"\d+\.\d+\.\d+"', gradle), "Invalid versionName"
+assert re.search(r'versionCode\s*=\s*[1-9]\d*', gradle), "Missing positive versionCode"
 assert 'applicationId = "com.orbitplayer.app"' in Path("app/build.gradle.kts").read_text()
 manifest=Path("app/src/main/AndroidManifest.xml").read_text()
 assert 'android:name=".SettingsActivity"' in manifest
