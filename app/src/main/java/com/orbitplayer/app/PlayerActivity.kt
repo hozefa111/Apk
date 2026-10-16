@@ -242,7 +242,7 @@ class PlayerActivity : Activity() {
                 AlertDialog.Builder(this@PlayerActivity)
                     .setTitle("Unable to play this video")
                     .setMessage("Decoder or file problem: ${error.errorCodeName}.\n\n" +
-                        "This Lite build uses Android-supported codecs. Some formats need a different decoder.")
+                        "Orbit Pro uses the decoders available on your device. This codec might require an additional decoder.")
                     .setPositiveButton("OK", null)
                     .show()
             }
