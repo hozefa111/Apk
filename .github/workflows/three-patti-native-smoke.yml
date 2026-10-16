@@ -35,7 +35,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
           script: |
-            set -euo pipefail
+            set -eu
             adb install 3PattiProNative/app/build/outputs/apk/debug/app-debug.apk
             adb shell am start -W -n com.hozefa.threepattipro.nativeapp/.MainActivity
             sleep 6
@@ -59,6 +59,12 @@ jobs:
             subprocess.run(['adb','shell','pidof','com.hozefa.threepattipro.nativeapp'],check=True)
             tap('Home')
             subprocess.run(['adb','shell','pidof','com.hozefa.threepattipro.nativeapp'],check=True)
-            print('Native install, launch, Ranks and Home taps passed')
+            tap('Players')
+            subprocess.run(['adb','shell','pidof','com.hozefa.threepattipro.nativeapp'],check=True)
+            tap('History')
+            subprocess.run(['adb','shell','pidof','com.hozefa.threepattipro.nativeapp'],check=True)
+            print('Native install, launch, Ranks/Home/Players/History taps passed')
             PY
-            echo "This is an offline UI smoke check, not an Auth/Firestore integration test"
+            adb logcat -d -v brief | grep -F 'FATAL EXCEPTION' > /tmp/patti-crashes.txt || true
+            if [ -s /tmp/patti-crashes.txt ]; then cat /tmp/patti-crashes.txt; exit 1; fi
+            echo "Native navigation smoke passed; Auth/Firestore writes not exercised"

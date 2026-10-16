@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
@@ -29,6 +30,7 @@ public final class FirebaseGateway {
         void authChanged(boolean loggedIn);
         void notice(String message);
         void busy(boolean active);
+        void syncState(boolean online);
     }
     public static final class Stamp {
         public final String value;
@@ -39,12 +41,14 @@ public final class FirebaseGateway {
     private final Listener listener;
     private final String apiKey;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final ExecutorService fetchers = Executors.newFixedThreadPool(3);
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final OkHttpClient http = new OkHttpClient.Builder().connectTimeout(14, TimeUnit.SECONDS).readTimeout(14, TimeUnit.SECONDS).build();
     private final SharedPreferences prefs;
-    private String refreshToken, idToken;
+    private volatile String refreshToken, idToken;
     private long expireAt;
-    private boolean running;
+    private volatile boolean running;
+    private volatile boolean freshSnapshot=false;
     private boolean loading;
     private final AtomicBoolean writeInFlight=new AtomicBoolean(false);
     private boolean reloadRequested=false;
@@ -75,7 +79,8 @@ public final class FirebaseGateway {
             load();
         });
     }
-    public void stop() { running = false; ui.removeCallbacksAndMessages(null); executor.shutdownNow(); }
+    public void stop() { running = false; ui.removeCallbacksAndMessages(null);
+        executor.shutdownNow();fetchers.shutdownNow(); }
     private void notify(String msg) { ui.post(() -> { if (running) listener.notice(msg); }); }
     private void setBusy(boolean b) { ui.post(() -> { if (running) listener.busy(b); }); }
     private String encoded(String s) throws Exception { return URLEncoder.encode(s, "UTF-8"); }
@@ -165,12 +170,20 @@ public final class FirebaseGateway {
                     ui.post(()->{if(running) listener.authChanged(false);});
                 }
             }
-            List<Map<String,Object>> p=fetchCollection("players");
-            List<Map<String,Object>> r=fetchCollection("rounds");
-            List<Map<String,Object>> s=fetchCollection("sessions");
+            // Fetch independent collections in parallel rather than blocking the
+            // admin action queue for the sum of three HTTP latencies.
+            Future<List<Map<String,Object>>> playerFetch=fetchers.submit(()->fetchCollection("players"));
+            Future<List<Map<String,Object>>> roundFetch=fetchers.submit(()->fetchCollection("rounds"));
+            Future<List<Map<String,Object>>> sessionFetch=fetchers.submit(()->fetchCollection("sessions"));
+            List<Map<String,Object>> p=playerFetch.get();
+            List<Map<String,Object>> r=roundFetch.get();
+            List<Map<String,Object>> s=sessionFetch.get();
+            freshSnapshot=true;
             saveCachedSnapshot(p,r,s);
-            ui.post(() -> { if(running) listener.dataUpdated(p,r,s); });
+            ui.post(() -> { if(running) { listener.syncState(true); listener.dataUpdated(p,r,s); } });
         } catch (Exception ex) {
+            freshSnapshot=false;
+            ui.post(()->{if(running)listener.syncState(false);});
             notify("Sync issue: " + ex.getMessage());
         } finally {
             loading=false;
@@ -213,6 +226,7 @@ public final class FirebaseGateway {
             List<Map<String,Object>> ss=decodeCachedCollection(snapshot.getJSONArray("sessions"));
             ui.post(()->{
                 if(running){
+                    listener.syncState(false);
                     listener.dataUpdated(p,r,ss);
                     listener.notice("Showing saved scores. Checking live updates…");
                 }
@@ -270,6 +284,7 @@ public final class FirebaseGateway {
             next=data.optString("nextPageToken","");
             if(next.isEmpty()) break;
         }
+        if(next!=null&&!next.isEmpty())throw new IOException("Firestore history exceeds page limit. Refusing to show incomplete records.");
         return result;
     }
     private Map<String,Object> decodeFields(JSONObject fields) throws Exception {
@@ -399,6 +414,11 @@ public final class FirebaseGateway {
             onUi(onFailure);
             return;
         }
+        if(!freshSnapshot){
+            notify("Waiting for live Firebase sync. Offline data is read-only.");
+            onUi(onFailure);
+            return;
+        }
         if(!writeInFlight.compareAndSet(false,true)){
             notify("Another save is already in progress");
             onUi(onFailure);
@@ -443,6 +463,31 @@ public final class FirebaseGateway {
             JSONObject body=new JSONObject();
             body.put("fields",encodeFields(fields));
             jsonCall("POST",dbRoot+"/"+collection,body,token);
+        },onSaved,onFailed);
+    }
+    /**
+     * Idempotent creation for Hukum rounds. The same stable document ID is
+     * reused across an ambiguous network failure and a user retry.
+     * No writes are generated by reads or unit tests.
+     */
+    public void addRoundWithId(String id,Map<String,Object> fields,
+                               Runnable onSaved,Runnable onFailed) {
+        write("Round saved successfully",token->{
+            String path=dbRoot+"/rounds/"+encoded(id);
+            JSONObject body=new JSONObject().put("fields",encodeFields(fields));
+            try {
+                jsonCall("PATCH",path+"?currentDocument.exists=false",body,token);
+            }catch(Exception failure){
+                // A timeout might occur AFTER the backend committed the write.
+                // Verify our unique UUID before offering a retry, to avoid
+                // inserting the same round twice into the source of truth.
+                try{
+                    JSONObject existing=jsonCall("GET",path,null,token);
+                    if(existing.optJSONObject("fields")==null)throw failure;
+                }catch(Exception verificationFailure){
+                    throw failure;
+                }
+            }
         },onSaved,onFailed);
     }
     public void patchDocument(String collection,String id,Map<String,Object> fields,String success) {

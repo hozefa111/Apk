@@ -38,7 +38,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private final List<Map<String,Object>> sessions = new ArrayList<>();
     private LinearLayout root, content, navigation, toolbar;
     private ScrollView scroll;
-    private boolean loggedIn=false, busy=false, hasData=false;
+    private boolean loggedIn=false, busy=false, hasData=false, liveConnected=false;
     private int tab=0, historyTab=0;
     private String profileId=null, rankFilter="all";
     private long customStart=0L, customEnd=0L;
@@ -51,6 +51,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private final LinkedHashSet<String> partners=new LinkedHashSet<>();
     private String hukum=null, outcome=null;
     private int bid=155;
+    private String pendingRoundId=null,pendingRoundKey=null;
 
     // Round form views live across taps; data changes update these controls in place.
     // Rebuilding the entire Activity on every bid/partner tap caused UI jank.
@@ -119,6 +120,11 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         updateToolbar();
         if(!loggedIn && tab==2) tab=0;
         render(false);
+    }
+    @Override public void syncState(boolean online) {
+        if(liveConnected==online)return;
+        liveConnected=online;
+        updateToolbar();
     }
     @Override public void notice(String msg) {
         Toast.makeText(this,msg,Toast.LENGTH_LONG).show();
@@ -200,22 +206,12 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         int n=0;
         for(Map<String,Object> r:source) {
             if(!strings(r.get("playerIds")).contains(pid))continue;
-            boolean isWin="win".equals(str(r,"result"));
-            boolean side=idIsHukum(r,pid)||strings(r.get("partnerIds")).contains(pid);
-            if(isWin==side)n++;
+            if(RoundAnalytics.won(r,pid))n++;
         }
         return n;
     }
     private int winningStreak(String pid,List<Map<String,Object>> source){
-        int streak=0;
-        for(Map<String,Object> round:source){
-            if(!strings(round.get("playerIds")).contains(pid))continue;
-            boolean onHukumSide=pid.equals(str(round,"hukumId"))||
-                    strings(round.get("partnerIds")).contains(pid);
-            if("win".equals(str(round,"result"))==onHukumSide)streak++;
-            else break;
-        }
-        return streak;
+        return RoundAnalytics.winningStreak(pid,source);
     }
     private boolean idIsHukum(Map<String,Object> r,String pid) {return str(r,"hukumId").equals(pid);}
     private TextView text(String label,int size,int color,boolean bold) {
@@ -302,7 +298,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         TextView appName=text("♠  3 PATTI PRO",21,GOLD,true);
         heading.addView(appName);
         gap(heading,5);
-        heading.addView(text("SCORE TRACKER",9,MUTED,true));
+        heading.addView(text(liveConnected?"●  LIVE SYNC":"○  OFFLINE / CONNECTING",9,
+                liveConnected?GREEN:MUTED,true));
         toolbar.addView(heading,new LinearLayout.LayoutParams(0,-2,1));
         TextView status=text(busy?"SAVING…":loggedIn?"ADMIN":"LOGIN",11,loggedIn?GREEN:GOLD,true);
         status.setGravity(Gravity.CENTER);pad(status,12,10,12,10);
@@ -636,7 +633,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         for(Map<String,Object> r:individual) {
             boolean roleH=pid.equals(str(r,"hukumId"));
             boolean roleP=strings(r.get("partnerIds")).contains(pid);
-            boolean win="win".equals(str(r,"result"))==(roleH||roleP);
+            boolean win=RoundAnalytics.won(r,pid);
             if(win)wins++;else losses++;
             if(roleH){if(win)hukumWins++;else hukumLosses++;}
             else if(roleP){if(win)partnerWins++;else partnerLosses++;}
@@ -1096,7 +1093,13 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                     preview.put("timestamp",java.time.Instant.now().toString());
                     roundSaving=true;
                     updateRoundForm();
-                    api.addDocument("rounds",body,"Round saved successfully",()->{
+                    String key=bid+"|"+hukum+"|"+outcome+"|"+
+                            new TreeSet<>(playing)+"|"+new TreeSet<>(partners);
+                    if(!key.equals(pendingRoundKey)){
+                        pendingRoundKey=key;
+                        pendingRoundId=UUID.randomUUID().toString();
+                    }
+                    api.addRoundWithId(pendingRoundId,body,()->{
                         roundSaving=false;
                         resetRound();
                         tab=0;
@@ -1113,7 +1116,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                     });
                 }).show();
     }
-    private void resetRound(){playing=null;partners.clear();hukum=null;outcome=null;bid=155;}
+    private void resetRound(){playing=null;partners.clear();hukum=null;outcome=null;bid=155;
+        pendingRoundId=null;pendingRoundKey=null;}
     private void addPlayerDialog() {
         EditText name=new EditText(this);
         name.setSingleLine(true);name.setHint("Player name");pad(name,20,10,20,10);
@@ -1390,9 +1394,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 if(!present)continue;
                 boolean isPartner=strings(round.get("partnerIds")).contains(pid);
                 if(isPartner){partnerCount++;if("win".equals(str(round,"result")))partnerWins++;}
-                int score=num(map(round.get("scoreChanges")).get(pid));
-                if(score>0){currentStreak++;topStreak=Math.max(topStreak,currentStreak);}
-                else if(score<0)currentStreak=0;
+                boolean won=RoundAnalytics.won(round,pid);
+                if(won){currentStreak++;topStreak=Math.max(topStreak,currentStreak);}
+                else currentStreak=0;
             }
             if(partnerCount>=3&&(double)partnerWins/partnerCount>=0.8)stringsMutable(badges,"sharpPartner").add(pid);
             if(topStreak>=3)stringsMutable(badges,"hotStreak").add(pid);
