@@ -592,7 +592,10 @@ class PlayerActivity : Activity() {
         val layer = findViewById<FrameLayout>(R.id.gestureLayer)
         val zone = PlayerGestureZone(
             this,
-            onTap = { if (touchLocked) showUnlockButton() else toggleControls() },
+            onTap = {
+                if (BuildConfig.DEBUG) android.util.Log.i("OrbitPlayerQA", "TOUCH_SINGLE_TAP")
+                if (touchLocked) showUnlockButton() else toggleControls()
+            },
             onDoubleTap = { fraction ->
                 if (!touchLocked && userOptions.gestureDoubleTap) {
                     when {
