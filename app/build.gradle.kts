@@ -48,6 +48,8 @@ dependencies {
     val media3 = "1.11.1"
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-ui:$media3")
+    implementation("androidx.media3:media3-session:$media3")
+    implementation("androidx.media3:media3-extractor:$media3")
     implementation("androidx.recyclerview:recyclerview:1.4.0")
     testImplementation("junit:junit:4.13.2")
 }

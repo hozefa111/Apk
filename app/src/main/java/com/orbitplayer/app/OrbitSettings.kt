@@ -30,6 +30,9 @@ class OrbitSettings(context: Context) {
     var resume: Boolean
         get() = prefs.getBoolean("resume", true)
         set(value) = prefs.edit().putBoolean("resume", value).apply()
+    var backgroundPlayback: Boolean
+        get() = prefs.getBoolean("background_playback", false)
+        set(value) = prefs.edit().putBoolean("background_playback", value).apply()
     var autoplay: Boolean
         get() = prefs.getBoolean("autoplay", true)
         set(value) = prefs.edit().putBoolean("autoplay", value).apply()

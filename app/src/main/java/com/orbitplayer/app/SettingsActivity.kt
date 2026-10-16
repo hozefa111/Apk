@@ -100,6 +100,9 @@ class SettingsActivity : Activity() {
         toggle("Autoplay", "Start playback immediately when opening a video", settings.autoplay) {
             settings.autoplay = it
         }
+        toggle("Play audio in background", "Keep audio playing with a media notification when leaving the player", settings.backgroundPlayback) {
+            settings.backgroundPlayback = it
+        }
         toggle("Repeat current video", "Loop the video when it ends", settings.repeat) {
             settings.repeat = it
         }
