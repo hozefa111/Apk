@@ -74,7 +74,9 @@ class SmbVideoDataSource : BaseDataSource(true) {
                 EnumSet.of(SMB2ShareAccess.FILE_SHARE_READ),
                 SMB2CreateDisposition.FILE_OPEN, null)
             handle = opened
-            val length = opened.getLength()
+            val length = opened.getFileInformation(
+                com.hierynomus.msfscc.fileinformation.FileStandardInformation::class.java
+            ).getEndOfFile()
             if (dataSpec.position > length) throw IOException("Seek position exceeds file size")
             offset = dataSpec.position
             remaining = if (dataSpec.length == C.LENGTH_UNSET.toLong())
