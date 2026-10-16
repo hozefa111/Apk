@@ -47,7 +47,7 @@ class OrbitCollections(context: Context) {
         val old = items(title)
         val combined = (old + uris.filter { it.isNotBlank() }).distinct().take(4000)
         val array = JSONArray()
-        combined.forEach(array::put)
+        combined.forEach { array.put(it) }
         data.put(title, array)
         prefs.edit().putString("playlists", data.toString()).apply()
         return combined.size - old.size
@@ -58,7 +58,7 @@ class OrbitCollections(context: Context) {
         if (!data.has(name)) return
         val values = items(name).filterNot { it == uri }
         val array = JSONArray()
-        values.forEach(array::put)
+        values.forEach { array.put(it) }
         data.put(name, array)
         prefs.edit().putString("playlists", data.toString()).apply()
     }
