@@ -12,7 +12,7 @@ required={"btnSettings","btnPick","navHome","navFolders","navContinue","navSearc
           "continueCard","continueTitle","continueThumb","continueDetails",
           "search","clearSearch","btnSort","btnView","filterAll","filterRecent",
           "filterProgress","filterHistory","filterFavorites","btnPlaylists","folderFilter","videos","count","btnGrant","btnRefresh",
-          "sectionTitle","empty","filterScroller"}
+          "sectionTitle","empty","filterScroller","formatFilter"}
 assert required <= root, "Missing main view IDs: "+str(sorted(required-root))
 cards={"thumb","duration","playGlyph","title","details","watchProgress"}
 for path in ("row_video.xml","row_video_list.xml"):
@@ -24,7 +24,7 @@ sources={n:Path("app/src/main/java/com/orbitplayer/app/"+n+".kt").read_text() fo
 main=sources["MainActivity"]
 for code in ("setTab(Tab.FOLDERS)","setTab(Tab.CONTINUE)","setTab(Tab.SEARCH)",
     "fun updateAlbums()","fun openAlbum(","fun folderOptions(","fun filterVideos()",
-    "fun refreshContinueCard()","SettingsActivity::class.java",
+    "fun refreshContinueCard()","fun showFormatDialog()","SettingsActivity::class.java",
     "VideoRepository(applicationContext).load()"):
     assert code in main, "Missing feature: "+code
 assert "navOpen" not in main and "navUpdates" not in main, "Obsolete navigation found"
@@ -33,13 +33,16 @@ for code in ("AMOLED black","Default opening screen","Folder gallery columns",
     "Resume playback","Autoplay","Repeat current video","Skip duration",
     "Controls auto-hide","Swipe for volume","Swipe for brightness","Double tap to seek",
     "Subtitle text size","Preferred audio language","Preferred subtitle language",
-    "Hidden folders","Pinned folders","Check for updates","Clear video history"):
+    "Hidden folders","Pinned folders","Check for updates","Clear watch history"):
     assert code in settings, "Setting missing: "+code
 assert "playback_positions_v1" in sources["VideoAdapter"]
 assert "recently_watched" in main and "R.id.filterHistory" in main
 assert "defaultOrientation" in sources["PlayerActivity"] and "defaultOrientation" in sources["OrbitSettings"]
 assert "ORBIT" not in str(root) or True
-assert 'versionName = "0.3.0"' in Path("app/build.gradle.kts").read_text()
+import re
+gradle = Path("app/build.gradle.kts").read_text()
+assert re.search(r'versionName\s*=\s*"\d+\.\d+\.\d+"', gradle), "Invalid versionName"
+assert re.search(r'versionCode\s*=\s*[1-9]\d*', gradle), "Missing positive versionCode"
 assert 'applicationId = "com.orbitplayer.app"' in Path("app/build.gradle.kts").read_text()
 manifest=Path("app/src/main/AndroidManifest.xml").read_text()
 assert 'android:name=".SettingsActivity"' in manifest

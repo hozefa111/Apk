@@ -37,7 +37,7 @@ import java.util.concurrent.Executors
 class MainActivity : Activity() {
     private enum class Filter { ALL, CONTINUE, RECENT, HISTORY, FAVORITES }
     private enum class Tab { VIDEOS, FOLDERS, CONTINUE, SEARCH }
-    private enum class Sort { NEWEST, OLDEST, NAME, SIZE }
+    private enum class Sort { NEWEST, OLDEST, NAME, SIZE, DURATION }
 
     private val requestLibrary = 501
     private val requestFile = 502
@@ -60,6 +60,7 @@ class MainActivity : Activity() {
     private lateinit var grant: TextView
     private lateinit var sortButton: TextView
     private lateinit var folderChip: TextView
+    private lateinit var formatChip: TextView
     private lateinit var continueCard: View
     private lateinit var continueThumb: ImageView
     private lateinit var search: EditText
@@ -71,10 +72,16 @@ class MainActivity : Activity() {
     private var gallery = true
     private var query = ""
     private var chosenFolder = "All folders"
+    private var selectedFormat = "" // Empty means all file types.
     private var continueVideo: VideoItem? = null
     private var scanGeneration = 0
+    // Android can revoke video access while the app is in the background.
+    private var previousLibraryAccess: Boolean? = null
     private var destroyed = false
     private var observerActive = false
+    private var needsBackgroundScan = false
+    // Never sort thousands of videos repeatedly while the user is still typing.
+    private val searchLater = Runnable { if (!destroyed) filterVideos() }
     private val refreshLater = Runnable { if (!destroyed && hasLibraryPermission()) scan() }
     private val mediaObserver = object : ContentObserver(handler) {
         override fun onChange(selfChange: Boolean) {
@@ -94,6 +101,7 @@ class MainActivity : Activity() {
         grant = findViewById(R.id.btnGrant)
         sortButton = findViewById(R.id.btnSort)
         folderChip = findViewById(R.id.folderFilter)
+        formatChip = findViewById(R.id.formatFilter)
         continueCard = findViewById(R.id.continueCard)
         continueThumb = findViewById(R.id.continueThumb)
         search = findViewById(R.id.search)
@@ -109,6 +117,26 @@ class MainActivity : Activity() {
             else -> Tab.FOLDERS
         }
         if (tab == Tab.VIDEOS) chosenFolder = preferences.lastFolder
+        // Android may recreate this screen on rotation or after process eviction.
+        // Restore the user's live context rather than dumping them into default Albums.
+        savedInstanceState?.let { state ->
+            tab = Tab.values().firstOrNull { it.name == state.getString("orbit_tab") } ?: tab
+            filter = Filter.values().firstOrNull { it.name == state.getString("orbit_filter") } ?: filter
+            sort = Sort.values().getOrNull(state.getInt("orbit_sort", sort.ordinal)) ?: sort
+            chosenFolder = state.getString("orbit_folder", chosenFolder) ?: chosenFolder
+            albumSort = state.getInt("orbit_album_sort", 0).coerceIn(0, 2)
+            gallery = state.getBoolean("orbit_gallery", gallery)
+            currentPlaylist = state.getString("orbit_playlist")?.takeIf {
+                it in collections.names()
+            }
+            query = state.getString("orbit_query", "") ?: ""
+            selectedFormat = state.getString("orbit_format", "") ?: ""
+        }
+        // Let RecyclerView restore its scroll offset after asynchronous MediaStore results.
+        adapter.stateRestorationPolicy =
+            RecyclerView.Adapter.StateRestorationPolicy.PREVENT_WHEN_EMPTY
+        albumAdapter.stateRestorationPolicy =
+            RecyclerView.Adapter.StateRestorationPolicy.PREVENT_WHEN_EMPTY
         gridManager = GridLayoutManager(this, if (gallery) 2 else 1)
         videos.layoutManager = gridManager
         videos.adapter = adapter
@@ -127,6 +155,7 @@ class MainActivity : Activity() {
         grant.setOnClickListener { requestVideoPermissions() }
         sortButton.setOnClickListener { showSortDialog() }
         folderChip.setOnClickListener { showFolderDialog() }
+        formatChip.setOnClickListener { showFormatDialog() }
         findViewById<View>(R.id.filterAll).setOnClickListener { chooseFilter(Filter.ALL) }
         findViewById<View>(R.id.filterProgress).setOnClickListener { chooseFilter(Filter.CONTINUE) }
         findViewById<View>(R.id.filterRecent).setOnClickListener { chooseFilter(Filter.RECENT) }
@@ -144,15 +173,31 @@ class MainActivity : Activity() {
                 query = s?.toString()?.trim().orEmpty()
                 findViewById<View>(R.id.clearSearch).visibility =
                     if (query.isBlank()) View.GONE else View.VISIBLE
-                filterVideos()
+                handler.removeCallbacks(searchLater)
+                handler.postDelayed(searchLater, 180)
             }
             override fun afterTextChanged(s: Editable?) = Unit
         })
 
+        if (query.isNotBlank()) search.setText(query)
         updatePermissionsUi()
         applyAppearance()
-        if (hasLibraryPermission()) scan() else filterVideos()
+        previousLibraryAccess = hasLibraryPermission()
+        if (previousLibraryAccess == true) scan() else filterVideos()
         showPreviousCrashReport()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("orbit_tab", tab.name)
+        outState.putString("orbit_filter", filter.name)
+        outState.putInt("orbit_sort", sort.ordinal)
+        outState.putString("orbit_folder", chosenFolder)
+        outState.putInt("orbit_album_sort", albumSort)
+        outState.putBoolean("orbit_gallery", gallery)
+        outState.putString("orbit_playlist", currentPlaylist)
+        outState.putString("orbit_query", query)
+        outState.putString("orbit_format", selectedFormat)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onStart() {
@@ -165,6 +210,9 @@ class MainActivity : Activity() {
     }
 
     override fun onStop() {
+        // MediaStore observer is unregistered while another app/player is foreground.
+        // Mark the next foreground entry for a real rescan instead of showing stale files.
+        needsBackgroundScan = true
         handler.removeCallbacks(refreshLater)
         if (observerActive) {
             contentResolver.unregisterContentObserver(mediaObserver)
@@ -175,16 +223,31 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        val hasAccess = hasLibraryPermission()
+        val accessChanged = previousLibraryAccess != null && previousLibraryAccess != hasAccess
+        previousLibraryAccess = hasAccess
         updatePermissionsUi()
         if (::adapter.isInitialized) {
             applyAppearance()
             adapter.refreshProgress()
-            refreshContinueCard()
             if (gallery != preferences.gallery && tab != Tab.FOLDERS) setGalleryMode(preferences.gallery)
             val rescan = preferences.prefs.getBoolean("needs_rescan", false)
             if (rescan) preferences.prefs.edit().putBoolean("needs_rescan", false).apply()
-            if (hasLibraryPermission() && (allVideos.isEmpty() || rescan)) scan()
-            else filterVideos()
+            if (!hasAccess) {
+                // Forget the stale on-screen MediaStore rows, not any saved user favorites.
+                ++scanGeneration
+                allVideos = emptyList()
+                continueVideo = null
+                rebuildFolders()
+                filterVideos()
+            } else if (accessChanged || allVideos.isEmpty() || rescan ||
+                (preferences.autoRefresh && needsBackgroundScan)) {
+                needsBackgroundScan = false
+                scan()
+            } else {
+                filterVideos()
+            }
+            refreshContinueCard()
         }
     }
 
@@ -248,13 +311,29 @@ class MainActivity : Activity() {
                 }.setNegativeButton("Cancel", null).show()
             return
         }
-        val values = arrayOf("Newest first", "Oldest first", "Name A to Z", "Largest first")
+        val values = arrayOf("Newest first", "Oldest first", "Name A to Z",
+            "Largest file first", "Longest video first")
         AlertDialog.Builder(this).setTitle("Sort videos")
             .setSingleChoiceItems(values, sort.ordinal) { dialog, selected ->
                 sort = Sort.values()[selected]
                 preferences.sort = selected
-                sortButton.text = arrayOf("Newest", "Oldest", "Name A–Z", "Largest")[selected] + "  ▾"
+                sortButton.text = arrayOf("Newest", "Oldest", "Name A–Z",
+                    "Largest", "Longest")[selected] + "  ▾"
                 filterVideos()
+                dialog.dismiss()
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun showFormatDialog() {
+        val formats = allVideos.asSequence().map { videoExtension(it.title) }
+            .filter { it.isNotBlank() }.distinct().sorted().toList()
+        val entries = listOf("All formats") + formats.map { it.uppercase(java.util.Locale.ROOT) }
+        val selection = (formats.indexOf(selectedFormat) + 1).coerceAtLeast(0)
+        AlertDialog.Builder(this).setTitle("Video file type")
+            .setSingleChoiceItems(entries.toTypedArray(), selection) { dialog, index ->
+                selectedFormat = if (index == 0) "" else formats[index - 1]
+                filterVideos()
+                videos.scrollToPosition(0)
                 dialog.dismiss()
             }.setNegativeButton("Cancel", null).show()
     }
@@ -323,17 +402,26 @@ class MainActivity : Activity() {
     }
 
     private fun filterVideos() {
+        // Albums have their own search/grouping logic. Avoid diffing and sorting the
+        // entire video list invisibly whenever the user browses default Folders.
+        if (tab == Tab.FOLDERS) {
+            updateAlbums()
+            return
+        }
         val nowSeconds = System.currentTimeMillis() / 1000
         val history = progress.getString("recently_watched", "")?.split("|")
             ?.filter { it.isNotBlank() } ?: emptyList()
         val historyOrder = history.withIndex().associate { it.value to it.index }
         val cutoff = nowSeconds - 30L * 24L * 60L * 60L
         val playlistOrder = currentPlaylist?.let { collections.items(it) }
+        val playlistPositions = playlistOrder?.withIndex()?.associate { it.value to it.index }
+        val hiddenFolders = preferences.folders("hidden")
         val favorites = if (filter == Filter.FAVORITES) collections.favorites() else emptySet()
         val filtered = allVideos.asSequence()
-            .filter { !preferences.hasFolder("hidden", it.folder) }
+            .filter { it.folder !in hiddenFolders }
             .filter { chosenFolder == "All folders" || it.folder == chosenFolder }
-            .filter { playlistOrder == null || it.uri.toString() in playlistOrder }
+            .filter { selectedFormat.isEmpty() || videoExtension(it.title) == selectedFormat }
+            .filter { playlistPositions == null || it.uri.toString() in playlistPositions }
             .filter { query.isBlank() || it.title.contains(query, ignoreCase = true) ||
                 it.folder.contains(query, ignoreCase = true) }
             .filter {
@@ -349,20 +437,19 @@ class MainActivity : Activity() {
                 }
             }
         visibleVideos = when {
-            playlistOrder != null -> filtered.sortedBy { playlistOrder.indexOf(it.uri.toString()) }
+            playlistPositions != null -> filtered.sortedBy {
+                playlistPositions[it.uri.toString()] ?: Int.MAX_VALUE
+            }
             filter == Filter.HISTORY -> filtered.sortedBy {
                 historyOrder[it.uri.toString()] ?: Int.MAX_VALUE
             }
             sort == Sort.NEWEST -> filtered.sortedByDescending { it.modifiedSeconds }
             sort == Sort.OLDEST -> filtered.sortedBy { it.modifiedSeconds }
             sort == Sort.NAME -> filtered.sortedBy { it.title.lowercase() }
+            sort == Sort.DURATION -> filtered.sortedByDescending { it.durationMs }
             else -> filtered.sortedByDescending { it.sizeBytes }
         }.toList()
         adapter.submit(visibleVideos)
-        if (tab == Tab.FOLDERS) {
-            updateAlbums()
-            return
-        }
         videos.adapter = adapter
         gridManager.spanCount = if (gallery) 2 else 1
         empty.visibility = if (visibleVideos.isEmpty()) View.VISIBLE else View.GONE
@@ -389,13 +476,16 @@ class MainActivity : Activity() {
         renderChrome()
         folderChip.text = if (chosenFolder == "All folders") "Folders  ▾"
                           else chosenFolder.substringAfterLast('/').take(18) + "  ▾"
+        formatChip.text = if (selectedFormat.isEmpty()) "Format  ▾"
+            else "${selectedFormat.uppercase(java.util.Locale.ROOT)}  ▾"
         for ((id, selected) in arrayOf(
             R.id.filterAll to (filter == Filter.ALL),
             R.id.filterProgress to (filter == Filter.CONTINUE),
             R.id.filterRecent to (filter == Filter.RECENT),
             R.id.filterHistory to (filter == Filter.HISTORY),
             R.id.filterFavorites to (filter == Filter.FAVORITES),
-            R.id.folderFilter to (chosenFolder != "All folders")
+            R.id.folderFilter to (chosenFolder != "All folders"),
+            R.id.formatFilter to selectedFormat.isNotEmpty()
         )) {
             val view = findViewById<TextView>(id)
             view.setBackgroundResource(if (selected) R.drawable.orbit_filter_active
@@ -606,10 +696,12 @@ class MainActivity : Activity() {
 
     private fun openPlaylist(name: String) {
         currentPlaylist = name
+        selectedFormat = ""
         tab = Tab.VIDEOS
         chosenFolder = "All folders"
         filter = Filter.ALL
         search.setText("")
+        handler.removeCallbacks(searchLater)
         filterVideos()
         videos.scrollToPosition(0)
     }
@@ -649,6 +741,7 @@ class MainActivity : Activity() {
 
     private fun setTab(next: Tab) {
         tab = next
+        selectedFormat = ""
         preferences.lastTab = next.name
         currentPlaylist = null
         filter = if (next == Tab.CONTINUE) Filter.CONTINUE else Filter.ALL
@@ -656,6 +749,7 @@ class MainActivity : Activity() {
             .takeIf { it in folderOptions } ?: "All folders"
             else "All folders"
         search.setText("")
+        handler.removeCallbacks(searchLater)
         filterVideos()
         videos.scrollToPosition(0)
         if (next == Tab.SEARCH) {
@@ -681,6 +775,8 @@ class MainActivity : Activity() {
             if (tab == Tab.CONTINUE) View.GONE else View.VISIBLE
         findViewById<View>(R.id.folderFilter).visibility =
             if (tab == Tab.CONTINUE) View.GONE else View.VISIBLE
+        formatChip.visibility =
+            if (folders || tab == Tab.CONTINUE) View.GONE else View.VISIBLE
         findViewById<TextView>(R.id.filterProgress).text =
             if (tab == Tab.CONTINUE) "Unfinished" else "Continue"
         findViewById<View>(R.id.filterHistory).visibility =
@@ -707,13 +803,21 @@ class MainActivity : Activity() {
     }
 
     private fun updateAlbums() {
+        val hiddenFolders = preferences.folders("hidden")
+        val pinnedFolders = preferences.folders("pinned")
         albums = allVideos.asSequence()
-            .filter { !preferences.hasFolder("hidden", it.folder) }
+            .filter { it.folder !in hiddenFolders }
             .groupBy { it.folder }
+            // Search also works in Albums: match the folder path OR any video inside.
+            // Keep each album's real file count rather than reporting a partial count.
+            .filter { (path, items) ->
+                query.isBlank() || path.contains(query, ignoreCase = true) ||
+                    items.any { it.title.contains(query, ignoreCase = true) }
+            }
             .map { (path, items) ->
                 val recent = items.maxByOrNull { it.modifiedSeconds } ?: items.first()
                 FolderAlbum(path, items.size, recent, items,
-                    preferences.hasFolder("pinned", path))
+                    path in pinnedFolders)
             }.let { a ->
                 when (albumSort) {
                     1 -> a.sortedWith(compareByDescending<FolderAlbum> { it.pinned }
@@ -738,10 +842,12 @@ class MainActivity : Activity() {
 
     private fun openAlbum(album: FolderAlbum) {
         tab = Tab.VIDEOS
+        selectedFormat = ""
         chosenFolder = album.path
         preferences.lastFolder = album.path
         filter = Filter.ALL
         search.setText("")
+        handler.removeCallbacks(searchLater)
         filterVideos()
         videos.scrollToPosition(0)
     }
@@ -785,6 +891,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         destroyed = true
         handler.removeCallbacks(refreshLater)
+        handler.removeCallbacks(searchLater)
         ++scanGeneration
         executor.shutdownNow()
         adapter.dispose()

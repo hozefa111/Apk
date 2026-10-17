@@ -9,6 +9,12 @@
         <ImageView android:id="@+id/folderThumb"
             android:layout_width="match_parent" android:layout_height="match_parent"
             android:scaleType="centerCrop" android:contentDescription="Folder cover" />
+        <ImageView android:id="@+id/folderMore"
+            android:layout_width="34dp" android:layout_height="34dp"
+            android:layout_gravity="top|start" android:layout_margin="5dp"
+            android:padding="8dp" android:background="@drawable/orbit_duration_bg"
+            android:src="@drawable/orbit_ic_more"
+            android:contentDescription="Folder options" />
         <TextView android:id="@+id/folderPinned" android:layout_width="wrap_content"
             android:layout_height="wrap_content" android:layout_gravity="top|end"
             android:layout_margin="5dp" android:paddingHorizontal="6dp"

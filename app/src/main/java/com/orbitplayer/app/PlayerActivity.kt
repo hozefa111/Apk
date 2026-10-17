@@ -16,6 +16,8 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.database.Cursor
 import android.media.AudioManager
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -33,6 +35,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -89,10 +92,13 @@ class PlayerActivity : Activity() {
     private val userOptions by lazy { OrbitSettings(this) }
     private fun skipMs() = userOptions.seekSeconds * 1000L
     private var player: ExoPlayer? = null
+    private var mediaSession: MediaSession? = null
     private var videoUri = ""
     private var videoTitle = "Video"
     private var subtitleUri: Uri? = null
     private var lastSavedPosition = 0L
+    // Preserve a user's manual pause/play choice across Activity onStop/onStart.
+    private var savedPlayWhenReady: Boolean? = null
     private var repeatOne = false
     private var resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
     private var brightness = 0.5f
@@ -139,6 +145,18 @@ class PlayerActivity : Activity() {
             else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
         repeatOne = userOptions.repeat
+        resizeMode = when (userOptions.defaultAspect) {
+            "Crop" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            "Stretch" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+            else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+        }
+        playerView.resizeMode = resizeMode
+        findViewById<TextView>(R.id.btnAspect).text = userOptions.defaultAspect.uppercase(java.util.Locale.ROOT)
+        if (intent?.action == Intent.ACTION_VIEW && intent?.data != null) {
+            // External video opens are single-file sessions, not an old library Play All.
+            PlaybackQueue.replace(emptyList(), playAll = false)
+            PlaybackQueue.persist(this)
+        }
         PlaybackQueue.ensureRestored(this)
         runCatching {
             playerView.subtitleView?.setFractionalTextSize(0.0533f * userOptions.subtitleScale)
@@ -192,8 +210,13 @@ class PlayerActivity : Activity() {
         showControls()
         if (savedInstanceState != null) {
             lastSavedPosition = savedInstanceState.getLong("position", 0L)
+            if (savedInstanceState.containsKey("play_when_ready")) {
+                savedPlayWhenReady = savedInstanceState.getBoolean("play_when_ready")
+            }
             videoUri = savedInstanceState.getString("uri", videoUri)
             videoTitle = savedInstanceState.getString("title", videoTitle)
+            subtitleUri = savedInstanceState.getString("subtitle_uri")?.let(Uri::parse)
+            showRemainingTime = savedInstanceState.getBoolean("show_remaining_time", false)
             playerTitle.text = videoTitle
         } else {
             lastSavedPosition = if (userOptions.resume) savedProgress(videoUri) else 0L
@@ -224,6 +247,10 @@ class PlayerActivity : Activity() {
         exo.setHandleAudioBecomingNoisy(true)
         player = exo
         playerView.player = exo
+        // Controls from wired/Bluetooth headsets are routed to this foreground player.
+        // Background playback requires a separate MediaSessionService (not claimed here).
+        setupSystemMediaSession()
+        if (BuildConfig.DEBUG) android.util.Log.i("OrbitPlayerQA", "MEDIA_SESSION_READY")
         prefs.edit().putString("last_played_uri", videoUri).apply()
         recordWatchHistory(videoUri)
         exo.setPlaybackSpeed(userOptions.playbackSpeed)
@@ -238,7 +265,19 @@ class PlayerActivity : Activity() {
         exo.repeatMode = if (repeatOne) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         exo.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
+                if (BuildConfig.DEBUG) android.util.Log.e("OrbitPlayerQA", "PLAYER_ERROR ${error.errorCodeName}", error)
                 if (isFinishing || isDestroyed) return
+                val failedUri = videoUri
+                if (!repeatOne && PlaybackQueue.autoAdvance &&
+                    PlaybackQueue.adjacent(failedUri, 1) != null) {
+                    Toast.makeText(this@PlayerActivity,
+                        "Unable to play ${videoTitle.take(50)}. Trying next video.",
+                        Toast.LENGTH_LONG).show()
+                    handler.post {
+                        if (!isFinishing && !isDestroyed && videoUri == failedUri) switchQueue(1)
+                    }
+                    return
+                }
                 AlertDialog.Builder(this@PlayerActivity)
                     .setTitle("Unable to play this video")
                     .setMessage("Decoder or file problem: ${error.errorCodeName}.\n\n" +
@@ -248,6 +287,7 @@ class PlayerActivity : Activity() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                updateSystemPlaybackState()
                 updatePlayPauseButton()
                 if (isPlaying) scheduleAutoHide() else {
                     handler.removeCallbacks(hideControlsTask)
@@ -256,6 +296,11 @@ class PlayerActivity : Activity() {
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                if (BuildConfig.DEBUG && playbackState == Player.STATE_READY) {
+                    android.util.Log.i("OrbitPlayerQA", "STATE_READY")
+                }
+                if (playbackState == Player.STATE_READY) updateSystemMetadata()
+                updateSystemPlaybackState()
                 updateProgress()
                 updatePlayPauseButton()
 
@@ -276,7 +321,7 @@ class PlayerActivity : Activity() {
         try {
             exo.setMediaItem(buildMediaItem(), lastSavedPosition.coerceAtLeast(0L))
             exo.prepare()
-            exo.playWhenReady = userOptions.autoplay
+            exo.playWhenReady = savedPlayWhenReady ?: userOptions.autoplay
         } catch (ex: Exception) {
             AlertDialog.Builder(this)
                 .setTitle("Could not open video")
@@ -291,8 +336,69 @@ class PlayerActivity : Activity() {
         scheduleAutoHide()
     }
 
+    /** Platform MediaSession works on Android 8+ without an extra coroutine dependency. */
+    private fun setupSystemMediaSession() {
+        mediaSession = MediaSession(this, "OrbitPlayerPro").apply {
+            setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or
+                MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
+            setCallback(object : MediaSession.Callback() {
+                override fun onPlay() {
+                    player?.play()
+                    updateSystemPlaybackState()
+                }
+                override fun onPause() {
+                    player?.pause()
+                    updateSystemPlaybackState()
+                }
+                override fun onSkipToNext() { switchQueue(1) }
+                override fun onSkipToPrevious() { switchQueue(-1) }
+                override fun onSeekTo(pos: Long) {
+                    player?.seekTo(pos.coerceAtLeast(0L))
+                    updateSystemPlaybackState()
+                }
+                override fun onStop() {
+                    player?.pause()
+                    updateSystemPlaybackState()
+                }
+            }, handler)
+            isActive = true
+        }
+        updateSystemMetadata()
+        updateSystemPlaybackState()
+    }
+
+    private fun updateSystemMetadata() {
+        mediaSession?.setMetadata(android.media.MediaMetadata.Builder()
+            .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, videoTitle)
+            .putLong(android.media.MediaMetadata.METADATA_KEY_DURATION,
+                (player?.duration ?: 0L).coerceAtLeast(0L))
+            .build())
+    }
+
+    private fun updateSystemPlaybackState() {
+        val exo = player ?: return
+        val state = when {
+            exo.playbackState == Player.STATE_ENDED -> PlaybackState.STATE_STOPPED
+            exo.isPlaying -> PlaybackState.STATE_PLAYING
+            exo.playbackState == Player.STATE_BUFFERING && exo.playWhenReady ->
+                PlaybackState.STATE_BUFFERING
+            else -> PlaybackState.STATE_PAUSED
+        }
+        val actions = PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
+            PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_SEEK_TO or
+            PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+            PlaybackState.ACTION_STOP
+        mediaSession?.setPlaybackState(PlaybackState.Builder()
+            .setActions(actions)
+            .setState(state, exo.currentPosition.coerceAtLeast(0L),
+                if (exo.isPlaying) exo.playbackParameters.speed else 0f)
+            .build())
+    }
+
     private fun buildMediaItem(): MediaItem {
-        val item = MediaItem.Builder().setUri(Uri.parse(videoUri))
+        val item = MediaItem.Builder()
+            .setUri(Uri.parse(videoUri))
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(videoTitle).build())
         subtitleUri?.let { uri ->
             item.setSubtitleConfigurations(
                 listOf(MediaItem.SubtitleConfiguration.Builder(uri)
@@ -338,6 +444,7 @@ class PlayerActivity : Activity() {
         recordWatchHistory(videoUri)
         videoTitle = adjacent.title
         playerTitle.text = videoTitle
+        updateSystemMetadata()
         subtitleUri = null
         lastSavedPosition = if (userOptions.resume) savedProgress(videoUri) else 0L
         try {
@@ -508,6 +615,7 @@ class PlayerActivity : Activity() {
             else -> "Fit"
         }
         findViewById<TextView>(R.id.btnAspect).text = caption.uppercase(java.util.Locale.ROOT)
+        userOptions.defaultAspect = caption
         notifyGesture("Screen: $caption")
         scheduleAutoHide()
     }
@@ -577,7 +685,10 @@ class PlayerActivity : Activity() {
         val layer = findViewById<FrameLayout>(R.id.gestureLayer)
         val zone = PlayerGestureZone(
             this,
-            onTap = { if (touchLocked) showUnlockButton() else toggleControls() },
+            onTap = {
+                if (BuildConfig.DEBUG) android.util.Log.i("OrbitPlayerQA", "TOUCH_SINGLE_TAP")
+                if (touchLocked) showUnlockButton() else toggleControls()
+            },
             onDoubleTap = { fraction ->
                 if (!touchLocked && userOptions.gestureDoubleTap) {
                     when {
@@ -631,10 +742,8 @@ class PlayerActivity : Activity() {
             },
             onPinch = { zoomIn ->
                 if (!touchLocked) {
-                    resizeMode = if (zoomIn) AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                                 else AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    playerView.resizeMode = resizeMode
-                    notifyGesture(if (zoomIn) "Fill screen" else "Fit to screen")
+                    setAspectRatio(if (zoomIn) AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                   else AspectRatioFrameLayout.RESIZE_MODE_FIT)
                 }
             },
             onHoldBoost = { pressed ->
@@ -788,20 +897,12 @@ class PlayerActivity : Activity() {
     }
 
     private fun cycleAspectRatio() {
-        resizeMode = when (resizeMode) {
+        val next = when (resizeMode) {
             AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_FILL
             else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
         }
-        playerView.resizeMode = resizeMode
-        val caption = when (resizeMode) {
-            AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> "Crop"
-            AspectRatioFrameLayout.RESIZE_MODE_FILL -> "Stretch"
-            else -> "Fit"
-        }
-        findViewById<TextView>(R.id.btnAspect).text = "▣  $caption"
-        notifyGesture("Screen: $caption")
-        scheduleAutoHide()
+        setAspectRatio(next)
     }
 
     private fun rotateVideo() {
@@ -875,8 +976,12 @@ class PlayerActivity : Activity() {
     override fun onSaveInstanceState(outState: Bundle) {
         savePosition()
         outState.putLong("position", lastSavedPosition)
+        outState.putBoolean("play_when_ready",
+            player?.playWhenReady ?: savedPlayWhenReady ?: userOptions.autoplay)
         outState.putString("uri", videoUri)
         outState.putString("title", videoTitle)
+        outState.putString("subtitle_uri", subtitleUri?.toString())
+        outState.putBoolean("show_remaining_time", showRemainingTime)
         super.onSaveInstanceState(outState)
     }
 
@@ -888,9 +993,12 @@ class PlayerActivity : Activity() {
         handler.removeCallbacks(progressSaver)
         handler.removeCallbacks(progressUpdater)
         handler.removeCallbacks(hideControlsTask)
+        savedPlayWhenReady = player?.playWhenReady ?: savedPlayWhenReady
         savePosition()
         holdSpeedRestore?.let { player?.setPlaybackSpeed(it) }
         holdSpeedRestore = null
+        mediaSession?.release()
+        mediaSession = null
         playerView.player = null
         player?.release()
         player = null
@@ -898,7 +1006,10 @@ class PlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
-        // PiP may bypass normal onStop cleanup on some devices.
+        // PiP may bypass onStop; preserve watch progress before releasing its player.
+        savePosition()
+        mediaSession?.release()
+        mediaSession = null
         playerView.player = null
         player?.release()
         player = null

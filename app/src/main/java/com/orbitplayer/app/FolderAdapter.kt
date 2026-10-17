@@ -13,7 +13,9 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.AsyncListDiffer
 import java.util.concurrent.Executors
+import java.util.concurrent.ConcurrentHashMap
 import android.os.Handler
 import android.os.Looper
 
@@ -23,7 +25,17 @@ class FolderAdapter(
     private val onOpen: (FolderAlbum) -> Unit,
     private val onOptions: (FolderAlbum) -> Unit
 ) : RecyclerView.Adapter<FolderAdapter.Holder>() {
-    private var items = emptyList<FolderAlbum>()
+    private val differ = AsyncListDiffer(this, object : DiffUtil.ItemCallback<FolderAlbum>() {
+        override fun areItemsTheSame(oldItem: FolderAlbum, newItem: FolderAlbum) =
+            oldItem.path == newItem.path
+        override fun areContentsTheSame(oldItem: FolderAlbum, newItem: FolderAlbum) =
+            oldItem.count == newItem.count && oldItem.pinned == newItem.pinned &&
+                oldItem.cover.uri == newItem.cover.uri &&
+                oldItem.displayName == newItem.displayName
+    })
+    private val items: List<FolderAlbum> get() = differ.currentList
+    private val decoding = ConcurrentHashMap.newKeySet<String>()
+    private var disposed = false
     private val executor = Executors.newFixedThreadPool(2)
     private val handler = Handler(Looper.getMainLooper())
     private val cache = object : LruCache<String, Bitmap>(10 * 1024) {
@@ -33,21 +45,7 @@ class FolderAdapter(
     override fun getItemId(position: Int) = items[position].path.hashCode().toLong()
     override fun getItemCount() = items.size
     fun submit(next: List<FolderAlbum>) {
-        val old = items
-        val newer = next.toList()
-        val changes = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
-            override fun getOldListSize() = old.size
-            override fun getNewListSize() = newer.size
-            override fun areItemsTheSame(i: Int, j: Int) = old[i].path == newer[j].path
-            override fun areContentsTheSame(i: Int, j: Int): Boolean {
-                val before = old[i]
-                val after = newer[j]
-                return before.count == after.count && before.pinned == after.pinned &&
-                    before.cover.uri == after.cover.uri && before.displayName == after.displayName
-            }
-        })
-        items = newer
-        changes.dispatchUpdatesTo(this)
+        if (!disposed) differ.submitList(next.toList())
     }
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder =
         Holder(LayoutInflater.from(parent.context).inflate(R.layout.row_folder, parent, false))
@@ -56,10 +54,12 @@ class FolderAdapter(
         holder.title.text = album.displayName
         holder.count.text = "${album.count} ${if (album.count == 1) "video" else "videos"}"
         holder.pin.visibility = if (album.pinned) View.VISIBLE else View.GONE
+        // A folder's cover changes as media are added: cache by both path and cover URI.
+        val key = album.path + "|" + album.cover.uri
         holder.thumb.setImageDrawable(null)
-        holder.thumb.tag = album.path
-        synchronized(cache) { cache.get(album.path) }?.let(holder.thumb::setImageBitmap) ?: run {
-            executor.execute {
+        holder.thumb.tag = key
+        synchronized(cache) { cache.get(key) }?.let(holder.thumb::setImageBitmap) ?: run {
+            if (decoding.add(key)) executor.execute {
                 val bitmap = try {
                     if (Build.VERSION.SDK_INT >= 29)
                         context.contentResolver.loadThumbnail(album.cover.uri, Size(300, 300), null)
@@ -69,13 +69,23 @@ class FolderAdapter(
                             MediaStore.Video.Thumbnails.MINI_KIND, null)
                     }
                 } catch (_: Exception) { null }
+                decoding.remove(key)
                 if (bitmap != null) {
-                    synchronized(cache) { cache.put(album.path, bitmap) }
+                    synchronized(cache) { cache.put(key, bitmap) }
                     handler.post {
-                        if (holder.thumb.tag == album.path) holder.thumb.setImageBitmap(bitmap)
+                        if (!disposed) {
+                            val position = items.indexOfFirst {
+                                it.path == album.path && it.cover.uri == album.cover.uri
+                            }
+                            if (position >= 0) notifyItemChanged(position)
+                        }
                     }
                 }
             }
+        }
+        holder.more.contentDescription = "Options for ${album.displayName}"
+        holder.more.setOnClickListener {
+            holder.bindingAdapterPosition.takeIf { it in items.indices }?.let { onOptions(items[it]) }
         }
         holder.itemView.setOnClickListener {
             holder.bindingAdapterPosition.takeIf { it in items.indices }?.let { onOpen(items[it]) }
@@ -86,6 +96,7 @@ class FolderAdapter(
         }
     }
     fun dispose() {
+        disposed = true
         executor.shutdownNow()
         handler.removeCallbacksAndMessages(null)
         synchronized(cache) { cache.evictAll() }
@@ -95,5 +106,6 @@ class FolderAdapter(
         val title: TextView = root.findViewById(R.id.folderTitle)
         val count: TextView = root.findViewById(R.id.folderCount)
         val pin: TextView = root.findViewById(R.id.folderPinned)
+        val more: View = root.findViewById(R.id.folderMore)
     }
 }

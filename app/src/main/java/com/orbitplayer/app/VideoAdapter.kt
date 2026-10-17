@@ -15,6 +15,7 @@ import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.AsyncListDiffer
 import androidx.recyclerview.widget.RecyclerView
 import java.util.concurrent.Executors
 import java.util.concurrent.ConcurrentHashMap
@@ -29,7 +30,15 @@ class VideoAdapter(
     private val onLongPress: (VideoItem) -> Unit = {}
 ) : RecyclerView.Adapter<VideoAdapter.VideoHolder>() {
 
-    private var items: List<VideoItem> = emptyList()
+    // DiffUtil runs in the differ's background executor, never during a UI tap/search.
+    private val differ = AsyncListDiffer(this, object : DiffUtil.ItemCallback<VideoItem>() {
+        override fun areItemsTheSame(oldItem: VideoItem, newItem: VideoItem) =
+            oldItem.uri == newItem.uri
+        override fun areContentsTheSame(oldItem: VideoItem, newItem: VideoItem) =
+            oldItem == newItem
+    })
+    private val items: List<VideoItem> get() = differ.currentList
+    private var disposed = false
     private var galleryMode = true
     private val prefs = context.getSharedPreferences("playback_positions_v1", Context.MODE_PRIVATE)
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -56,16 +65,7 @@ class VideoAdapter(
     }
 
     fun submit(videos: List<VideoItem>) {
-        val old = items
-        val next = videos.toList()
-        val delta = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
-            override fun getOldListSize() = old.size
-            override fun getNewListSize() = next.size
-            override fun areItemsTheSame(a: Int, b: Int) = old[a].uri == next[b].uri
-            override fun areContentsTheSame(a: Int, b: Int) = old[a] == next[b]
-        }, true)
-        items = next
-        delta.dispatchUpdatesTo(this)
+        if (!disposed) differ.submitList(videos.toList())
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VideoHolder {
@@ -105,13 +105,20 @@ class VideoAdapter(
                 if (bitmap != null) {
                     synchronized(cache) { cache.put(key, bitmap) }
                     mainHandler.post {
-                        if (holder.thumb.tag == key) {
-                            holder.thumb.setImageBitmap(bitmap)
-                            holder.glyph.visibility = View.GONE
+                        if (!disposed) {
+                            // More than one holder can request the same thumbnail during decoding.
+                            // Rebind from cache so every holder is updated, including recycled ones.
+                            val position = items.indexOfFirst { it.uri.toString() == key }
+                            if (position >= 0) notifyItemChanged(position, "thumbnail")
                         }
                     }
                 }
             }
+        }
+        holder.more.contentDescription = "Options for ${item.title}"
+        holder.more.setOnClickListener {
+            val current = holder.bindingAdapterPosition
+            if (current != RecyclerView.NO_POSITION && current < items.size) onLongPress(items[current])
         }
         holder.itemView.setOnClickListener {
             val current = holder.bindingAdapterPosition
@@ -140,6 +147,7 @@ class VideoAdapter(
     }
 
     fun dispose() {
+        disposed = true
         executor.shutdownNow()
         synchronized(cache) { cache.evictAll() }
         mainHandler.removeCallbacksAndMessages(null)
@@ -152,5 +160,6 @@ class VideoAdapter(
         val thumb: ImageView = view.findViewById(R.id.thumb)
         val glyph: TextView = view.findViewById(R.id.playGlyph)
         val watchProgress: ProgressBar = view.findViewById(R.id.watchProgress)
+        val more: View = view.findViewById(R.id.moreOptions)
     }
 }
