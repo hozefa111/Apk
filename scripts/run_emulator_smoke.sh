@@ -115,6 +115,9 @@ done
 grep -E 'OrbitPlayerQA.*STATE_READY' qa/player-logcat.txt >/dev/null || {
   echo "Player did not reach READY after opening smoke video"; exit 1;
 }
+grep -E 'OrbitPlayerQA.*MEDIA_SESSION_READY' qa/player-logcat.txt >/dev/null || {
+  echo "MediaSession was not initialized for headset media controls"; exit 1;
+}
 adb shell dumpsys activity activities > qa/player-activity.txt
 grep -F "$PACKAGE/.PlayerActivity" qa/player-activity.txt >/dev/null || {
   echo "PlayerActivity did not remain active"; exit 1;

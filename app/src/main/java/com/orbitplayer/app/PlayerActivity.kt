@@ -33,12 +33,14 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.MediaSession
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlin.math.roundToInt
@@ -89,6 +91,7 @@ class PlayerActivity : Activity() {
     private val userOptions by lazy { OrbitSettings(this) }
     private fun skipMs() = userOptions.seekSeconds * 1000L
     private var player: ExoPlayer? = null
+    private var mediaSession: MediaSession? = null
     private var videoUri = ""
     private var videoTitle = "Video"
     private var subtitleUri: Uri? = null
@@ -243,6 +246,10 @@ class PlayerActivity : Activity() {
         exo.setHandleAudioBecomingNoisy(true)
         player = exo
         playerView.player = exo
+        // Controls from wired/Bluetooth headsets are routed to this foreground player.
+        // Background playback requires a separate MediaSessionService (not claimed here).
+        mediaSession = MediaSession.Builder(this, exo).build()
+        if (BuildConfig.DEBUG) android.util.Log.i("OrbitPlayerQA", "MEDIA_SESSION_READY")
         prefs.edit().putString("last_played_uri", videoUri).apply()
         recordWatchHistory(videoUri)
         exo.setPlaybackSpeed(userOptions.playbackSpeed)
@@ -326,7 +333,9 @@ class PlayerActivity : Activity() {
     }
 
     private fun buildMediaItem(): MediaItem {
-        val item = MediaItem.Builder().setUri(Uri.parse(videoUri))
+        val item = MediaItem.Builder()
+            .setUri(Uri.parse(videoUri))
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(videoTitle).build())
         subtitleUri?.let { uri ->
             item.setSubtitleConfigurations(
                 listOf(MediaItem.SubtitleConfiguration.Builder(uri)
@@ -924,6 +933,8 @@ class PlayerActivity : Activity() {
         savePosition()
         holdSpeedRestore?.let { player?.setPlaybackSpeed(it) }
         holdSpeedRestore = null
+        mediaSession?.release()
+        mediaSession = null
         playerView.player = null
         player?.release()
         player = null
@@ -933,6 +944,8 @@ class PlayerActivity : Activity() {
     override fun onDestroy() {
         // PiP may bypass onStop; preserve watch progress before releasing its player.
         savePosition()
+        mediaSession?.release()
+        mediaSession = null
         playerView.player = null
         player?.release()
         player = null
