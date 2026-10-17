@@ -105,7 +105,16 @@ public class NativeNavigationTest {
         }
     }
     private int folderImageCount()throws Exception{
-        String files=shell("find /sdcard/ -type f -name '3patti-*.png' 2>/dev/null");return files.isEmpty()?0:files.split("\\n").length;
+        android.content.Context context=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getTargetContext();
+        String saved=context.getSharedPreferences("image_exports",android.content.Context.MODE_PRIVATE).getString("last_folder","");if(saved.isEmpty())return 0;
+        android.net.Uri tree=android.net.Uri.parse(saved),children=android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(tree,android.provider.DocumentsContract.getTreeDocumentId(tree));int count=0;
+        try(android.database.Cursor cursor=context.getContentResolver().query(children,new String[]{android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME},null,null,null)){
+            while(cursor!=null&&cursor.moveToNext())if(cursor.getString(1).startsWith("3patti-")&&cursor.getString(1).endsWith(".png")){
+                android.net.Uri image=android.provider.DocumentsContract.buildDocumentUriUsingTree(tree,cursor.getString(0));android.graphics.BitmapFactory.Options options=new android.graphics.BitmapFactory.Options();options.inJustDecodeBounds=true;
+                try(java.io.InputStream in=context.getContentResolver().openInputStream(image)){android.graphics.BitmapFactory.decodeStream(in,null,options);}
+                org.junit.Assert.assertTrue("Saved PNG must decode through its document provider",options.outWidth>0&&options.outHeight>0);count++;
+            }
+        }return count;
     }
     private android.view.accessibility.AccessibilityNodeInfo findSystemNode(android.view.accessibility.AccessibilityNodeInfo node,String label){
         if(node==null)return null;
@@ -129,6 +138,9 @@ public class NativeNavigationTest {
         Assume.assumeTrue(BuildConfig.USE_EMULATORS);String original=shell("settings get system font_scale");
         try{
             shell("settings put system font_scale 2.0");
+            long configured=System.currentTimeMillis()+10000;
+            while(Math.abs(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getTargetContext().getResources().getConfiguration().fontScale-2f)>0.01f&&System.currentTimeMillis()<configured)Thread.sleep(100);
+            org.junit.Assert.assertEquals(2f,androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getTargetContext().getResources().getConfiguration().fontScale,0.01f);
             try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
                 waitFor("Table Status");onView(withContentDescription("Players")).perform(click());
                 onView(org.hamcrest.Matchers.allOf(withText("Players"),withParent(withContentDescription("Players")))).check((view,error)->{if(error!=null)throw error;android.widget.TextView label=(android.widget.TextView)view;org.junit.Assert.assertEquals("Navigation label must not break inside its word",1,label.getLineCount());org.junit.Assert.assertEquals("Navigation label must remain complete",label.length(),label.getLayout().getLineEnd(0));});

@@ -331,8 +331,10 @@ public final class NativeImageShare {
             if(!activity.getSharedPreferences("image_exports",Activity.MODE_PRIVATE).edit().putString("pending",pending.toString()).commit()){
                 errorToast(activity,new IOException("Cannot preserve image export request. Please retry."));return;
             }
-            try{activity.startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION),701);}
+            Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            String last=activity.getSharedPreferences("image_exports",Activity.MODE_PRIVATE).getString("last_folder","");
+            if(!last.isEmpty())picker.putExtra(android.provider.DocumentsContract.EXTRA_INITIAL_URI,Uri.parse(last));
+            try{activity.startActivityForResult(picker,701);}
             catch(Exception error){activity.getSharedPreferences("image_exports",Activity.MODE_PRIVATE).edit().remove("pending").commit();errorToast(activity,error);}
             return;
         }
@@ -368,11 +370,18 @@ public final class NativeImageShare {
             if(sources.isEmpty())throw new IOException("Export images are unavailable. Open the preview and save again.");
         }catch(Exception error){draft.edit().remove("pending").commit();errorToast(activity,error);return;}
         final Uri tree=data.getData();
+        if((data.getFlags()&Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)!=0)try{
+            boolean read=(data.getFlags()&Intent.FLAG_GRANT_READ_URI_PERMISSION)!=0,write=(data.getFlags()&Intent.FLAG_GRANT_WRITE_URI_PERMISSION)!=0;
+            if(read&&write)activity.getContentResolver().takePersistableUriPermission(tree,Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            else if(read)activity.getContentResolver().takePersistableUriPermission(tree,Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            else if(write)activity.getContentResolver().takePersistableUriPermission(tree,Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        }catch(SecurityException ignored){/* A transient grant still permits the current export. */}
         RENDERER.execute(()->{
             List<Uri> created=new ArrayList<>();
             try{
                 Uri parent=android.provider.DocumentsContract.buildDocumentUriUsingTree(tree,android.provider.DocumentsContract.getTreeDocumentId(tree));
                 for(Uri source:sources){Uri target=android.provider.DocumentsContract.createDocument(activity.getContentResolver(),parent,"image/png","3patti-"+System.nanoTime()+".png");if(target==null)throw new IOException("Cannot create image");created.add(target);copy(activity,source,target);}
+                draft.edit().putString("last_folder",tree.toString()).apply();
                 activity.runOnUiThread(()->android.widget.Toast.makeText(activity,"Saved "+sources.size()+" images",android.widget.Toast.LENGTH_LONG).show());
             }catch(Exception error){
                 for(Uri target:created)try{android.provider.DocumentsContract.deleteDocument(activity.getContentResolver(),target);}catch(Exception cleanup){error.addSuppressed(cleanup);}
@@ -381,6 +390,7 @@ public final class NativeImageShare {
         });
     }
     private static void errorToast(Activity activity,Exception ex){
+        android.util.Log.e("NativeImageShare","Image export failed",ex);
         activity.runOnUiThread(()->{
             if(!activity.isFinishing())android.widget.Toast.makeText(activity,
                     "Image export failed: "+ex.getMessage(),android.widget.Toast.LENGTH_LONG).show();
