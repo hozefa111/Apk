@@ -319,6 +319,10 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private void line(LinearLayout c,String left,String right,int rightColor) {
         LinearLayout r=row();
         TextView l=text(left,13,MUTED,false);
+        if(getResources().getConfiguration().fontScale>1.3f){
+            r.setOrientation(LinearLayout.VERTICAL);r.setGravity(Gravity.START);
+            r.addView(l,lp(-1,-2));gap(r,4);TextView value=text(right,14,rightColor,true);r.addView(value,lp(-1,-2));gap(r,12);c.addView(r);return;
+        }
         l.setMinHeight(dp(30));r.addView(l,new LinearLayout.LayoutParams(0,-2,1));
         TextView value=text(right,14,rightColor,true);value.setGravity(Gravity.END);
         r.addView(value,new LinearLayout.LayoutParams(0,-2,1));
@@ -343,18 +347,25 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private void updateToolbar() {
         if(toolbar==null)return;
         toolbar.removeAllViews();
+        boolean largeText=getResources().getConfiguration().fontScale>1.3f;
+        toolbar.setOrientation(largeText?LinearLayout.VERTICAL:LinearLayout.HORIZONTAL);
+        toolbar.setGravity(largeText?Gravity.START:Gravity.CENTER_VERTICAL);
         LinearLayout heading=column();
         TextView appName=text("♠  3 PATTI PRO",21,GOLD,true);
+        if(largeText){appName.setMaxLines(1);appName.setAutoSizeTextTypeUniformWithConfiguration(16,21,1,android.util.TypedValue.COMPLEX_UNIT_SP);}
         heading.addView(appName);
         gap(heading,5);
         heading.addView(text(liveConnected?"●  LIVE SYNC":"○  OFFLINE / CONNECTING",9,
                 liveConnected?GREEN:MUTED,true));
-        toolbar.addView(heading,new LinearLayout.LayoutParams(0,-2,1));
+        toolbar.addView(heading,largeText?lp(-1,-2):new LinearLayout.LayoutParams(0,-2,1));
+        LinearLayout actions=largeText?row():toolbar;
+        if(largeText){gap(toolbar,8);toolbar.addView(actions,lp(-1,-2));}
         TextView status=text(busy?"SAVING…":loggedIn?"ADMIN":"LOGIN",11,loggedIn?GREEN:GOLD,true);
         status.setGravity(Gravity.CENTER);pad(status,12,10,12,10);
         status.setBackground(shape(PANEL2,12,BORDER));
         status.setOnClickListener(v->{if(busy)return;if(loggedIn)confirmLogout();else loginDialog();});
-        toolbar.addView(status);
+        actions.addView(status);
+        if(largeText)actions.addView(new View(this),new LinearLayout.LayoutParams(0,1,1));
         TextView refresh=text("↻",23,GOLD,true);
         refresh.setGravity(Gravity.CENTER);
         refresh.setBackground(shape(PANEL2,12,BORDER));
@@ -366,12 +377,12 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             }
         });
         LinearLayout.LayoutParams rp=lp(48,48);rp.leftMargin=dp(8);
-        toolbar.addView(refresh,rp);
+        actions.addView(refresh,rp);
         TextView more=text("⋮",24,GOLD,true);more.setGravity(Gravity.CENTER);more.setContentDescription("More options");
         more.setMinWidth(dp(40));more.setMinHeight(dp(48));
         more.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Your table")
             .setItems(new String[]{"Search","Analytics","Share Studio","Settings"},(d,which)->{tab=6+which;render(true);})
-            .setNegativeButton("Close",null).show());toolbar.addView(more);
+            .setNegativeButton("Close",null).show());actions.addView(more);
 
     }
     private void render(boolean reset) {
@@ -406,6 +417,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             LinearLayout item=column();item.setGravity(Gravity.CENTER);
             TextView sym=text(symbols[i],24,tab==i?GOLD:MUTED,true);sym.setGravity(Gravity.CENTER);
             TextView text=text(navNames[i],10,tab==i?GOLD:MUTED,tab==i);text.setGravity(Gravity.CENTER);
+            text.setMaxLines(1);text.setAutoSizeTextTypeUniformWithConfiguration(8,10,1,android.util.TypedValue.COMPLEX_UNIT_SP);
             item.addView(sym);gap(item,2);item.addView(text);
             if(tab==i)item.setBackground(shape(PANEL2,12,0));
             item.setMinimumHeight(dp(52));item.setSelected(tab==i);item.setContentDescription(navNames[i]);

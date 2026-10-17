@@ -105,6 +105,7 @@ public class NativeNavigationTest {
             shell("settings put system font_scale 2.0");
             try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
                 waitFor("Table Status");onView(withContentDescription("Players")).perform(click());
+                onView(withText("Players")).check((view,error)->{if(error!=null)throw error;android.widget.TextView label=(android.widget.TextView)view;org.junit.Assert.assertEquals("Navigation label must not break inside its word",1,label.getLineCount());org.junit.Assert.assertEquals("Navigation label must remain complete",label.length(),label.getLayout().getLineEnd(0));});
                 onView(withContentDescription("More options")).perform(click());onView(withText("Settings")).perform(click());
                 onView(withText("Compact round history")).perform(scrollTo()).check(matches(isDisplayed()));capture("11-settings-large-text");
                 scenario.recreate();onView(withContentDescription("More options")).check(matches(isDisplayed()));

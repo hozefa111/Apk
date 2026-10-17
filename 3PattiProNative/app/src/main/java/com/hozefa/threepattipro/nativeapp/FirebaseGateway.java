@@ -251,7 +251,7 @@ public final class FirebaseGateway {
                 if(running){
                     listener.syncState(false);
                     listener.dataUpdated(p,r,ss);
-                    listener.notice("Showing saved scores. Checking live updates…");
+                    // The connection label already identifies cached/offline state.
                 }
             });
         }catch(Exception ex){

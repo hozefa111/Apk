@@ -124,3 +124,11 @@ document IDs, Unicode and the 1 MiB document limit. Untrusted JSON is checked fo
 UTF-8, recursion depth and trailing payloads before parsing. A malformed record
 after record 500 must reject before creating a journal or changing any data.
 Seven further JVM cases cover valid types and malformed/oversize input.
+
+Commit `6493f54` passed all eight instrumentation tests on each API 26/30/35
+(24 executions), including large system fonts. Screenshot review still exposed
+word-breaking in the header/navigation and equal-column statistics at 2x text.
+The follow-up stacks header actions and statistic rows at large font scales and
+fits complete navigation labels on one line. Redundant cached-state toasts are
+removed; the toolbar continues to show offline/connecting status. The new large-text
+regression asserts that the complete navigation label fits on one line.
