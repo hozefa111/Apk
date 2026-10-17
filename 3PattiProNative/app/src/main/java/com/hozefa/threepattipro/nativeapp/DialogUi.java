@@ -47,7 +47,7 @@ final class DialogUi {
     }
     static void fact(LinearLayout parent,String label,String value,int color){
         Context c=parent.getContext();LinearLayout row=column(c);row.setPadding(dp(c,14),dp(c,12),dp(c,14),dp(c,12));row.setBackground(background(c,CARD,12));
-        row.addView(text(c,label,11,MUTED,false));gap(row,6);TextView result=text(c,value.isEmpty()?"—":value,15,color,true);result.setTextIsSelectable(true);row.addView(result);
+        row.addView(text(c,label,11,MUTED,false));gap(row,6);TextView result=text(c,value.isEmpty()?"—":value,15,color,true);row.addView(result);
         parent.addView(row,new LinearLayout.LayoutParams(-1,-2));gap(parent,8);
     }
     static void score(LinearLayout parent,String name,String role,int points){

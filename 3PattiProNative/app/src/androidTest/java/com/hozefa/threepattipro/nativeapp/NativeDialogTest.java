@@ -83,6 +83,7 @@ public class NativeDialogTest {
             shell("settings put system font_scale 2.0");long end=System.currentTimeMillis()+10000;while(Math.abs(context().getResources().getConfiguration().fontScale-2f)>.01f&&System.currentTimeMillis()<end)Thread.sleep(100);
             assertEquals(2f,context().getResources().getConfiguration().fontScale,.01f);
             try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
+                try{
                 scenario.onActivity(a->a.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
                 AtomicBoolean rotated=new AtomicBoolean();end=System.currentTimeMillis()+15000;
                 while(!rotated.get()&&System.currentTimeMillis()<end){scenario.onActivity(a->rotated.set(a.getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE));Thread.sleep(100);}assertTrue(rotated.get());
@@ -90,8 +91,10 @@ public class NativeDialogTest {
                 onData(anything()).inAdapterView(withContentDescription("Role round history")).atPosition(47).check(matches(isDisplayed()));onView(withText("Close")).check(matches(isCompletelyDisplayed()));capture("19-role-landscape-large-font");onView(withText("Close")).perform(click());
                 scenario.onActivity(a->{List<NativeImageShare.RankRow> ranks=new ArrayList<>();for(int i=0;i<75;i++)ranks.add(new NativeImageShare.RankRow(LONG_NAME+i,100-i,10,5,5,3,4));NativeImageShare.leaderboard(a,"Landscape large text",ranks);});
                 waitFor("3 Patti PRO - Rankings");onView(withText("Close")).check(matches(isCompletelyDisplayed()));onView(withText("Save Images")).check(matches(isCompletelyDisplayed()));onView(withText("Next")).check(matches(isCompletelyDisplayed())).perform(click());onView(withText("2 / 3")).check(matches(isDisplayed()));capture("20-share-landscape-large-font");onView(withText("Close")).perform(click());
-                scenario.onActivity(a->a.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT));rotated.set(false);end=System.currentTimeMillis()+15000;
-                while(!rotated.get()&&System.currentTimeMillis()<end){scenario.onActivity(a->rotated.set(a.getResources().getConfiguration().orientation==Configuration.ORIENTATION_PORTRAIT));Thread.sleep(100);}assertTrue(rotated.get());
+                }finally{
+                    scenario.onActivity(a->a.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT));AtomicBoolean restored=new AtomicBoolean();long resetEnd=System.currentTimeMillis()+15000;
+                    while(!restored.get()&&System.currentTimeMillis()<resetEnd){scenario.onActivity(a->restored.set(a.getResources().getConfiguration().orientation==Configuration.ORIENTATION_PORTRAIT));Thread.sleep(100);}assertTrue(restored.get());
+                }
             }
         }finally{shell("null".equals(old)?"settings delete system font_scale":"settings put system font_scale "+old);}
     }
