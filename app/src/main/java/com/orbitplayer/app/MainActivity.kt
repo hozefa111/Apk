@@ -380,6 +380,12 @@ class MainActivity : Activity() {
     }
 
     private fun filterVideos() {
+        // Albums have their own search/grouping logic. Avoid diffing and sorting the
+        // entire video list invisibly whenever the user browses default Folders.
+        if (tab == Tab.FOLDERS) {
+            updateAlbums()
+            return
+        }
         val nowSeconds = System.currentTimeMillis() / 1000
         val history = progress.getString("recently_watched", "")?.split("|")
             ?.filter { it.isNotBlank() } ?: emptyList()
@@ -420,10 +426,6 @@ class MainActivity : Activity() {
             else -> filtered.sortedByDescending { it.sizeBytes }
         }.toList()
         adapter.submit(visibleVideos)
-        if (tab == Tab.FOLDERS) {
-            updateAlbums()
-            return
-        }
         videos.adapter = adapter
         gridManager.spanCount = if (gallery) 2 else 1
         empty.visibility = if (visibleVideos.isEmpty()) View.VISIBLE else View.GONE
