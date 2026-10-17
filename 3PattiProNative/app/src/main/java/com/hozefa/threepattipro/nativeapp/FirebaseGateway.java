@@ -124,6 +124,10 @@ public final class FirebaseGateway {
             if(!running)return;
             animationContinuity=false;liveRevision.incrementAndGet();freshSnapshot=false;listener.syncState(false);
             if(state.getCurrentUser()==null){idToken=null;listener.authChanged(false);}
+            else if(retry.remaining(retryClock.getAsLong())>0){
+                // Restoring Firebase Auth is independent of a paused Firestore quota.
+                executor.execute(()->{try{ensureIdToken();}catch(Exception expired){idToken=null;ui.post(()->{if(running)listener.authChanged(false);});}});
+            }
             ui.removeCallbacks(liveRefresh);ui.postDelayed(liveRefresh,500);
         };
         auth.addAuthStateListener(authObserver);

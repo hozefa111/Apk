@@ -55,8 +55,8 @@ public class NativeQuotaTest {
         int count=requests.get();assertTrue(count>=1&&count<=3);
         for(int i=0;i<20;i++){gateway.refresh();InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{gateway.setForeground(false);gateway.setForeground(true);});}
         Thread.sleep(600);assertEquals("Refresh/resume cannot bypass quota",count,requests.get());
-        stop();start(client,clock);await(()->quota.get());Thread.sleep(600);assertEquals("Restart must retain cooldown",count,requests.get());
         gateway.signIn("tester@example.test","test-password-123");await(gateway::loggedIn);
+        stop();start(client,clock);await(()->quota.get());await(gateway::loggedIn);Thread.sleep(600);assertEquals("Restart must retain cooldown",count,requests.get());
         AtomicBoolean wrote=new AtomicBoolean();CountDownLatch rejected=new CountDownLatch(1);gateway.write("Must never save",token->wrote.set(true),()->{},rejected::countDown);assertTrue(rejected.await(5,TimeUnit.SECONDS));assertFalse(wrote.get());
         limited.set(false);clock.addAndGet(121000);assertTrue(gateway.refresh());await(()->live.get()&&!quota.get());assertTrue(requests.get()>count);
         assertFalse(players.get().stream().anyMatch(p->"cached-only".equals(p.get("id"))));
