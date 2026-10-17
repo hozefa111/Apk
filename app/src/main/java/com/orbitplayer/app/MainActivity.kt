@@ -77,6 +77,7 @@ class MainActivity : Activity() {
     private var previousLibraryAccess: Boolean? = null
     private var destroyed = false
     private var observerActive = false
+    private var needsBackgroundScan = false
     // Never sort thousands of videos repeatedly while the user is still typing.
     private val searchLater = Runnable { if (!destroyed) filterVideos() }
     private val refreshLater = Runnable { if (!destroyed && hasLibraryPermission()) scan() }
@@ -171,6 +172,9 @@ class MainActivity : Activity() {
     }
 
     override fun onStop() {
+        // MediaStore observer is unregistered while another app/player is foreground.
+        // Mark the next foreground entry for a real rescan instead of showing stale files.
+        needsBackgroundScan = true
         handler.removeCallbacks(refreshLater)
         if (observerActive) {
             contentResolver.unregisterContentObserver(mediaObserver)
@@ -198,7 +202,9 @@ class MainActivity : Activity() {
                 continueVideo = null
                 rebuildFolders()
                 filterVideos()
-            } else if (accessChanged || allVideos.isEmpty() || rescan) {
+            } else if (accessChanged || allVideos.isEmpty() || rescan ||
+                (preferences.autoRefresh && needsBackgroundScan)) {
+                needsBackgroundScan = false
                 scan()
             } else {
                 filterVideos()
