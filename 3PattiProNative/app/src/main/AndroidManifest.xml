@@ -5,9 +5,10 @@
     <application
         android:allowBackup="false"
         android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:label="3 Patti PRO"
-        android:icon="@drawable/ic_brand"
-        android:roundIcon="@drawable/ic_brand"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/Theme.ThreePatti"
         android:usesCleartextTraffic="false">
         <provider android:name="androidx.core.content.FileProvider"

@@ -33,6 +33,20 @@ public final class RoundAnalytics {
         }
         return count;
     }
+    /** HH session hot-streak award uses positive deltas; zero neither extends nor breaks it. */
+    public static int longestPositiveStreak(String playerId,List<Map<String,Object>> newestFirst){
+        int current=0,best=0;
+        for(int i=newestFirst.size()-1;i>=0;i--){
+            Map<String,Object> round=newestFirst.get(i);
+            if("settlement".equals(text(round,"type")) || !(round.get("scoreChanges") instanceof Map))continue;
+            Object raw=((Map<?,?>)round.get("scoreChanges")).get(playerId);
+            if(!(raw instanceof Number))continue;
+            double change=((Number)raw).doubleValue();
+            if(change>0){current++;best=Math.max(best,current);}
+            else if(change<0)current=0;
+        }
+        return best;
+    }
     /** {together, against, winsAgainst, lossesAgainst}. */
     public static int[] headToHead(String playerId,String rival,List<Map<String,Object>> games){
         int[] counts=new int[4];

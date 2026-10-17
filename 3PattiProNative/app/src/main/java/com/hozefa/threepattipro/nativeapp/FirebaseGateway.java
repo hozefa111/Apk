@@ -1,7 +1,13 @@
 package com.hozefa.threepattipro.nativeapp;
 
 import android.content.Context;
-import android.content.SharedPreferences;
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.FirebaseOptions;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.ListenerRegistration;
+import com.google.firebase.firestore.MetadataChanges;
+import com.google.android.gms.tasks.Tasks;
 import android.os.Handler;
 import android.os.Looper;
 import org.json.JSONArray;
@@ -36,17 +42,29 @@ public final class FirebaseGateway {
         public final String value;
         public Stamp(String v) { value = v; }
     }
-    private final String project = "patti-pro-a61d8";
+    private final String project = BuildConfig.USE_EMULATORS?"demo-three-patti":"patti-pro-a61d8";
     private final Context context;
     private final Listener listener;
     private final String apiKey;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final ExecutorService fetchers = Executors.newFixedThreadPool(3);
     private final Handler ui = new Handler(Looper.getMainLooper());
-    private final OkHttpClient http = new OkHttpClient.Builder().connectTimeout(14, TimeUnit.SECONDS).readTimeout(14, TimeUnit.SECONDS).build();
-    private final SharedPreferences prefs;
-    private volatile String refreshToken, idToken;
-    private long expireAt;
+    private final OkHttpClient http = new OkHttpClient.Builder().callTimeout(25, TimeUnit.SECONDS).connectTimeout(14, TimeUnit.SECONDS).readTimeout(14, TimeUnit.SECONDS).build();
+    private final FirebaseAuth auth;
+    private final FirebaseFirestore firestore;
+    private final List<ListenerRegistration> subscriptions=new ArrayList<>();
+    private volatile Map<String,String> versions=Collections.emptyMap();
+    private volatile Map<String,JSONObject> rawDocuments=Collections.emptyMap();
+    private static final class CollectionSnapshot {
+        final List<Map<String,Object>> rows=new ArrayList<>();
+        final Map<String,JSONObject> documents=new HashMap<>();
+        final Map<String,String> versions=new HashMap<>();
+    }
+    private final java.util.concurrent.atomic.AtomicLong liveRevision=new java.util.concurrent.atomic.AtomicLong();
+    private volatile long snapshotAt=0;
+    private volatile boolean signingOut=false;
+    private final Runnable liveRefresh=()->{if(this.running)executor.execute(this::load);};
+    private volatile String idToken;
     private volatile boolean running;
     private volatile boolean freshSnapshot=false;
     private boolean loading;
@@ -59,28 +77,41 @@ public final class FirebaseGateway {
     public FirebaseGateway(Context c, Listener l, String key) {
         context = c.getApplicationContext();
         listener = l;
-        apiKey = key;
-        prefs = context.getSharedPreferences("patti_native_auth", Context.MODE_PRIVATE);
-        refreshToken = prefs.getString("refresh_token", null);
-        dbRoot = "https://firestore.googleapis.com/v1/projects/" + project + "/databases/(default)/documents";
+        apiKey = BuildConfig.USE_EMULATORS?"demo-key":key;
+        FirebaseOptions options=new FirebaseOptions.Builder().setProjectId(project)
+                .setApiKey(apiKey).setApplicationId("1:570573461138:web:4414d0ce87282b91b2f84b").build();
+        FirebaseApp firebase;boolean initialized=false;
+        try { firebase=FirebaseApp.getInstance("three-patti-native"); }
+        catch(IllegalStateException missing){firebase=FirebaseApp.initializeApp(context,options,"three-patti-native");initialized=true;}
+        auth=FirebaseAuth.getInstance(firebase);
+        firestore=FirebaseFirestore.getInstance(firebase);
+        if(BuildConfig.USE_EMULATORS && initialized){
+            auth.useEmulator("10.0.2.2",9099);
+            firestore.useEmulator("10.0.2.2",8080);
+        }
+        // Legacy REST refresh tokens are discarded; Firebase Auth owns session persistence.
+        context.getSharedPreferences("patti_native_auth",Context.MODE_PRIVATE).edit().clear().apply();
+        dbRoot = (BuildConfig.USE_EMULATORS?"http://10.0.2.2:8080":"https://firestore.googleapis.com")+"/v1/projects/" + project + "/databases/(default)/documents";
     }
     public void start() {
         running = true;
         // A stored refresh token is not proof of a valid admin session.
         ui.post(() -> listener.authChanged(false));
-        executor.execute(() -> {
-            readCachedSnapshot();
-            if (refreshToken != null) {
-                try { ensureIdToken(); }
-                catch (Exception ex) {
-                    notify("Saved login could not be verified. Log in again if needed.");
-                }
-            }
-            load();
-        });
+        executor.execute(() -> { readCachedSnapshot(); load(); });
+        for(String collection:Arrays.asList("players","rounds","sessions")){
+            subscriptions.add(firestore.collection(collection).addSnapshotListener(MetadataChanges.INCLUDE,(snapshot,error)->{
+                if(!running)return;
+                liveRevision.incrementAndGet();freshSnapshot=false;listener.syncState(false);
+                ui.removeCallbacks(liveRefresh);
+                ui.postDelayed(liveRefresh,200);
+            }));
+        }
     }
-    public void stop() { running = false; ui.removeCallbacksAndMessages(null);
-        executor.shutdownNow();fetchers.shutdownNow(); }
+    public void stop() { running=false;
+        for(ListenerRegistration registration:subscriptions)registration.remove();
+        subscriptions.clear();ui.removeCallbacksAndMessages(null);
+        http.dispatcher().cancelAll();executor.shutdownNow();fetchers.shutdownNow();
+    }
     private void notify(String msg) { ui.post(() -> { if (running) listener.notice(msg); }); }
     private void setBusy(boolean b) { ui.post(() -> { if (running) listener.busy(b); }); }
     private String encoded(String s) throws Exception { return URLEncoder.encode(s, "UTF-8"); }
@@ -108,48 +139,26 @@ public final class FirebaseGateway {
         return network(method,endpoint,"application/json; charset=utf-8",body==null?null:body.toString(),bearer);
     }
     private void ensureIdToken() throws Exception {
-        if (refreshToken == null) return;
-        if (idToken != null && System.currentTimeMillis() < expireAt) return;
-        String fields = "grant_type=refresh_token&refresh_token=" + encoded(refreshToken);
-        JSONObject res = network("POST","https://securetoken.googleapis.com/v1/token?key="+encoded(apiKey),
-                "application/x-www-form-urlencoded",fields,null);
-        idToken=res.getString("id_token");
-        refreshToken=res.getString("refresh_token");
-        expireAt=System.currentTimeMillis() + Math.max(120, res.optLong("expires_in",3600)-90)*1000L;
-        prefs.edit().putString("refresh_token",refreshToken).apply();
-        ui.post(() -> { if (running) listener.authChanged(true); });
+        if(signingOut || auth.getCurrentUser()==null){idToken=null;return;}
+        idToken=Tasks.await(auth.getCurrentUser().getIdToken(false),20,TimeUnit.SECONDS).getToken();
+        ui.post(()->{if(running)listener.authChanged(loggedIn());});
     }
-    public boolean loggedIn() { return refreshToken != null && idToken != null; }
-    public void signIn(String email,String password) {
+    public boolean loggedIn(){return !signingOut && auth.getCurrentUser()!=null && idToken!=null;}
+    public void signIn(String email,String password){
         setBusy(true);
-        executor.execute(() -> {
-            try {
-                JSONObject req=new JSONObject();
-                req.put("email",email);
-                req.put("password",password);
-                req.put("returnSecureToken",true);
-                JSONObject res=jsonCall("POST","https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key="+encoded(apiKey),req,null);
-                refreshToken=res.getString("refreshToken");
-                idToken=res.getString("idToken");
-                expireAt=System.currentTimeMillis() + Math.max(120,res.optLong("expiresIn",3600)-90)*1000L;
-                prefs.edit().putString("refresh_token",refreshToken).apply();
-                ui.post(() -> { if(running) listener.authChanged(true); });
-                notify("Admin login successful");
-                load();
-            } catch (Exception ex) { notify("Login failed: " + ex.getMessage()); }
-            finally { setBusy(false); }
+        executor.execute(()->{
+            try{
+                Tasks.await(auth.signInWithEmailAndPassword(email,password),25,TimeUnit.SECONDS);
+                signingOut=false;ensureIdToken();load();notify("Admin login successful");
+            }catch(Exception error){notify("Login failed. Check credentials and connection.");}
+            finally{setBusy(false);}
         });
     }
-    public void signOut() {
-        executor.execute(() -> {
-            refreshToken=null;
-            idToken=null;
-            expireAt=0;
-            prefs.edit().remove("refresh_token").apply();
-            ui.post(() -> { if(running) listener.authChanged(false); });
-            notify("Logged out");
-            load();
-        });
+    public void signOut(){
+        // Block new mutations immediately, before the serialized work queue runs.
+        signingOut=true;freshSnapshot=false;
+        ui.post(()->{if(running)listener.authChanged(false);});
+        executor.execute(()->{auth.signOut();idToken=null;signingOut=false;load();notify("Logged out");});
     }
     public void refresh() {
         ui.removeCallbacks(refreshLoop);
@@ -157,30 +166,35 @@ public final class FirebaseGateway {
     }
     private void scheduleNext() {
         ui.removeCallbacks(refreshLoop);
-        ui.postDelayed(refreshLoop, 12000);
+        ui.postDelayed(refreshLoop, freshSnapshot?60000:12000);
     }
     private void load() {
         if (!running) return;
         if (loading) { reloadRequested=true; return; }
         loading=true;
         try {
-            if (refreshToken != null) {
+            if (auth.getCurrentUser() != null) {
                 try { ensureIdToken(); } catch (Exception ex) {
                     idToken=null;
                     ui.post(()->{if(running) listener.authChanged(false);});
                 }
             }
+            long revision=liveRevision.get();
             // Fetch independent collections in parallel rather than blocking the
             // admin action queue for the sum of three HTTP latencies.
-            Future<List<Map<String,Object>>> playerFetch=fetchers.submit(()->fetchCollection("players"));
-            Future<List<Map<String,Object>>> roundFetch=fetchers.submit(()->fetchCollection("rounds"));
-            Future<List<Map<String,Object>>> sessionFetch=fetchers.submit(()->fetchCollection("sessions"));
-            List<Map<String,Object>> p=playerFetch.get();
-            List<Map<String,Object>> r=roundFetch.get();
-            List<Map<String,Object>> s=sessionFetch.get();
-            freshSnapshot=true;
+            Future<CollectionSnapshot> playerFetch=fetchers.submit(()->fetchCollection("players"));
+            Future<CollectionSnapshot> roundFetch=fetchers.submit(()->fetchCollection("rounds"));
+            Future<CollectionSnapshot> sessionFetch=fetchers.submit(()->fetchCollection("sessions"));
+            CollectionSnapshot ps=playerFetch.get(),rs=roundFetch.get(),ss=sessionFetch.get();
+            List<Map<String,Object>> p=ps.rows,r=rs.rows,s=ss.rows;
+            Map<String,String> nextVersions=new HashMap<>();Map<String,JSONObject> nextDocuments=new HashMap<>();
+            for(CollectionSnapshot collection:Arrays.asList(ps,rs,ss)){nextVersions.putAll(collection.versions);nextDocuments.putAll(collection.documents);}
+            versions=nextVersions;rawDocuments=nextDocuments;
+            snapshotAt=System.currentTimeMillis();
+            freshSnapshot=revision==liveRevision.get();
+            final boolean coherent=freshSnapshot;
             saveCachedSnapshot(p,r,s);
-            ui.post(() -> { if(running) { listener.syncState(true); listener.dataUpdated(p,r,s); } });
+            ui.post(() -> { if(running) { listener.syncState(coherent); listener.dataUpdated(p,r,s); } });
         } catch (Exception ex) {
             freshSnapshot=false;
             ui.post(()->{if(running)listener.syncState(false);});
@@ -266,8 +280,8 @@ public final class FirebaseGateway {
         }
         return value;
     }
-    private List<Map<String,Object>> fetchCollection(String name) throws Exception {
-        ArrayList<Map<String,Object>> result=new ArrayList<>();
+    private CollectionSnapshot fetchCollection(String name) throws Exception {
+        CollectionSnapshot result=new CollectionSnapshot();
         String next=null;
         for(int page=0;page<20;page++) {
             String url=dbRoot + "/" + name + "?pageSize=500"
@@ -279,7 +293,10 @@ public final class FirebaseGateway {
                 Map<String,Object> map=decodeFields(doc.optJSONObject("fields"));
                 String full=doc.optString("name","");
                 map.put("id",full.substring(full.lastIndexOf('/')+1));
-                result.add(map);
+                map.put("_updateTime",doc.optString("updateTime"));
+                result.documents.put(name+"/"+map.get("id"),doc);
+                result.versions.put(name+"/"+map.get("id"),doc.optString("updateTime"));
+                result.rows.add(map);
             }
             next=data.optString("nextPageToken","");
             if(next.isEmpty()) break;
@@ -344,7 +361,10 @@ public final class FirebaseGateway {
      * Atomic rename: changing the player and the historical embedded names
      * either ALL succeeds or NONE succeeds. Never partially rename Firebase.
      */
-    public void renamePlayer(String playerId,String newName,List<Map<String,Object>> rounds) {
+    public void renamePlayer(String playerId,String newName,List<Map<String,Object>> rounds,String playerVersion) {
+        final Map<String,String> expected=new HashMap<>(versions);
+        expected.put("players/"+playerId,playerVersion);
+        for(Map<String,Object> round:rounds)expected.put("rounds/"+round.get("id"),String.valueOf(round.get("_updateTime")));
         write("Player renamed",token->{
             JSONArray operations=new JSONArray();
             JSONObject playerUpdate=new JSONObject();
@@ -353,7 +373,7 @@ public final class FirebaseGateway {
             operations.put(new JSONObject()
                     .put("update",playerUpdate)
                     .put("updateMask",new JSONObject().put("fieldPaths",new JSONArray().put("name")))
-                    .put("currentDocument",new JSONObject().put("exists",true)));
+                    .put("currentDocument",precondition(expected,"players/"+playerId)));
             for(Map<String,Object> round:rounds){
                 String rid=String.valueOf(round.get("id"));
                 Map<String,Object> edits=new LinkedHashMap<>();
@@ -385,7 +405,7 @@ public final class FirebaseGateway {
                 operations.put(new JSONObject()
                         .put("update",update)
                         .put("updateMask",new JSONObject().put("fieldPaths",fields))
-                        .put("currentDocument",new JSONObject().put("exists",true)));
+                        .put("currentDocument",precondition(expected,"rounds/"+rid)));
             }
             jsonCall("POST",dbRoot+":commit",new JSONObject().put("writes",operations),token);
         });
@@ -398,9 +418,17 @@ public final class FirebaseGateway {
         }
         return "Unknown";
     }
-    public void deleteDocument(String collection,String id,String success){
+    private JSONObject precondition(Map<String,String> expected,String path) throws Exception{
+        String version=expected.get(path);
+        if(version==null||version.isEmpty())throw new IOException("Refresh before changing this record");
+        return new JSONObject().put("updateTime",version);
+    }
+    public void deleteDocument(String collection,String id,String success){deleteDocument(collection,id,success,versions.get(collection+"/"+id));}
+    public void deleteDocument(String collection,String id,String success,String expectedVersion){
+        final Map<String,String> expected=new HashMap<>(versions);expected.put(collection+"/"+id,expectedVersion);
         write(success,token->{
-            String url=dbRoot+"/"+collection+"/"+encoded(id);
+            String url=dbRoot+"/"+collection+"/"+encoded(id)+"?currentDocument.updateTime="+encoded(precondition(expected,collection+"/"+id).getString("updateTime"));
+            preserveBackup();
             jsonCall("DELETE",url,null,token);
         });
     }
@@ -428,13 +456,18 @@ public final class FirebaseGateway {
         executor.execute(() -> {
             try {
                 ensureIdToken();
-                if(idToken==null)throw new IOException("Login expired");
+                if(idToken==null || signingOut)throw new IOException("Login expired");
+                if(System.currentTimeMillis()-snapshotAt>60000)load();
+                if(!freshSnapshot)throw new IOException("Data changed. Refresh and retry.");
                 action.run(idToken);
                 notify(success);
                 onUi(onSuccess);
                 load();
             }catch(Exception error){
+                freshSnapshot=false;
+                ui.post(()->{if(running)listener.syncState(false);});
                 notify("Not saved: "+error.getMessage());
+                if(running)ui.postDelayed(liveRefresh,200);
                 onUi(onFailure);
             }finally{
                 writeInFlight.set(false);
@@ -445,12 +478,89 @@ public final class FirebaseGateway {
     private void onUi(Runnable callback){
         if(callback!=null)ui.post(()->{if(running)callback.run();});
     }
+    public interface BackupCallback{void ready(byte[] bytes);}
+    public void exportBackup(BackupCallback callback){
+        setBusy(true);
+        executor.execute(()->{
+            try{
+                load();if(!freshSnapshot)throw new IOException("A live snapshot is required for backup");
+                JSONObject backup=new JSONObject().put("format","3patti-firestore-v1").put("project",project)
+                    .put("exportedAt",Instant.now().toString()).put("documents",new JSONArray(rawDocuments.values()));
+                byte[] bytes=backup.toString(2).getBytes(StandardCharsets.UTF_8);
+                ui.post(()->{if(running)callback.ready(bytes);});
+            }catch(Exception error){notify("Backup failed: "+error.getMessage());}
+            finally{setBusy(false);}
+        });
+    }
+    public void exportRecoveryBackup(BackupCallback callback){
+        executor.execute(()->{
+            try{
+                File[] files=new File(context.getFilesDir(),"recovery").listFiles((dir,name)->name.endsWith(".json"));
+                if(files==null||files.length==0)throw new IOException("No recovery backup on this device");
+                Arrays.sort(files,Comparator.comparingLong(File::lastModified).reversed());
+                byte[] bytes=Files.readAllBytes(files[0].toPath());ui.post(()->{if(running)callback.ready(bytes);});
+            }catch(Exception error){notify("Recovery export: "+error.getMessage());}
+        });
+    }
+    private String fingerprint(){return new TreeMap<>(versions).toString();}
+    public String backupFingerprint(){return fingerprint();}
+    private void preserveBackup()throws Exception{
+        JSONObject backup=new JSONObject().put("format","3patti-firestore-v1").put("project",project)
+            .put("exportedAt",Instant.now().toString()).put("documents",new JSONArray(rawDocuments.values()));
+        File folder=new File(context.getFilesDir(),"recovery");if(!folder.exists()&&!folder.mkdirs())throw new IOException("Cannot create recovery backup");
+        File target=new File(folder,"backup-"+System.currentTimeMillis()+".json");
+        try(FileOutputStream out=new FileOutputStream(target)){out.write(backup.toString().getBytes(StandardCharsets.UTF_8));out.getFD().sync();}
+    }
+    public void clearHistory(String exportedFingerprint){
+        final Map<String,String> expected=new HashMap<>(versions);
+        write("All rounds and sessions cleared",token->{
+            if(!fingerprint().equals(exportedFingerprint))throw new IOException("Table changed since backup. Export a new backup first.");
+            JSONArray writes=new JSONArray();
+            for(String path:expected.keySet())if(path.startsWith("rounds/")||path.startsWith("sessions/")){
+                writes.put(new JSONObject().put("delete",documentRoot+"/"+path).put("currentDocument",precondition(expected,path)));
+            }
+            if(writes.length()>500)throw new IOException("Atomic clear supports up to 500 rounds and sessions. Nothing deleted.");
+            preserveBackup();
+            if(writes.length()>0)jsonCall("POST",dbRoot+":commit",new JSONObject().put("writes",writes),token);
+        });
+    }
+    public void restoreBackup(byte[] bytes){restoreBackup(bytes,false);}
+    public void restoreBackup(byte[] bytes,boolean legacy){
+        write("Backup restored; existing records preserved",token->{
+            List<JSONObject> documents=BackupArchive.validate(bytes,project);JSONArray writes=new JSONArray();
+            // Load live state first; conflicts fail before any mutation.
+            load();if(!freshSnapshot)throw new IOException("Live data required");
+            if(legacy)for(String path:rawDocuments.keySet())if(path.startsWith("players/"))throw new IOException("Legacy import requires an empty player collection");
+            for(JSONObject doc:documents){
+                String path=BackupArchive.path(doc,project);
+                if(rawDocuments.containsKey(path)){
+                    if(!equivalent(decodeFields(rawDocuments.get(path).getJSONObject("fields")),decodeFields(doc.getJSONObject("fields"))))
+                        throw new IOException("Backup conflicts with existing "+path+". No records changed.");
+                    continue;
+                }
+                writes.put(new JSONObject().put("update",new JSONObject().put("name",documentRoot+"/"+path).put("fields",doc.getJSONObject("fields")))
+                    .put("currentDocument",new JSONObject().put("exists",false)));
+            }
+            preserveBackup();
+            if(writes.length()>0)jsonCall("POST",dbRoot+":commit",new JSONObject().put("writes",writes),token);
+        });
+    }
     public static Map<String,Object> map(Object... v) {
         Map<String,Object> m=new LinkedHashMap<>();
         for(int i=0;i+1<v.length;i+=2) m.put(String.valueOf(v[i]),v[i+1]);
         return m;
     }
     public static Stamp now() { return new Stamp(Instant.now().toString()); }
+    private JSONObject updateWrite(String collection,String id,Map<String,Object> fields,JSONObject condition,boolean masked)throws Exception{
+        Map<String,Object> values=new LinkedHashMap<>(fields);JSONArray transforms=new JSONArray();
+        for(Map.Entry<String,Object> entry:fields.entrySet())if(entry.getValue() instanceof Stamp){
+            values.remove(entry.getKey());transforms.put(new JSONObject().put("fieldPath",entry.getKey()).put("setToServerValue","REQUEST_TIME"));
+        }
+        JSONObject write=new JSONObject().put("update",new JSONObject().put("name",documentRoot+"/"+collection+"/"+id).put("fields",encodeFields(values))).put("currentDocument",condition);
+        if(masked)write.put("updateMask",new JSONObject().put("fieldPaths",new JSONArray(fields.keySet())));
+        if(transforms.length()>0)write.put("updateTransforms",transforms);
+        return write;
+    }
     public void addDocument(String collection, Map<String,Object> fields,String success) {
         addDocument(collection,fields,success,null);
     }
@@ -459,10 +569,10 @@ public final class FirebaseGateway {
     }
     public void addDocument(String collection,Map<String,Object> fields,String success,
                             Runnable onSaved,Runnable onFailed) {
+        final String documentId=UUID.randomUUID().toString();
         write(success,token->{
-            JSONObject body=new JSONObject();
-            body.put("fields",encodeFields(fields));
-            jsonCall("POST",dbRoot+"/"+collection,body,token);
+            JSONObject update=updateWrite(collection,documentId,fields,new JSONObject().put("exists",false),false);
+            jsonCall("POST",dbRoot+":commit",new JSONObject().put("writes",new JSONArray().put(update)),token);
         },onSaved,onFailed);
     }
     /**
@@ -474,29 +584,46 @@ public final class FirebaseGateway {
                                Runnable onSaved,Runnable onFailed) {
         write("Round saved successfully",token->{
             String path=dbRoot+"/rounds/"+encoded(id);
-            JSONObject body=new JSONObject().put("fields",encodeFields(fields));
+            JSONObject update=updateWrite("rounds",id,fields,new JSONObject().put("exists",false),false);
             try {
-                jsonCall("PATCH",path+"?currentDocument.exists=false",body,token);
+                jsonCall("POST",dbRoot+":commit",new JSONObject().put("writes",new JSONArray().put(update)),token);
             }catch(Exception failure){
                 // A timeout might occur AFTER the backend committed the write.
                 // Verify our unique UUID before offering a retry, to avoid
                 // inserting the same round twice into the source of truth.
                 try{
                     JSONObject existing=jsonCall("GET",path,null,token);
-                    if(existing.optJSONObject("fields")==null)throw failure;
+                    if(!sameRound(decodeFields(existing.optJSONObject("fields")),fields))
+                        throw new IOException("Round ID already contains different data. Refresh before retrying.");
                 }catch(Exception verificationFailure){
                     throw failure;
                 }
             }
         },onSaved,onFailed);
     }
-    public void patchDocument(String collection,String id,Map<String,Object> fields,String success) {
+    static boolean sameRound(Map<String,Object> a,Map<String,Object> b){
+        for(String key:Arrays.asList("type","bid","hukumId","partnerIds","nonPartnerIds","playerIds","result","scoreChanges")){
+            if(!equivalent(a.get(key),b.get(key)))return false;
+        }
+        return true;
+    }
+    private static boolean equivalent(Object a,Object b){
+        if(a instanceof Number && b instanceof Number)return Double.compare(((Number)a).doubleValue(),((Number)b).doubleValue())==0;
+        if(a instanceof Map && b instanceof Map){
+            Map<?,?> left=(Map<?,?>)a,right=(Map<?,?>)b;
+            if(!left.keySet().equals(right.keySet()))return false;
+            for(Object key:left.keySet())if(!equivalent(left.get(key),right.get(key)))return false;
+            return true;
+        }
+        return Objects.equals(a,b);
+    }
+    public void patchDocument(String collection,String id,Map<String,Object> fields,String success){patchDocument(collection,id,fields,success,null);}
+    public void patchDocument(String collection,String id,Map<String,Object> fields,String success,Runnable onSaved){patchDocument(collection,id,fields,success,versions.get(collection+"/"+id),onSaved);}
+    public void patchDocument(String collection,String id,Map<String,Object> fields,String success,String expectedVersion,Runnable onSaved) {
+        final Map<String,String> expected=new HashMap<>(versions);expected.put(collection+"/"+id,expectedVersion);
         write(success,token -> {
-            JSONObject body=new JSONObject();
-            body.put("fields",encodeFields(fields));
-            StringBuilder uri=new StringBuilder(dbRoot+"/"+collection+"/"+encoded(id)+"?");
-            for(String key:fields.keySet()) uri.append("updateMask.fieldPaths=").append(encoded(key)).append("&");
-            jsonCall("PATCH",uri.toString(),body,token);
-        });
+            JSONObject update=updateWrite(collection,id,fields,precondition(expected,collection+"/"+id),true);
+            jsonCall("POST",dbRoot+":commit",new JSONObject().put("writes",new JSONArray().put(update)),token);
+        },onSaved,null);
     }
 }

@@ -28,6 +28,12 @@ public final class NativeImageShare {
     private static final int BACKGROUND=0xFF0F0F1A, LINE=0xFF343446;
     private static final ExecutorService RENDERER=Executors.newSingleThreadExecutor();
     private NativeImageShare() {}
+    private static final ThreadLocal<String> STYLE=new ThreadLocal<>();
+    private static List<Uri> pendingSave=Collections.emptyList();
+    private static int accent(){String s=STYLE.get();return "emerald".equals(s)?0xFF57D9AC:"midnight".equals(s)?0xFF9FA8FF:GOLD;}
+    private static int background(){String s=STYLE.get();return "emerald".equals(s)?0xFF071D18:"midnight".equals(s)?0xFF0A1028:BACKGROUND;}
+    private static void style(Activity activity){STYLE.set(activity.getSharedPreferences("preferences",0).getString("share_style","classic"));}
+
 
     public static final class ScoreRow {
         public final String name, role;
@@ -59,9 +65,9 @@ public final class NativeImageShare {
             this.height=height;
             bitmap=Bitmap.createBitmap(W,height,Bitmap.Config.ARGB_8888);
             canvas=new Canvas(bitmap);
-            canvas.drawColor(BACKGROUND);
+            canvas.drawColor(background());
             p.setShader(new LinearGradient(0,0,W,height,
-                    new int[]{0xFF10101D,0xFF15132A,0xFF0D0D18},null,Shader.TileMode.CLAMP));
+                    new int[]{background(),background(),0xFF0D0D18},null,Shader.TileMode.CLAMP));
             canvas.drawRect(0,0,W,height,p);p.setShader(null);
             p.setColor(0x24F5A623);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(3);
             canvas.drawRoundRect(18,18,W-18,height-18,34,34,p);p.setStyle(Paint.Style.FILL);
@@ -78,7 +84,7 @@ public final class NativeImageShare {
             p.setColor(color);p.setStrokeWidth(2);canvas.drawLine(l,top,r,top,p);
         }
         void draw(String value,float x,float base,int size,int color,boolean bold,Paint.Align align,float maximum){
-            p.setShader(null);p.setColor(color);p.setTextSize(size);
+            p.setShader(null);p.setColor(color==GOLD?accent():color);p.setTextSize(size);
             p.setTypeface(Typeface.create("sans-serif",bold?Typeface.BOLD:Typeface.NORMAL));
             p.setTextAlign(align);
             p.setStyle(Paint.Style.FILL);
@@ -123,6 +129,7 @@ public final class NativeImageShare {
         RENDERER.execute(()->renderRound(activity,date,hukum,result,bid,snapshot));
     }
     private static void renderRound(Activity activity,String date,String hukum,String result,int bid,List<ScoreRow> rows){
+        style(activity);
         try{
             final int perPage=26;
             final int pages=Math.max(1,(rows.size()+perPage-1)/perPage);
@@ -163,6 +170,7 @@ public final class NativeImageShare {
         RENDERER.execute(()->renderLeaderboard(activity,filter,snapshot));
     }
     private static void renderLeaderboard(Activity activity,String filter,List<RankRow> rows){
+        style(activity);
         try {
             final int pageSize=30;
             final int pages=Math.max(1,(rows.size()+pageSize-1)/pageSize);
@@ -200,7 +208,16 @@ public final class NativeImageShare {
     }
     private static void renderSession(Activity activity,String title,String date,
                                 List<AwardRow> awards,List<RankRow> ranked){
+        style(activity);
         try{
+            List<AwardRow> expanded=new ArrayList<>();
+            TextPaint measure=new TextPaint(Paint.ANTI_ALIAS_FLAG);measure.setTextSize(25);
+            for(AwardRow award:awards){
+                String value=award.value==null?"":award.value;
+                android.text.StaticLayout layout=android.text.StaticLayout.Builder.obtain(value,0,value.length(),measure,W-2*PAD-64).setIncludePad(false).build();
+                for(int line=0;line<layout.getLineCount();line++)expanded.add(new AwardRow(award.title+(line>0?" (continued)":""),value.substring(layout.getLineStart(line),layout.getLineEnd(line)).trim()));
+            }
+            awards=expanded;
             List<Uri> images=new ArrayList<>();
             int awardPosition=0,rankPosition=0,page=0;
             // 12 award and 14 ranking records per first page; subsequent pages
@@ -210,7 +227,7 @@ public final class NativeImageShare {
                 boolean moreAwards=awardPosition+awardCount<awards.size();
                 int rankCapacity=awardCount>0?14:28;
                 int rankCount=moreAwards?0:Math.min(rankCapacity,ranked.size()-rankPosition);
-                int awardsHeight=awardCount==0?0:85+awardCount*75;
+                int awardsHeight=awardCount==0?0:85+awardCount*105;
                 int rankHeight=90+rankCount*86;
                 Art card=new Art(370+awardsHeight+rankHeight+155);
                 card.header(page==0?"Session Summary":"Session Summary  •  Page "+(page+1),"📅  "+date);
@@ -218,7 +235,9 @@ public final class NativeImageShare {
                     int at=card.y;card.sectionStart("🏆  SESSION AWARDS",awardsHeight);
                     for(int i=0;i<awardCount;i++){
                         AwardRow award=awards.get(awardPosition+i);
-                        card.row(award.title,award.value,GOLD,55,at+63+i*75,75);
+                        int top=at+80+i*105;
+                        card.draw(award.title,PAD+32,top,23,MUTED,true,Paint.Align.LEFT,W-2*PAD-64);
+                        card.draw(award.value,PAD+32,top+40,25,GOLD,true,Paint.Align.LEFT,W-2*PAD-64);
                     }
                     card.y=at+awardsHeight+26;
                 }
@@ -257,15 +276,87 @@ public final class NativeImageShare {
         if(images.isEmpty())return;
         activity.runOnUiThread(()->{
             if(activity.isFinishing()||activity.isDestroyed())return;
+            android.widget.LinearLayout body=new android.widget.LinearLayout(activity);body.setOrientation(android.widget.LinearLayout.VERTICAL);
+            android.widget.ImageView preview=new android.widget.ImageView(activity);preview.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+            body.addView(preview,new android.widget.LinearLayout.LayoutParams(-1,(int)(activity.getResources().getDisplayMetrics().heightPixels*0.5f)));
+            android.widget.LinearLayout controls=new android.widget.LinearLayout(activity);controls.setGravity(android.view.Gravity.CENTER);
+            android.widget.Button previous=new android.widget.Button(activity),next=new android.widget.Button(activity);
+            android.widget.TextView pageLabel=new android.widget.TextView(activity);pageLabel.setGravity(android.view.Gravity.CENTER);
+            previous.setText("Previous");next.setText("Next");controls.addView(previous);controls.addView(pageLabel,new android.widget.LinearLayout.LayoutParams(0,-2,1));controls.addView(next);body.addView(controls);
+            int[] position={0};Bitmap[] displayed={null};
+            Runnable show=()->{
+                try{
+                    preview.setImageDrawable(null);if(displayed[0]!=null)displayed[0].recycle();
+                    Uri uri=images.get(position[0]);BitmapFactory.Options opts=new BitmapFactory.Options();opts.inJustDecodeBounds=true;
+                    try(java.io.InputStream in=activity.getContentResolver().openInputStream(uri)){BitmapFactory.decodeStream(in,null,opts);}
+                    opts.inSampleSize=1;int target=activity.getResources().getDisplayMetrics().widthPixels;
+                    while(opts.outWidth/(opts.inSampleSize*2)>=target)opts.inSampleSize*=2;opts.inJustDecodeBounds=false;
+                    try(java.io.InputStream in=activity.getContentResolver().openInputStream(uri)){displayed[0]=BitmapFactory.decodeStream(in,null,opts);}
+                    preview.setImageBitmap(displayed[0]);preview.setContentDescription(title+" preview page "+(position[0]+1));
+                    pageLabel.setText((position[0]+1)+" / "+images.size());previous.setEnabled(position[0]>0);next.setEnabled(position[0]<images.size()-1);
+                }catch(Exception error){errorToast(activity,error);}
+            };
+            previous.setOnClickListener(v->{position[0]--;show.run();});next.setOnClickListener(v->{position[0]++;show.run();});
+            android.app.AlertDialog dialog=new android.app.AlertDialog.Builder(activity).setTitle(title)
+                .setView(body).setNegativeButton("Close",null)
+                .setNeutralButton("Save Images",(d,w)->saveImages(activity,images))
+                .setPositiveButton("Share",(d,w)->sendImages(activity,images,title)).create();
+            dialog.setOnDismissListener(d->{preview.setImageDrawable(null);if(displayed[0]!=null){displayed[0].recycle();displayed[0]=null;}});
+            dialog.show();show.run();
+        });
+    }
+    private static void sendImages(Activity activity,List<Uri> images,String title){
+        try{
             Intent intent=new Intent(images.size()==1?Intent.ACTION_SEND:Intent.ACTION_SEND_MULTIPLE);
             intent.setType("image/png");
             if(images.size()==1)intent.putExtra(Intent.EXTRA_STREAM,images.get(0));
             else intent.putParcelableArrayListExtra(Intent.EXTRA_STREAM,new ArrayList<>(images));
             ClipData clips=ClipData.newRawUri(title,images.get(0));
             for(int i=1;i<images.size();i++)clips.addItem(new ClipData.Item(images.get(i)));
-            intent.setClipData(clips);
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.setClipData(clips);intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             activity.startActivity(Intent.createChooser(intent,title));
+        }catch(Exception error){errorToast(activity,error);}
+    }
+    private static void copy(Activity activity,Uri source,Uri target)throws Exception{
+        try(java.io.InputStream in=activity.getContentResolver().openInputStream(source);
+            java.io.OutputStream out=activity.getContentResolver().openOutputStream(target)){
+            if(in==null||out==null)throw new IOException("Cannot open image file");
+            byte[] bytes=new byte[32768];int read;while((read=in.read(bytes))!=-1)out.write(bytes,0,read);
+        }
+    }
+    private static void saveImages(Activity activity,List<Uri> images){
+        if(android.os.Build.VERSION.SDK_INT<29){
+            pendingSave=new ArrayList<>(images);
+            activity.startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE),701);return;
+        }
+        RENDERER.execute(()->{
+            List<Uri> created=new ArrayList<>();
+            try{
+                for(Uri source:images){
+                    android.content.ContentValues values=new android.content.ContentValues();
+                    values.put(android.provider.MediaStore.Images.Media.DISPLAY_NAME,"3patti-"+System.nanoTime()+".png");
+                    values.put(android.provider.MediaStore.Images.Media.MIME_TYPE,"image/png");
+                    values.put(android.provider.MediaStore.Images.Media.RELATIVE_PATH,"Pictures/3 Patti PRO");
+                    values.put(android.provider.MediaStore.Images.Media.IS_PENDING,1);
+                    Uri target=activity.getContentResolver().insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values);
+                    if(target==null)throw new IOException("Gallery unavailable");created.add(target);copy(activity,source,target);
+                }
+                for(Uri target:created){android.content.ContentValues values=new android.content.ContentValues();values.put(android.provider.MediaStore.Images.Media.IS_PENDING,0);activity.getContentResolver().update(target,values,null,null);}
+                activity.runOnUiThread(()->android.widget.Toast.makeText(activity,"Saved "+images.size()+" images to Pictures/3 Patti PRO",android.widget.Toast.LENGTH_LONG).show());
+            }catch(Exception error){for(Uri target:created)activity.getContentResolver().delete(target,null,null);errorToast(activity,error);}
+        });
+    }
+    public static void onActivityResult(Activity activity,int request,int result,Intent data){
+        if(request!=701)return;
+        List<Uri> sources=new ArrayList<>(pendingSave);pendingSave=Collections.emptyList();
+        if(result!=Activity.RESULT_OK||data==null||data.getData()==null)return;
+        final Uri tree=data.getData();
+        RENDERER.execute(()->{
+            try{
+                Uri parent=android.provider.DocumentsContract.buildDocumentUriUsingTree(tree,android.provider.DocumentsContract.getTreeDocumentId(tree));
+                for(Uri source:sources){Uri target=android.provider.DocumentsContract.createDocument(activity.getContentResolver(),parent,"image/png","3patti-"+System.nanoTime()+".png");if(target==null)throw new IOException("Cannot create image");copy(activity,source,target);}
+                activity.runOnUiThread(()->android.widget.Toast.makeText(activity,"Saved "+sources.size()+" images",android.widget.Toast.LENGTH_LONG).show());
+            }catch(Exception error){errorToast(activity,error);}
         });
     }
     private static void errorToast(Activity activity,Exception ex){
@@ -275,27 +366,4 @@ public final class NativeImageShare {
         });
     }
 
-    private static void deliver(Activity activity,Bitmap bitmap,String title){
-        try {
-            File dir=new File(activity.getCacheDir(),"share");
-            if(!dir.exists()&&!dir.mkdirs())throw new IllegalStateException("Cannot create cache");
-            File file=new File(dir,"3-patti-pro-"+System.nanoTime()+".png");
-            try(FileOutputStream stream=new FileOutputStream(file)){
-                if(!bitmap.compress(Bitmap.CompressFormat.PNG,100,stream))
-                    throw new IllegalStateException("PNG write failed");
-            }
-            Uri uri=FileProvider.getUriForFile(activity,activity.getPackageName()+".fileprovider",file);
-            Intent send=new Intent(Intent.ACTION_SEND);
-            send.setType("image/png");
-            send.putExtra(Intent.EXTRA_STREAM,uri);
-            send.setClipData(ClipData.newRawUri(title,uri));
-            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            activity.runOnUiThread(()->{
-                if(!activity.isFinishing())activity.startActivity(Intent.createChooser(send,title));
-            });
-        }catch(Exception ex){
-            activity.runOnUiThread(()->android.widget.Toast.makeText(activity,
-                    "Image sharing failed: "+ex.getMessage(),android.widget.Toast.LENGTH_LONG).show());
-        }finally {bitmap.recycle();}
-    }
 }

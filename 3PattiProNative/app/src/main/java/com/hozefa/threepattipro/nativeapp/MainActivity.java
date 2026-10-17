@@ -28,11 +28,24 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 public final class MainActivity extends Activity implements FirebaseGateway.Listener {
-    private static final int BG = 0xFF0A0A0C, PANEL = 0xFF18181C, PANEL2 = 0xFF222228;
+    private int BG = 0xFF0A0A0C, PANEL = 0xFF18181C, PANEL2 = 0xFF222228;
     private static final int BORDER = 0xFF35343A, WHITE = 0xFFFFFFFF, MUTED = 0xFF8A8D93;
-    private static final int GOLD = 0xFFF6D365, GREEN = 0xFF2ECD71, RED = 0xFFE74C3C;
+    private int GOLD = 0xFFF6D365, GREEN = 0xFF2ECD71, RED = 0xFFE74C3C;
     private static final int BLUE = 0xFF4FACFE;
     private FirebaseGateway api;
+    private AlertDialog authDialog;
+    private android.content.SharedPreferences settings;
+    private String rosterFilter="all",searchQuery="";
+    private String pendingRoundTimestamp=null,pendingRoundJson=null;
+    private final android.os.Handler clock=new android.os.Handler(android.os.Looper.getMainLooper());
+    private TextView sessionTimer;
+    private final Runnable tick=new Runnable(){public void run(){
+        Map<String,Object> session=activeSession();
+        if(sessionTimer!=null&&session!=null)sessionTimer.setText("Duration  "+duration(System.currentTimeMillis()-time(session.get("startTime"))));
+        clock.postDelayed(this,1000);
+    }};
+    private String duration(long ms){long n=Math.max(0,ms/1000);return String.format(Locale.ROOT,"%02d:%02d:%02d",n/3600,n/60%60,n%60);}
+
     private final List<Map<String,Object>> players = new ArrayList<>();
     private final List<Map<String,Object>> rounds = new ArrayList<>();
     private final List<Map<String,Object>> sessions = new ArrayList<>();
@@ -65,19 +78,26 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        settings=getSharedPreferences("preferences",MODE_PRIVATE);
+        applyAppearance();
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        restoreDraft();
+        if(state!=null){tab=state.getInt("tab",0);historyTab=state.getInt("historyTab",0);rankFilter=state.getString("rankFilter","all");profileId=state.getString("profileId");customStart=state.getLong("customStart");customEnd=state.getLong("customEnd");searchQuery=state.getString("searchQuery","");}
         buildShell();
+        clock.post(tick);
         api=new FirebaseGateway(this,this,getString(R.string.firebase_web_api_key));
         api.start();
     }
     @Override protected void onDestroy() {
+        persistDraft();
+        clock.removeCallbacksAndMessages(null);
         if (api != null) api.stop();
         super.onDestroy();
     }
     @Override public void dataUpdated(List<Map<String,Object>> p,List<Map<String,Object>> r,List<Map<String,Object>> s) {
-        p.sort(Comparator.comparing(a -> str(a,"name").toLowerCase(Locale.ROOT)));
+        p.sort(Comparator.<Map<String,Object>>comparingLong(a -> time(a.get("createdAt"))).thenComparing(this::id));
         r.sort((a,b) -> Long.compare(time(b.get("timestamp")),time(a.get("timestamp"))));
         s.sort((a,b) -> Long.compare(time(b.get("startTime")),time(a.get("startTime"))));
         // Preserve every touch target on empty/no-op Firestore polls.
@@ -107,7 +127,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             }
         }
         hasData=true;
-        if(playing!=null) playing.retainAll(activeIds());
+        if(playing!=null && pendingRoundId==null) playing.retainAll(activeIds());
         // New rounds and sessions can arrive while the form is open. Update only
         // its score preview unless the player roster itself changed.
         if(tab==2 && !rosterChanged && roundBidView!=null && roundPreviewSection!=null)
@@ -117,6 +137,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     @Override public void authChanged(boolean value) {
         if(loggedIn==value) return;
         loggedIn=value;
+        if(value&&authDialog!=null){authDialog.dismiss();authDialog=null;}
         updateToolbar();
         if(!loggedIn && tab==2) tab=0;
         render(false);
@@ -125,6 +146,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(liveConnected==online)return;
         liveConnected=online;
         updateToolbar();
+        if(tab==2&&roundSaveView!=null&&roundHintView!=null&&roundPreviewSection!=null)updateRoundForm();
     }
     @Override public void notice(String msg) {
         Toast.makeText(this,msg,Toast.LENGTH_LONG).show();
@@ -135,6 +157,28 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         updateToolbar();
         if(tab==2&&roundSaveView!=null&&roundPreviewSection!=null&&roundHintView!=null)
             updateRoundForm();
+    }
+    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);persistDraft();state.putInt("tab",tab);state.putInt("historyTab",historyTab);state.putString("rankFilter",rankFilter);state.putString("profileId",profileId);state.putLong("customStart",customStart);state.putLong("customEnd",customEnd);state.putString("searchQuery",searchQuery);}
+    @Override protected void onPause(){persistDraft();super.onPause();}
+    private boolean persistDraft(){
+        if(settings==null)return false;
+        try{
+            org.json.JSONObject draft=new org.json.JSONObject();
+            if(playing!=null)draft.put("playing",new org.json.JSONArray(playing));
+            draft.put("partners",new org.json.JSONArray(partners));draft.put("hukum",hukum);
+            draft.put("outcome",outcome);draft.put("bid",bid);
+            draft.put("pendingId",pendingRoundId);draft.put("pendingKey",pendingRoundKey);draft.put("pendingTimestamp",pendingRoundTimestamp);draft.put("pendingPayload",pendingRoundJson);
+            return settings.edit().putString("draft",draft.toString()).commit();
+        }catch(Exception ignored){return false;}
+    }
+    private void restoreDraft(){
+        try{
+            org.json.JSONObject draft=new org.json.JSONObject(settings.getString("draft","{}"));
+            if(draft.has("playing")){playing=new LinkedHashSet<>();org.json.JSONArray a=draft.getJSONArray("playing");for(int i=0;i<a.length();i++)playing.add(a.getString(i));}
+            org.json.JSONArray a=draft.optJSONArray("partners");if(a!=null)for(int i=0;i<a.length();i++)partners.add(a.getString(i));
+            hukum=draft.optString("hukum",null);outcome=draft.optString("outcome",null);bid=draft.optInt("bid",155);
+            pendingRoundId=draft.optString("pendingId",null);pendingRoundKey=draft.optString("pendingKey",null);pendingRoundTimestamp=draft.optString("pendingTimestamp",null);pendingRoundJson=draft.optString("pendingPayload",null);
+        }catch(Exception ignored){settings.edit().remove("draft").apply();}
     }
     private int dp(int n) {return Math.round(n*getResources().getDisplayMetrics().density);}
     private GradientDrawable shape(int fill,int radius,int stroke) {
@@ -240,11 +284,11 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         b.setGravity(Gravity.CENTER);
         b.setMinHeight(dp(48));
         pad(b,18,12,18,12);
-        b.setBackground(primary?gradient(0xFFF6D365,0xFFFDA085,14):shape(PANEL2,14,BORDER));
+        b.setBackground(primary?gradient(GOLD,settings.getString("appearance","gold").equals("gold")?0xFFFDA085:GOLD,14):shape(PANEL2,14,BORDER));
         b.setForeground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x40FFFFFF),null,null));
         b.setClickable(true);
         b.setFocusable(true);
-        b.setOnClickListener(v->{if(action!=null) action.run();});
+        b.setOnClickListener(v->{if(settings.getBoolean("haptics",false))v.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP);if(action!=null) action.run();});
         return b;
     }
     private TextView chip(String name,boolean selected,boolean gold,Runnable action) {
@@ -257,7 +301,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         t.setClickable(true);
         t.setFocusable(true);
         t.setMinHeight(dp(48));
-        t.setOnClickListener(v->{if(action!=null)action.run();});
+        t.setOnClickListener(v->{if(settings.getBoolean("haptics",false))v.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP);if(action!=null)action.run();});
         return t;
     }
     private void title(LinearLayout c,String head,String sub) {
@@ -271,14 +315,15 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private void line(LinearLayout c,String left,String right,int rightColor) {
         LinearLayout r=row();
         TextView l=text(left,13,MUTED,false);
-        r.addView(l,new LinearLayout.LayoutParams(0,dp(30),1));
-        r.addView(text(right,14,rightColor,true));
+        l.setMinHeight(dp(30));r.addView(l,new LinearLayout.LayoutParams(0,-2,1));
+        TextView value=text(right,14,rightColor,true);value.setGravity(Gravity.END);
+        r.addView(value,new LinearLayout.LayoutParams(0,-2,1));
         c.addView(r);
     }
     private void buildShell() {
         root=column();root.setBackgroundColor(BG);
         toolbar=row();pad(toolbar,18,15,18,15);toolbar.setBackgroundColor(BG);
-        root.addView(toolbar,lp(-1,66));updateToolbar();
+        toolbar.setMinimumHeight(dp(66));root.addView(toolbar,lp(-1,-2));updateToolbar();
         View bar=new View(this);bar.setBackgroundColor(BORDER);root.addView(bar,lp(-1,1));
         scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setVerticalScrollBarEnabled(false);
         scroll.setSmoothScrollingEnabled(false);
@@ -318,13 +363,21 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         });
         LinearLayout.LayoutParams rp=lp(48,48);rp.leftMargin=dp(8);
         toolbar.addView(refresh,rp);
+        TextView more=text("⋮",24,GOLD,true);more.setGravity(Gravity.CENTER);more.setContentDescription("More options");
+        more.setMinWidth(dp(40));more.setMinHeight(dp(48));
+        more.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Your table")
+            .setItems(new String[]{"Search","Analytics","Share Studio","Settings"},(d,which)->{tab=6+which;render(true);})
+            .setNegativeButton("Close",null).show());toolbar.addView(more);
+
     }
     private void render(boolean reset) {
         if(content==null||navigation==null)return;
+        sessionTimer=null;
+        if(settings.getBoolean("keep_awake",false)&&activeSession()!=null)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         int prev=reset?0:scroll.getScrollY();
         content.removeAllViews();
         navigation.removeAllViews();
-        if(!hasData) {
+        if(!hasData && tab<6) {
             gap(content,80);content.addView(text("♠  Loading your table…",20,GOLD,true));
             gap(content,16);content.addView(text("Connecting to your existing Firebase project",13,MUTED,false));
         } else {
@@ -335,6 +388,10 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 case 3:ranksPage();break;
                 case 4:historyPage();break;
                 case 5:profilePage();break;
+                case 6:searchPage();break;
+                case 7:analyticsPage();break;
+                case 8:shareStudioPage();break;
+                case 9:settingsPage();break;
                 default:home();
             }
         }
@@ -397,6 +454,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             if(session!=null) {
                 gap(sessionBar,7);
                 sessionBar.addView(text("Started "+when(session.get("startTime")),12,MUTED,false));
+                sessionTimer=text("Duration  "+duration(System.currentTimeMillis()-time(session.get("startTime"))),13,GOLD,true);
+                gap(sessionBar,8);sessionBar.addView(sessionTimer);
             }
             gap(sessionBar,12);
             sessionBar.addView(button(session==null?"▶  Start Session":"■  End Session",
@@ -414,6 +473,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 "♣  Players",()->{tab=1;render(true);});
         quickActions("★  Rankings",()->{tab=3;render(true);},
                 "◷  History",()->{tab=4;render(true);});
+        quickActions("⌕  Search",()->{tab=6;render(true);},"▥  Analytics",()->{tab=7;render(true);});
         gap(content,13);
         content.addView(text("RECENT ACTIVITY",15,WHITE,true));gap(content,12);
         if(games.isEmpty())empty("No rounds yet. Add players and start playing!");
@@ -461,7 +521,16 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             content.addView(button("＋  Add a Player",true,this::addPlayerDialog));gap(content,18);
         }
         if(players.isEmpty()){empty("No players yet. Add the first player as admin.");return;}
-        for(Map<String,Object> p:players) {
+        LinearLayout filters=row();
+        for(String f:new String[]{"all","active","benched"}){TextView c=chip(f.toUpperCase(Locale.ROOT),rosterFilter.equals(f),true,()->{rosterFilter=f;render(false);});filters.addView(c,new LinearLayout.LayoutParams(0,dp(48),1));}
+        content.addView(filters);gap(content,16);
+        List<Map<String,Object>> roster=new ArrayList<>(players);
+        roster.sort(Comparator.comparing(p->Boolean.FALSE.equals(p.get("active"))));
+        int rosterCount=0;
+        for(Map<String,Object> p:roster) {
+            boolean isActive=!Boolean.FALSE.equals(p.get("active"));
+            if("active".equals(rosterFilter)&&!isActive || "benched".equals(rosterFilter)&&isActive)continue;
+            rosterCount++;
             String id=id(p),name=str(p,"name");boolean active=!Boolean.FALSE.equals(p.get("active"));
             LinearLayout card=panel();
             LinearLayout top=row();
@@ -522,41 +591,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
 
     private List<Map<String,Object>> filteredRounds() {
         if("all".equals(rankFilter))return gameRounds();
-        long now=System.currentTimeMillis();
-        java.util.Calendar start=java.util.Calendar.getInstance();
-        start.set(java.util.Calendar.HOUR_OF_DAY,0);
-        start.set(java.util.Calendar.MINUTE,0);
-        start.set(java.util.Calendar.SECOND,0);
-        start.set(java.util.Calendar.MILLISECOND,0);
-        long min=0,max=Long.MAX_VALUE;
-        switch(rankFilter) {
-            case "today":min=start.getTimeInMillis();break;
-            case "yesterday":max=start.getTimeInMillis();start.add(java.util.Calendar.DAY_OF_YEAR,-1);min=start.getTimeInMillis();break;
-            case "week": {
-                int day=start.get(java.util.Calendar.DAY_OF_WEEK);
-                start.add(java.util.Calendar.DAY_OF_YEAR,-(day-java.util.Calendar.SUNDAY));
-                min=start.getTimeInMillis();break;
-            }
-            case "month":start.set(java.util.Calendar.DAY_OF_MONTH,1);min=start.getTimeInMillis();break;
-            case "year":start.set(java.util.Calendar.DAY_OF_YEAR,1);min=start.getTimeInMillis();break;
-            case "custom":{
-                min=customStart;
-                if(customEnd>0){
-                    java.util.Calendar e=java.util.Calendar.getInstance();
-                    e.setTimeInMillis(customEnd);
-                    e.add(java.util.Calendar.DAY_OF_YEAR,1);
-                    max=e.getTimeInMillis();
-                }
-                break;
-            }
-            default:return gameRounds();
-        }
-        final long from=min,to=max;
+        DateRange range=DateRange.of(rankFilter,Instant.now(),ZoneId.systemDefault(),customStart,customEnd);
         List<Map<String,Object>> result=new ArrayList<>();
-        for(Map<String,Object> r:gameRounds()) {
-            long t=time(r.get("timestamp"));
-            if(t>=from&&t<to)result.add(r);
-        }
+        for(Map<String,Object> round:gameRounds())if(range.contains(time(round.get("timestamp"))))result.add(round);
         return result;
     }
 
@@ -654,6 +691,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         line(stats,"Rank",rankIndex<0?"—":"#"+(rankIndex+1),GOLD);
         line(stats,"Total Score",(totalScore>=0?"+":"")+totalScore,totalScore>=0?GREEN:RED);
         line(stats,"Rounds",String.valueOf(individual.size()),WHITE);
+        line(stats,"Win Rate",individual.isEmpty()?"0%":Math.round(100.0*wins/individual.size())+"%",GOLD);
         line(stats,"Wins / Losses",wins+"W / "+losses+"L",WHITE);
         content.addView(stats);gap(content,16);
         label(content,"PLAYING ROLES");
@@ -711,7 +749,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                     strings(r.get("partnerIds")).contains(pid)?"partner":"nonpartner";
             if(!role.equals(actual))continue;
             total++;
-            if(total<=30)out.append(when(r.get("timestamp"))).append(" · ")
+            out.append(when(r.get("timestamp"))).append(" · ")
                     .append(str(r,"hukumName")).append(" · ")
                     .append(num(map(r.get("scoreChanges")).get(pid))).append("\n");
         }
@@ -734,7 +772,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private void addRankCard(Map<String,Object> p,int position) {
         LinearLayout card=panel();
         LinearLayout r=row();
-        TextView rank=text(position==0?"♛":(position+1)+".",22,position==0?GOLD:MUTED,true);
+        TextView rank=text(position==0?"🥇":position==1?"🥈":position==2?"🥉":(position+1)+".",22,position==0?GOLD:MUTED,true);
         rank.setGravity(Gravity.CENTER);r.addView(rank,lp(45,42));
         LinearLayout middle=column();
         middle.addView(text(str(p,"name"),16,WHITE,true));gap(middle,5);
@@ -803,6 +841,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 line(card,"Started",when(s.get("startTime")),MUTED);
                 line(card,"Ended",s.get("endTime")==null?"Active":when(s.get("endTime")),s.get("endTime")==null?GREEN:WHITE);
                 line(card,"Rounds",String.valueOf(num(s.get("totalRounds"))),GOLD);
+                if(s.get("endTime")!=null)line(card,"Duration",duration(s.get("duration") instanceof Number?((Number)s.get("duration")).longValue():time(s.get("endTime"))-time(s.get("startTime"))),MUTED);
                 Map<String,Object> mvp=map(s.get("mvp"));
                 if(!mvp.isEmpty())line(card,"MVP",str(mvp,"name"),GREEN);
                 gap(card,9);
@@ -837,9 +876,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         LinearLayout head=row();
         boolean victory="win".equals(str(r,"result"));
         TextView title=text("♛  "+str(r,"hukumName"),15,WHITE,true);
-        title.setSingleLine(true);
-        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        head.addView(title,new LinearLayout.LayoutParams(0,dp(36),1));
+        title.setMaxLines(3);
+        head.addView(title,new LinearLayout.LayoutParams(0,-2,1));
         TextView flag=text(victory?"WIN":"LOSE",12,victory?GREEN:RED,true);
         flag.setGravity(Gravity.CENTER);
         flag.setBackground(shape(victory?0xFF1C443B:0xFF492633,9,0));
@@ -850,6 +888,14 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         gap(card,8);
         String team=android.text.TextUtils.join(", ",strings(r.get("partnerNames")));
         card.addView(text("Partners: "+(team.isEmpty()?"—":team),12,MUTED,false));
+        card.addView(text("Opponents: "+android.text.TextUtils.join(", ",strings(r.get("nonPartnerNames"))),12,MUTED,false));
+        if(!settings.getBoolean("compact",false)){
+            gap(card,8);
+            for(Map.Entry<String,Object> entry:map(r.get("scoreChanges")).entrySet()){
+                int change=num(entry.getValue());
+                line(card,nameOf(entry.getKey()),(change>0?"+":"")+change,change>0?GREEN:change<0?RED:MUTED);
+            }
+        }
         card.setClickable(true);card.setFocusable(true);
         card.setForeground(new android.graphics.drawable.RippleDrawable(
                 android.content.res.ColorStateList.valueOf(0x25FFFFFF),null,null));
@@ -883,7 +929,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         for(Map<String,Object> player:active){
             final String pid=id(player);
             TextView pick=chip(str(player,"name"),playing.contains(pid),false,()->{
-                if(roundSaving||busy)return;
+                if(roundSaving||busy||pendingRoundId!=null)return;
                 if(!playing.add(pid)){
                     playing.remove(pid);
                     if(pid.equals(hukum))hukum=null;
@@ -907,14 +953,14 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         gap(bidding,14);
         LinearLayout stepper=row();
         stepper.addView(button("− 5",false,()->{
-            if(roundSaving||busy)return;
+            if(roundSaving||busy||pendingRoundId!=null)return;
             bid=Math.max(155,bid-5);updateRoundForm();
         }),new LinearLayout.LayoutParams(0,dp(50),1));
         TextView label=text("155 – 250",13,MUTED,false);
         label.setGravity(Gravity.CENTER);
         stepper.addView(label,new LinearLayout.LayoutParams(0,dp(50),1));
         stepper.addView(button("+ 5",false,()->{
-            if(roundSaving||busy)return;
+            if(roundSaving||busy||pendingRoundId!=null)return;
             bid=Math.min(250,bid+5);updateRoundForm();
         }),new LinearLayout.LayoutParams(0,dp(50),1));
         bidding.addView(stepper);content.addView(bidding);gap(content,18);
@@ -925,7 +971,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         for(Map<String,Object> player:active){
             String pid=id(player);
             TextView pick=chip(str(player,"name"),false,true,()->{
-                if(roundSaving||busy)return;
+                if(roundSaving||busy||pendingRoundId!=null)return;
                 hukum=pid;partners.remove(pid);updateRoundForm();
             });
             hukumBox.addView(pick,spacedRow(8));
@@ -940,7 +986,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         for(Map<String,Object> player:active){
             String pid=id(player);
             TextView pick=chip(str(player,"name"),false,false,()->{
-                if(roundSaving||busy)return;
+                if(roundSaving||busy||pendingRoundId!=null)return;
                 if(!partners.add(pid))partners.remove(pid);
                 updateRoundForm();
             });
@@ -954,11 +1000,11 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         label(roundResultSection,"05  •  Hukum result");
         LinearLayout results=row();
         roundWinView=chip("✓   Hukum Win",false,false,()->{
-            if(roundSaving||busy)return;
+            if(roundSaving||busy||pendingRoundId!=null)return;
             outcome="win";updateRoundForm();
         });
         roundLoseView=chip("✕   Hukum Lose",false,false,()->{
-            if(roundSaving||busy)return;
+            if(roundSaving||busy||pendingRoundId!=null)return;
             outcome="loss";updateRoundForm();
         });
         LinearLayout.LayoutParams half=new LinearLayout.LayoutParams(0,dp(50),1);
@@ -996,6 +1042,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         roundBidView.setText("Bid  "+bid+"   ▾");
         for(Map.Entry<String,TextView> item:roundPlayingButtons.entrySet()){
             String pid=item.getKey();
+            item.getValue().setContentDescription("Playing "+nameOf(pid));
             updateRoundChip(item.getValue(),(playing.contains(pid)?"✓   ":"○   ")+nameOf(pid),
                     playing.contains(pid),false);
         }
@@ -1007,14 +1054,14 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         roundResultSection.setVisibility(hasHukum?View.VISIBLE:View.GONE);
         for(Map.Entry<String,TextView> item:roundHukumButtons.entrySet()){
             String pid=item.getKey();
-            TextView control=item.getValue();
+            TextView control=item.getValue();control.setContentDescription("Hukum "+nameOf(pid));
             control.setVisibility(playing.contains(pid)?View.VISIBLE:View.GONE);
             updateRoundChip(control,(pid.equals(hukum)?"♛   ":"○   ")+nameOf(pid),
                     pid.equals(hukum),true);
         }
         for(Map.Entry<String,TextView> item:roundPartnerButtons.entrySet()){
             String pid=item.getKey();
-            TextView control=item.getValue();
+            TextView control=item.getValue();control.setContentDescription("Partner "+nameOf(pid));
             control.setVisibility(hasHukum&&playing.contains(pid)&&!pid.equals(hukum)?View.VISIBLE:View.GONE);
             updateRoundChip(control,(partners.contains(pid)?"✓   ":"○   ")+nameOf(pid),
                     partners.contains(pid),false);
@@ -1041,14 +1088,14 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 partners.isEmpty()?"Choose at least one partner.":
                 playing.size()-partners.size()-1<1?"At least one non-partner must be playing.":
                 outcome==null?"Select Hukum Win or Lose.":"Preview verified. Check the scores before saving.";
-        roundHintView.setText(roundSaving?"Saving round to Firebase…":hint);
+        roundHintView.setText(roundSaving?"Saving round to Firebase…":pendingRoundId!=null?"Unconfirmed save: selections locked. Retry to confirm the same round.":hint);
         roundSaveView.setVisibility(ready?View.VISIBLE:View.GONE);
-        roundSaveView.setEnabled(ready&&!roundSaving&&!busy);
+        roundSaveView.setEnabled(ready&&liveConnected&&!roundSaving&&!busy);
         roundSaveView.setAlpha(roundSaving||busy?0.55f:1f);
         roundSaveView.setText(roundSaving?"Saving…":"✓  Save Round to Firebase");
     }
     private void chooseBid(){
-        if(roundSaving||busy)return;
+        if(roundSaving||busy||pendingRoundId!=null)return;
         String[] values=new String[20];
         for(int i=0;i<values.length;i++)values[i]=String.valueOf(155+i*5);
         new AlertDialog.Builder(this)
@@ -1088,36 +1135,36 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                         "\n\nThis will add one new round to your existing Firebase data.")
                 .setNegativeButton("Cancel",null)
                 .setPositiveButton("Save Round",(d,w)->{
-                    // Keep the user's form intact until the server confirms successful write.
-                    final Map<String,Object> preview=new HashMap<>(body);
-                    preview.put("timestamp",java.time.Instant.now().toString());
-                    roundSaving=true;
-                    updateRoundForm();
                     String key=bid+"|"+hukum+"|"+outcome+"|"+
                             new TreeSet<>(playing)+"|"+new TreeSet<>(partners);
-                    if(!key.equals(pendingRoundKey)){
-                        pendingRoundKey=key;
-                        pendingRoundId=UUID.randomUUID().toString();
+                    if(pendingRoundKey!=null&&!key.equals(pendingRoundKey)){
+                        notice("An earlier round is unconfirmed. Restore that selection and retry before changing it.");return;
                     }
-                    api.addRoundWithId(pendingRoundId,body,()->{
-                        roundSaving=false;
-                        resetRound();
-                        tab=0;
-                        render(true);
-                        new AlertDialog.Builder(this)
-                            .setTitle("Round saved successfully")
-                            .setMessage("Your round is saved in your existing Firebase database. Share its premium image?")
-                            .setNegativeButton("Not Now",null)
-                            .setPositiveButton("Share Result",(dlg,index)->shareRound(preview))
-                            .show();
-                    },()->{
-                        roundSaving=false;
-                        updateRoundForm();
-                    });
+                    if(pendingRoundId==null){pendingRoundKey=key;pendingRoundId=UUID.randomUUID().toString();pendingRoundTimestamp=Instant.now().toString();}
+                    if(pendingRoundJson==null){Map<String,Object> durable=new LinkedHashMap<>(body);durable.put("timestamp",pendingRoundTimestamp);pendingRoundJson=new org.json.JSONObject(durable).toString();}
+                    if(!persistDraft()){notice("Could not persist this round safely. Free storage and retry.");return;}
+                    sendPendingRound();
                 }).show();
     }
+    private void retryPendingRound(){
+        if(pendingRoundId==null||pendingRoundJson==null){notice("No unconfirmed round");return;}
+        new AlertDialog.Builder(this).setTitle("Retry unconfirmed round?").setMessage("Verify or save the original round using its existing ID. Its scores and selections are preserved.").setNegativeButton("Cancel",null).setPositiveButton("Retry",(d,w)->sendPendingRound()).show();
+    }
+    private void sendPendingRound(){
+        if(roundSaving||busy)return;
+        try{
+            Map<String,Object> preview=JsonValues.object(new org.json.JSONObject(pendingRoundJson));
+            Map<String,Object> body=new LinkedHashMap<>(preview);body.put("timestamp",new FirebaseGateway.Stamp(pendingRoundTimestamp));
+            roundSaving=true;if(tab==2)updateRoundForm();
+            api.addRoundWithId(pendingRoundId,body,()->{
+                roundSaving=false;resetRound();tab=0;render(true);
+                new AlertDialog.Builder(this).setTitle("Round saved successfully").setMessage("Your round is saved. Share its image?")
+                    .setNegativeButton("Not Now",null).setPositiveButton("Share Result",(d,w)->shareRound(preview)).show();
+            },()->{roundSaving=false;if(tab==2)updateRoundForm();});
+        }catch(Exception error){roundSaving=false;notice("Cannot recover draft: "+error.getMessage());}
+    }
     private void resetRound(){playing=null;partners.clear();hukum=null;outcome=null;bid=155;
-        pendingRoundId=null;pendingRoundKey=null;}
+        pendingRoundId=null;pendingRoundKey=null;pendingRoundTimestamp=null;pendingRoundJson=null;persistDraft();}
     private void addPlayerDialog() {
         EditText name=new EditText(this);
         name.setSingleLine(true);name.setHint("Player name");pad(name,20,10,20,10);
@@ -1126,7 +1173,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 .setNegativeButton("Cancel",null)
                 .setPositiveButton("Add",(dlg,which)->{
                     String value=name.getText().toString().trim();
-                    if(value.isEmpty()){Toast.makeText(this,"Enter a player name",Toast.LENGTH_SHORT).show();return;}
+                    if(value.isEmpty()||value.length()>40){Toast.makeText(this,"Enter a player name (1–40 characters)",Toast.LENGTH_SHORT).show();return;}
                     for(Map<String,Object> p:players)if(str(p,"name").equalsIgnoreCase(value)){
                         Toast.makeText(this,"Player already exists",Toast.LENGTH_SHORT).show();return;
                     }
@@ -1152,7 +1199,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                             Toast.makeText(this,"Duplicate name",Toast.LENGTH_SHORT).show();return;
                         }
                     }
-                    api.renamePlayer(id(player),newName,new ArrayList<>(rounds));
+                    api.renamePlayer(id(player),newName,new ArrayList<>(rounds),str(player,"_updateTime"));
                 }).show();
     }
     private void editSessionDialog(Map<String,Object> session) {
@@ -1164,7 +1211,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 .setPositiveButton("Save",(d,w)->{
                     String value=field.getText().toString().trim();
                     if(value.isEmpty())return;
-                    api.patchDocument("sessions",id(session),FirebaseGateway.map("sessionName",value),"Session updated");
+                    api.patchDocument("sessions",id(session),FirebaseGateway.map("sessionName",value),"Session updated",str(session,"_updateTime"),null);
                 }).show();
     }
     private void confirmRemove(String collection,Map<String,Object> record,String noun) {
@@ -1172,14 +1219,14 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         // Deliberately NEVER deletes without an explicit, named confirmation.
         new AlertDialog.Builder(this)
                 .setTitle("Permanently delete "+noun+"?")
-                .setMessage("This will remove the selected "+noun+" from Firebase. It cannot be undone. Other existing records stay unchanged.")
+                .setMessage("This will remove the selected "+noun+" from Firebase. A recovery backup is saved on this device before deletion. Export it from Settings.")
                 .setNegativeButton("Cancel",null)
                 .setPositiveButton("Continue",(d,w)->new AlertDialog.Builder(this)
                         .setTitle("Final confirmation")
                         .setMessage("Delete only this "+noun+"?\n"+("player".equals(noun)?str(record,"name"):
                                 "session".equals(noun)?str(record,"sessionName"):when(record.get("timestamp"))))
                         .setNegativeButton("Keep",null)
-                        .setPositiveButton("Delete",(dlg,which)->api.deleteDocument(collection,id(record),noun+" deleted")).show())
+                        .setPositiveButton("Delete",(dlg,which)->api.deleteDocument(collection,id(record),noun+" deleted",str(record,"_updateTime"))).show())
                 .show();
     }
     private void showSessionSummary(Map<String,Object> session) {
@@ -1198,7 +1245,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         line(overview,"Ended",session.get("endTime")==null?"Active":when(session.get("endTime")),WHITE);
         line(overview,"Rounds",String.valueOf(num(session.get("totalRounds"))),GOLD);
         long length=session.get("duration") instanceof Number?
-                ((Number)session.get("duration")).longValue():0;
+                ((Number)session.get("duration")).longValue():Math.max(0,time(session.get("endTime"))-time(session.get("startTime")));
         if(length>0)
             line(overview,"Duration",(length/3600000)+"h "+(length/60000)%60+"m",WHITE);
         display.addView(overview);gap(display,14);
@@ -1253,7 +1300,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 .setMessage(str(p,"name")+(activate?" will return to the active table.":" will be temporarily benched. Historic scores will be kept."))
                 .setNegativeButton("Cancel",null)
                 .setPositiveButton(activate?"Restore":"Bench",(d,w)->api.patchDocument("players",id(p),
-                        FirebaseGateway.map("active",activate),"Player status updated"))
+                        FirebaseGateway.map("active",activate),"Player status updated",str(p,"_updateTime"),null))
                 .show();
     }
     private void loginDialog() {
@@ -1264,12 +1311,15 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         EditText password=new EditText(this);password.setHint("Password");password.setSingleLine(true);
         password.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);
         form.addView(password,lp(-1,54));
-        new AlertDialog.Builder(this).setTitle("3 Patti PRO · Admin Login")
+        authDialog=new AlertDialog.Builder(this).setTitle("3 Patti PRO · Admin Login")
                 .setMessage("Use the same email and password as your existing web app.")
-                .setView(form)
-                .setNegativeButton("Cancel",null)
-                .setPositiveButton("Login",(d,w)->api.signIn(email.getText().toString().trim(),password.getText().toString()))
-                .show();
+                .setView(form).setNegativeButton("Cancel",null).setPositiveButton("Login",null).create();
+        authDialog.setOnShowListener(v->authDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(btn->{
+            String value=email.getText().toString().trim();
+            if(!android.util.Patterns.EMAIL_ADDRESS.matcher(value).matches()){email.setError("Enter a valid email");return;}
+            if(password.length()==0){password.setError("Enter your password");return;}
+            if(!busy)api.signIn(value,password.getText().toString());
+        }));authDialog.show();
     }
     private void confirmLogout() {
         new AlertDialog.Builder(this).setTitle("Logout?")
@@ -1281,14 +1331,14 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(activeSession()!=null){Toast.makeText(this,"A session is already active",Toast.LENGTH_SHORT).show();return;}
         EditText input=new EditText(this);
         input.setSingleLine(true);
-        input.setText("Session "+DateTimeFormatter.ofPattern("dd MMM yyyy").withZone(ZoneId.systemDefault()).format(Instant.now()));
+        input.setText("Session "+DateTimeFormatter.ofPattern("d MMM yyyy",Locale.ENGLISH).withZone(ZoneId.systemDefault()).format(Instant.now()));
         pad(input,18,10,18,10);
         new AlertDialog.Builder(this).setTitle("Start Game Session")
                 .setView(input).setNegativeButton("Cancel",null)
                 .setPositiveButton("Start",(d,w)->{
                     String n=input.getText().toString().trim();
                     api.addDocument("sessions",FirebaseGateway.map(
-                        "sessionName",n.isEmpty()?"Game Session":n,
+                        "sessionName",n.isEmpty()?"Session "+DateTimeFormatter.ofPattern("d MMM yyyy",Locale.ENGLISH).withZone(ZoneId.systemDefault()).format(Instant.now()):n,
                         "startTime",FirebaseGateway.now(),"endTime",null,
                         "totalRounds",0,"leaderboard",new ArrayList<>(),
                         "mvp",null,"bestHukum",null,
@@ -1312,7 +1362,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                     .setNegativeButton("Keep Active",null)
                     .setPositiveButton("End Session",(d,w)->api.patchDocument(
                             "sessions",id(active),FirebaseGateway.map("endTime",FirebaseGateway.now()),
-                            "Empty session ended")).show();
+                            "Empty session ended",str(active,"_updateTime"),null)).show();
             return;
         }
         new AlertDialog.Builder(this).setTitle("End Session?")
@@ -1399,7 +1449,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 else currentStreak=0;
             }
             if(partnerCount>=3&&(double)partnerWins/partnerCount>=0.8)stringsMutable(badges,"sharpPartner").add(pid);
-            if(topStreak>=3)stringsMutable(badges,"hotStreak").add(pid);
+            if(RoundAnalytics.longestPositiveStreak(pid,r)>=3)stringsMutable(badges,"hotStreak").add(pid);
         }
         if(!ranked.isEmpty()) {
             int highScore=scoreOf(id(ranked.get(0)),r);
@@ -1430,7 +1480,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 "leaderboard",leaderboard,"mvp",mvp,
                 "biggestWin",FirebaseGateway.map("name",winningName,"score",best),
                 "biggestLoss",FirebaseGateway.map("name",losingName,"score",worst));
-        api.patchDocument("sessions",id(s),update,"Session ended · Summary saved");
+        api.patchDocument("sessions",id(s),update,"Session ended · Summary saved",str(s,"_updateTime"),()->{Map<String,Object> summary=new HashMap<>(s);summary.putAll(update);summary.put("endTime",Instant.ofEpochMilli(end).toString());showSessionSummary(summary);});
     }
     private List<NativeImageShare.RankRow> shareRankRows(List<Map<String,Object>> games) {
         List<NativeImageShare.RankRow> out=new ArrayList<>();
@@ -1455,7 +1505,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             Toast.makeText(this,"No ranks in this period",Toast.LENGTH_SHORT).show();
             return;
         }
-        String label="all".equals(rankFilter)?"All Time":
+        String label="custom".equals(rankFilter)?(customStart==0?"Any start":dateOnly(customStart))+" – "+(customEnd==0?"Any end":dateOnly(customEnd)):"all".equals(rankFilter)?"All Time":
                 rankFilter.substring(0,1).toUpperCase(Locale.ROOT)+rankFilter.substring(1);
         NativeImageShare.leaderboard(this,label+"  ·  "+dateOnly(System.currentTimeMillis()),shareRankRows(selected));
     }
@@ -1498,12 +1548,156 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             ranking.add(new NativeImageShare.RankRow(str(p,"name"),num(p.get("score")),num(p.get("roundsPlayed")),0,0,0,0));
         }
         NativeImageShare.session(this,str(session,"sessionName"),
-                when(session.get("startTime"))+"  ·  "+num(session.get("totalRounds"))+" rounds",awards,ranking);
+                when(session.get("startTime"))+" · "+duration(session.get("duration") instanceof Number?((Number)session.get("duration")).longValue():time(session.get("endTime"))-time(session.get("startTime")))+" · "+num(session.get("totalRounds"))+" rounds",awards,ranking);
     }
     @Override public void onBackPressed() {
         if(tab==5){tab=3;render(true);}
         else if(tab!=0){tab=0;render(true);}
         else new AlertDialog.Builder(this).setTitle("Exit 3 Patti PRO?")
                 .setNegativeButton("Stay",null).setPositiveButton("Exit",(d,w)->finish()).show();
+    }
+    private void searchPage(){
+        title(content,"Search","Players, rounds and sessions across your saved table");
+        EditText input=new EditText(this);input.setSingleLine(true);input.setHint("Name, bid, result or session");
+        input.setTextColor(WHITE);input.setHintTextColor(MUTED);pad(input,14,10,14,10);input.setBackground(shape(PANEL,14,BORDER));
+        content.addView(input,lp(-1,54));gap(content,16);
+        LinearLayout results=column();content.addView(results);
+        Runnable find=()->{
+            results.removeAllViews();String query=input.getText().toString().trim().toLowerCase(Locale.ROOT);
+            if(query.isEmpty()){results.addView(text("Type to search your table",14,MUTED,false));return;}
+            int count=0;
+            for(Map<String,Object> player:players)if(str(player,"name").toLowerCase(Locale.ROOT).contains(query)){
+                String pid=id(player);results.addView(button("♣  "+str(player,"name"),false,()->{profileId=pid;tab=5;render(true);}));gap(results,8);count++;
+            }
+            for(Map<String,Object> round:gameRounds()){
+                String haystack=(str(round,"hukumName")+" "+strings(round.get("partnerNames"))+" "+strings(round.get("nonPartnerNames"))+" "+str(round,"bid")+" "+str(round,"result")+" "+when(round.get("timestamp"))).toLowerCase(Locale.ROOT);
+                if(haystack.contains(query)){results.addView(button("♛  "+str(round,"hukumName")+" · "+str(round,"bid")+" · "+when(round.get("timestamp")),false,()->roundActions(round)));gap(results,8);count++;}
+            }
+            for(Map<String,Object> session:sessions)if(str(session,"sessionName").toLowerCase(Locale.ROOT).contains(query)){
+                results.addView(button("◷  "+str(session,"sessionName"),false,()->showSessionSummary(session)));gap(results,8);count++;
+            }
+            results.addView(text(count+" results",12,MUTED,false));
+        };
+        input.setText(searchQuery);input.setSelection(input.length());
+        input.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){} public void onTextChanged(CharSequence s,int a,int b,int c){searchQuery=s.toString();find.run();}public void afterTextChanged(android.text.Editable e){}});
+        find.run();
+    }
+    private void analyticsPage(){
+        title(content,"Table Analytics","Scores, roles and trends from saved game rounds");dateFilterBar(content);
+        List<Map<String,Object>> games=filteredRounds();
+        if(games.isEmpty()){empty("No rounds in this date range.");return;}
+        int hukumWins=0,bids=0,highest=0;
+        for(Map<String,Object> round:games){if("win".equals(str(round,"result")))hukumWins++;int value=num(round.get("bid"));bids+=value;highest=Math.max(highest,value);}
+        LinearLayout overview=panel();line(overview,"Rounds",String.valueOf(games.size()),WHITE);
+        line(overview,"Average Bid",String.format(Locale.ROOT,"%.1f",(double)bids/games.size()),GOLD);
+        line(overview,"Highest Bid",String.valueOf(highest),GOLD);
+        line(overview,"Hukum Win Rate",Math.round(100.0*hukumWins/games.size())+"%",GREEN);
+        content.addView(overview);gap(content,18);label(content,"PLAYER PERFORMANCE");
+        List<Map<String,Object>> ranked=rankedFor(games);int maxScore=1;
+        for(Map<String,Object> p:ranked)maxScore=Math.max(maxScore,Math.abs(scoreOf(id(p),games)));
+        for(Map<String,Object> p:ranked){String pid=id(p);int score=scoreOf(pid,games),played=played(pid,games),won=wins(pid,games);
+            LinearLayout card=panel();line(card,str(p,"name"),(score>0?"+":"")+score,score>=0?GREEN:RED);
+            android.widget.ProgressBar bar=new android.widget.ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
+            bar.setMax(maxScore);bar.setProgress(Math.abs(score));bar.setProgressTintList(android.content.res.ColorStateList.valueOf(score>=0?GREEN:RED));
+            card.addView(bar,lp(-1,12));gap(card,8);
+            line(card,"Won / Played",won+" / "+played+" · "+(played==0?0:Math.round(100.0*won/played))+"%",MUTED);
+            card.addView(text("Current streak "+winningStreak(pid,games)+" · Best positive streak "+RoundAnalytics.longestPositiveStreak(pid,games),12,MUTED,false));
+            card.addView(new ScoreTrendView(this,pid,games),lp(-1,100));
+            card.setOnClickListener(v->{profileId=pid;tab=5;render(true);});content.addView(card);gap(content,12);
+        }
+        content.addView(button("Share this leaderboard",true,this::shareLeaderboard));
+    }
+    private final class ScoreTrendView extends View{
+        final List<Integer> values=new ArrayList<>();final android.graphics.Paint paint=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        ScoreTrendView(android.content.Context c,String pid,List<Map<String,Object>> games){super(c);int total=0;values.add(total);
+            for(int i=games.size()-1;i>=0;i--){Map<String,Object> round=games.get(i);if(!RoundAnalytics.played(round,pid))continue;total+=num(map(round.get("scoreChanges")).get(pid));values.add(total);}
+            setContentDescription("Cumulative score trend, "+(values.size()-1)+" rounds, ending at "+total);
+        }
+        @Override protected void onDraw(android.graphics.Canvas canvas){super.onDraw(canvas);int low=Collections.min(values),high=Collections.max(values);double range=Math.max(1,high-low);float left=dp(8),top=dp(12),w=getWidth()-dp(16),h=getHeight()-dp(30);
+            paint.setColor(BORDER);paint.setStrokeWidth(dp(1));float zero=top+(float)(high/range)*h;canvas.drawLine(left,zero,left+w,zero,paint);
+            paint.setColor(GOLD);paint.setStrokeWidth(dp(2));
+            for(int i=1;i<values.size();i++){float x1=left+w*(i-1)/Math.max(1,values.size()-1),x2=left+w*i/Math.max(1,values.size()-1);float y1=top+(float)((high-values.get(i-1))/range)*h,y2=top+(float)((high-values.get(i))/range)*h;canvas.drawLine(x1,y1,x2,y2,paint);}
+            paint.setColor(MUTED);paint.setTextSize(dp(10));canvas.drawText("Cumulative score • oldest → newest",left,getHeight()-dp(2),paint);
+        }
+    }
+    private void shareStudioPage(){
+        title(content,"Share Studio","Preview, save and share native image cards");
+        label(content,"CARD STYLE");
+        String selected=settings.getString("share_style","classic");
+        for(String style:new String[]{"classic","emerald","midnight"}){
+            content.addView(button((style.equals(selected)?"●  ":"○  ")+style.toUpperCase(Locale.ROOT),style.equals(selected),()->{settings.edit().putString("share_style",style).apply();render(false);}));gap(content,8);
+        }
+        gap(content,12);dateFilterBar(content);
+        content.addView(button("Preview Rankings",true,this::shareLeaderboard));gap(content,12);
+        label(content,"RECENT ROUNDS");
+        for(int i=0;i<Math.min(10,gameRounds().size());i++){Map<String,Object> round=gameRounds().get(i);content.addView(button(str(round,"hukumName")+" · Bid "+str(round,"bid")+" · "+when(round.get("timestamp")),false,()->shareRound(round)));gap(content,8);}
+        label(content,"SESSIONS");
+        for(Map<String,Object> session:sessions)if(session.get("endTime")!=null){content.addView(button(str(session,"sessionName"),false,()->shareSession(session)));gap(content,8);}
+    }
+    private byte[] pendingExport;
+    private String exportedFingerprint=null,pendingExportFingerprint=null;
+    private void settingsPage(){
+        title(content,"Settings","Your preferences and data safety");
+        LinearLayout info=panel();line(info,"Account",loggedIn?"Admin":"Visitor",loggedIn?GREEN:MUTED);line(info,"Connection",liveConnected?"Live":"Offline",liveConnected?GREEN:RED);content.addView(info);gap(content,14);
+        content.addView(button(loggedIn?"Log out":"Admin login",false,loggedIn?this::confirmLogout:this::loginDialog));gap(content,14);
+        android.widget.Switch compact=new android.widget.Switch(this);compact.setText("Compact round history");compact.setTextColor(WHITE);compact.setMinHeight(dp(56));compact.setChecked(settings.getBoolean("compact",false));compact.setOnCheckedChangeListener((v,b)->settings.edit().putBoolean("compact",b).apply());content.addView(compact);
+        content.addView(button("Appearance · "+settings.getString("appearance","gold"),false,()->new AlertDialog.Builder(this).setTitle("Appearance").setItems(new String[]{"Gold","Emerald","Midnight"},(d,w)->{settings.edit().putString("appearance",new String[]{"gold","emerald","midnight"}[w]).apply();applyAppearance();buildShell();}).show()));gap(content,12);
+        for(String key:new String[]{"haptics","keep_awake"}){
+            android.widget.Switch toggle=new android.widget.Switch(this);toggle.setText(key.equals("haptics")?"Haptic feedback":"Keep screen awake during sessions");toggle.setTextColor(WHITE);toggle.setMinHeight(dp(56));toggle.setChecked(settings.getBoolean(key,false));toggle.setOnCheckedChangeListener((view,value)->settings.edit().putBoolean(key,value).apply());content.addView(toggle);
+        }
+        content.addView(button("Share Studio",false,()->{tab=8;render(true);}));gap(content,12);
+        label(content,"DATA SAFETY");
+        content.addView(button("Export JSON backup",true,this::exportBackup));gap(content,10);
+        content.addView(text("Backups include player names, scores and sessions. Keep exported files private.",12,MUTED,false));gap(content,12);
+        content.addView(button("Export last recovery backup",false,()->api.exportRecoveryBackup(bytes->{pendingExport=bytes;pendingExportFingerprint=null;Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/json");intent.putExtra(Intent.EXTRA_TITLE,"3patti-recovery.json");startActivityForResult(intent,700);})));gap(content,12);
+        content.addView(button("Refresh live data",false,()->api.refresh()));gap(content,12);
+        if(pendingRoundId!=null){content.addView(button("Retry unconfirmed round",true,this::retryPendingRound));gap(content,12);}
+        content.addView(button("Discard local round draft",false,()->new AlertDialog.Builder(this).setTitle("Discard draft?").setMessage(pendingRoundId==null?"Remove your unsaved form selections?":"This round has an unconfirmed save. Refresh and check History before discarding; it may already be saved.").setNegativeButton("Keep",null).setPositiveButton("Discard draft",(d,w)->{resetRound();notice("Local draft discarded");}).show()));
+        if(loggedIn){
+            gap(content,12);content.addView(button("Restore backup / import HH legacy JSON",false,()->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/json");startActivityForResult(intent,702);}));
+            gap(content,12);content.addView(button("Clear all rounds and sessions",false,this::clearHistoryDialog));
+        }
+        gap(content,20);content.addView(text("3 Patti PRO · Native Android\nOriginal HH scoring · Native images · Read-only offline cache",12,MUTED,false));
+    }
+    private void exportBackup(){
+        api.exportBackup(bytes->{pendingExport=bytes;try{pendingExportFingerprint=BackupArchive.fingerprint(bytes,BuildConfig.USE_EMULATORS?"demo-three-patti":"patti-pro-a61d8");}catch(Exception error){notice("Backup validation failed");return;}Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/json");intent.putExtra(Intent.EXTRA_TITLE,"3patti-backup-"+java.time.LocalDate.now()+".json");startActivityForResult(intent,700);});
+    }
+    @Override protected void onActivityResult(int request,int result,Intent data){
+        super.onActivityResult(request,result,data);
+        if(request==700&&result==RESULT_OK&&data!=null&&data.getData()!=null&&pendingExport!=null){
+            final byte[] bytes=pendingExport;final android.net.Uri uri=data.getData();pendingExport=null;
+            new Thread(()->{try(java.io.OutputStream out=getContentResolver().openOutputStream(uri)){if(out==null)throw new java.io.IOException("Cannot open file");out.write(bytes);runOnUiThread(()->{exportedFingerprint=pendingExportFingerprint;notice("Backup saved");});}catch(Exception error){runOnUiThread(()->notice("Backup failed: "+error.getMessage()));}}).start();
+        }
+        if(request==702&&result==RESULT_OK&&data!=null&&data.getData()!=null){
+            final android.net.Uri uri=data.getData();new Thread(()->{
+                try(java.io.InputStream in=getContentResolver().openInputStream(uri);java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream()){
+                    if(in==null)throw new java.io.IOException("Cannot read backup");byte[] buffer=new byte[8192];int n;
+                    while((n=in.read(buffer))!=-1){if(out.size()+n>16_000_000)throw new java.io.IOException("Backup exceeds 16 MB");out.write(buffer,0,n);}
+                    byte[] raw=out.toByteArray();boolean legacy=new org.json.JSONObject(new String(raw,java.nio.charset.StandardCharsets.UTF_8)).has("totalPlayers");
+                    String project=BuildConfig.USE_EMULATORS?"demo-three-patti":"patti-pro-a61d8";
+                    byte[] bytes=legacy?LegacyImport.convert(raw,project):raw;
+                    List<org.json.JSONObject> docs=BackupArchive.validate(bytes,project);
+                    runOnUiThread(()->new AlertDialog.Builder(this).setTitle("Restore backup?").setMessage(docs.size()+" records. Only missing records will be created. Any conflict cancels the whole restore.").setNegativeButton("Cancel",null).setPositiveButton("Restore",(d,w)->api.restoreBackup(bytes,legacy)).show());
+                }catch(Exception error){runOnUiThread(()->notice("Cannot restore: "+error.getMessage()));}
+            }).start();
+        }
+        NativeImageShare.onActivityResult(this,request,result,data);
+    }
+    private void clearHistoryDialog(){
+        if(exportedFingerprint==null){notice("Export and save a current JSON backup before clearing history.");return;}
+        new AlertDialog.Builder(this).setTitle("Clear all game data?").setMessage("This deletes all rounds and sessions. Players stay. Your exported backup can restore missing records.")
+            .setNegativeButton("Cancel",null).setPositiveButton("Continue",(d,w)->{
+                EditText confirm=new EditText(this);confirm.setSingleLine(true);confirm.setHint("Type CONFIRM");
+                AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Final confirmation").setView(confirm).setNegativeButton("Cancel",null).setPositiveButton("Clear All",null).create();
+                dialog.setOnShowListener(v->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(btn->{if(!"CONFIRM".equals(confirm.getText().toString().trim())){confirm.setError("Type CONFIRM exactly");return;}dialog.dismiss();api.clearHistory(exportedFingerprint);exportedFingerprint=null;}));dialog.show();
+            }).show();
+    }
+    private void applyAppearance(){
+        String theme=settings.getString("appearance","gold");
+        GOLD="emerald".equals(theme)?0xFF57D9AC:"midnight".equals(theme)?0xFFADB4FF:0xFFF6D365;
+        BG="emerald".equals(theme)?0xFF071712:"midnight".equals(theme)?0xFF0B1025:0xFF0A0A0C;
+        PANEL="emerald".equals(theme)?0xFF142820:"midnight".equals(theme)?0xFF171F3B:0xFF18181C;
+        PANEL2="emerald".equals(theme)?0xFF203C30:"midnight".equals(theme)?0xFF232F50:0xFF222228;
+        getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
     }
 }
