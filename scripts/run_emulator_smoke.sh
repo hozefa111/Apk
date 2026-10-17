@@ -52,6 +52,39 @@ grep -F "$PACKAGE/.SettingsActivity" qa/settings-activity.txt >/dev/null || {
 adb shell input keyevent 4
 sleep 1
 
+# Verify the full user journey: MediaStore -> Folders -> folder videos -> tap -> READY.
+# Opening the Player through ACTION_VIEW alone cannot catch a broken gallery adapter.
+wait_for_ui() {
+  local view_id="$1"
+  for attempt in $(seq 1 15); do
+    adb shell uiautomator dump /sdcard/orbit-gallery.xml >/dev/null 2>&1 || true
+    adb exec-out cat /sdcard/orbit-gallery.xml > qa/gallery.xml 2>/dev/null || true
+    if grep -F "resource-id=\"$view_id\"" qa/gallery.xml >/dev/null; then return 0; fi
+    sleep 1
+  done
+  echo "Gallery view was not found: $view_id"
+  return 1
+}
+wait_for_ui "$PACKAGE:id/folderTitle"
+python3 scripts/tap_android_view.py "$PACKAGE:id/folderTitle"
+wait_for_ui "$PACKAGE:id/title"
+python3 scripts/tap_android_view.py "$PACKAGE:id/title"
+for attempt in $(seq 1 25); do
+  adb logcat -d -v brief > qa/gallery-player-logcat.txt
+  if grep -E 'OrbitPlayerQA.*STATE_READY' qa/gallery-player-logcat.txt >/dev/null; then break; fi
+  if grep -E 'FATAL EXCEPTION|OrbitPlayerQA.*PLAYER_ERROR' qa/gallery-player-logcat.txt >/dev/null; then
+    echo "Gallery tap opened a broken video"; exit 1
+  fi
+  sleep 2
+done
+grep -E 'OrbitPlayerQA.*STATE_READY' qa/gallery-player-logcat.txt >/dev/null || {
+  echo "Tapping a library video did not start native playback"; exit 1;
+}
+adb shell dumpsys activity activities > qa/gallery-player-activity.txt
+grep -F "$PACKAGE/.PlayerActivity" qa/gallery-player-activity.txt >/dev/null || {
+  echo "Tapping a gallery thumbnail did not open PlayerActivity"; exit 1;
+}
+
 # Exercise exported ACTION_VIEW route (required by Android 13+ intent-filter enforcement).
 adb shell am start -W -a android.intent.action.VIEW -c android.intent.category.DEFAULT -d "$URI" -t video/mp4 -n "$PACKAGE/.PlayerActivity" | tee qa/player-launch.txt
 sleep 2
