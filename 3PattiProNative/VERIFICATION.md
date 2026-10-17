@@ -1,157 +1,79 @@
-# Verification record — 2.2 development
+# Verification record — 2.2.0
 
-Web reference: `hozefa111/hh` `8b2189d28d7bd9d9c21f509e87bf89717816898f`.
-Native starting point: `f9adf83ba74112899b7a1b0b126bc29ceb910b3a` (v2.1).
-Date: 2026-10-17 UTC.
+Date: 2026-10-17 UTC. Web reference: `hozefa111/hh`
+`8b2189d28d7bd9d9c21f509e87bf89717816898f`. Native v2.1 baseline:
+`f9adf83ba74112899b7a1b0b126bc29ceb910b3a`.
 
-## Production safety
+## Completed evidence
 
-HH source checkout is unchanged. The production schema/scoring audit used GET only:
-6 players, 324 rounds, 19 sessions. All 324 saved rounds matched HH scoring, with
-valid player/partner roles and bids. No account sign-in or production write was
-performed by development/tests. No private production snapshot is committed.
+- 68 JVM tests pass for debug and release, including 840 vectors from actual HH
+  scoring and 64 fixtures from actual HH endSession. All 324 production rounds in
+  the read-only audit matched HH scoring (6 players, 19 sessions).
+- Application source through `fa87081` passed all nine sandbox instrumentation
+  tests on API 26, 30 and 35: 27 executions, zero failures/errors. Latest complete
+  verification run: 39028539761, source head `e40de88` (later changes were test/docs).
+  Build run 39028539757 and API 29 read-only smoke 39028539815 also passed.
+- Tests cover version preconditions, server timestamps, idempotent retries,
+  conflicting payloads, stale backup rejection, clear/restore retaining players,
+  501-record operations and restart recovery, search refresh, account dialog
+  lifecycle, settings recreation, full round form, share pagination and 2x fonts.
+- Actual API 26 DocumentsProvider folder save was verified by decoding the saved
+  PNGs. API 30/35 gallery saves also passed. Single/multiple share intents were
+  opened by a separate test APK UID, verifying grants, ClipData, MIME and PNG decode.
+- Fourteen screenshots per platform were collected; navigation, large fonts and
+  long-name share layouts were reviewed. HH browser references used synthetic data.
+- Lint has zero errors; warnings include hardcoded English labels, pinned
+  dependencies, target SDK 34 and intentional synchronous private recovery commits.
+- Local release build uses the owner-approved stable RSA-3072 identity. The signing
+  guard refuses absent configuration. APK Signature Scheme v2 is checked locally.
+- Release version 2.2.0 (code 11) changes only version metadata from the above app
+  implementation. The API 29 smoke workflow now builds/tests/launches the release
+  variant with a disposable CI certificate; the distributed APK uses the private
+  stable identity. Its completed result is included in the delivery report.
 
-Repeat the read-only audit explicitly with:
-`python3 scripts/audit_firestore_readonly.py --project patti-pro-a61d8`.
+Earlier failed device runs exposed timing races, export persistence, delete
+preconditions and large-font wrapping. They were corrected and rerun; failures
+are not counted as passes. Local software emulation was unstable, so device
+results above are from GitHub Actions Android emulators, not physical phones.
 
-## Automated checks
+## Production safety and account limits
 
-Latest completed local run: **68 JVM tests passed, 0 failures/errors**; 840 HH
-scoring vectors are checked within the parity test. Debug/sandbox app and
-instrumentation APK compilation passed. Lint: **0 errors, 20 warnings**.
-`verifyReleaseSigning` was also exercised and correctly refused release without
-the missing stable signing configuration.
+Original HH checkout is unchanged. The production audit used GET only. No test
+signed into a production account or wrote production game data, Firebase rules,
+project settings or Android registrations. Test writes use the separate compiled-in
+`demo-three-patti` sandbox destination and synthetic fixtures only.
 
-- Original HH function supplies 840 bid/role/result scoring vectors (3–8 players).
-- JVM tests cover score validation, gameplay wins and streaks, zero-score session
-  hot-streak behavior, head-to-head, month/year boundaries and 23/25-hour DST days,
-  retry payload equality, durable JSON draft preservation, archive project/path
-  restrictions, duplicate records, large archives, backup version fingerprints,
-  and HH legacy JSON conversion.
-- Debug and sandbox APKs plus sandbox instrumentation compile locally.
-- Android lint runs without error; remaining warnings include existing hardcoded
-  English UI text, intentionally pinned dependencies and target SDK 34.
-- Ordering regression tests cover active sessions first, ended sessions by end
-  time, nanosecond round timestamps and descending Firestore document-ID ties.
-- A separate sandbox application compiles only local `demo-three-patti` emulator
-  destinations. Instrumentation writes refuse to run in production variants.
-- Device tests cover idempotent create/retry, conflicting payload rejection,
-  versioned writes/deletes, server timestamps, backup/restore, stale-backup clear
-  rejection, full clear/restore with players retained, native navigation,
-  full round form, image preview/pagination, search and settings recreation.
-  Login restoration during the dialog onShow callback is also exercised to guard
-  against dereferencing a dismissed/null dialog. A lifecycle-owned Auth observer
-  refreshes SDK session changes and is removed when the activity gateway stops.
-  Their result must be recorded below before claiming these paths device-verified.
+Firebase Auth/Firestore use explicit FirebaseOptions and do not require a
+`google-services.json` file for the current email/password and database paths.
+The missing Android registration does not by itself block these APIs. Actual
+owner-account sign-in and cross-device production writes were not exercised;
+they remain subject to the existing project API restrictions and security rules.
+No credentials were borrowed from HH's source.
 
-## Initial CI device run and corrections
+HH's notifications.js helper is not referenced by index.html or app.js, and its
+messaging SDK is not loaded by the active web entry point. FCM is not implemented
+or claimed as active web parity. Adding push requires Android client registration,
+backend delivery setup and a separate end-to-end device check.
 
-The first matrix run on `c202a38` compiled and passed JVM/lint checks. UI search,
-settings and navigation passed on API 26 and 35; full form/share preview passed
-on API 26 and 35. It exposed a Firestore Emulator DELETE query-precondition
-parsing issue (reproduced separately against the local emulator), plus timing
-races in direct-gateway tests and an asynchronous preview dialog focus check on
-API 30. Delete now uses a version-checked atomic commit, admitted writes refresh
-an invalidated snapshot, and tests wait for stable sync and the intended dialog.
-Corrected commit `0df3607` passed all four instrumentation tests on each API 26,
-30 and 35 (12 device test executions), including the complete round form and
-share preview flow. Subsequent ordering/layout fixes and screenshot/gallery
-coverage require another run for the final source; the initial failures are not
-counted as passes.
-A regression check also simulates a second client renaming a player during Search;
-results update without rebuilding the query field or losing focus. Gallery checks
-on API 29+ require all paginated images to be saved, and CI collects native screen
-captures for visual inspection. Gradle must retain test APKs until screenshot
-collection finishes; missing image artifacts now fail verification. Captures use
-app-private files and `run-as` so Android 11 scoped storage does not block retrieval.
-Visual inspection found an unsupported card-brand glyph and ambiguous zero-score
-dashes; the brand now uses supported text and score previews/cards show `0`.
-Long image previews also use a full-width scrollable viewport rather than shrinking
-the whole ranking page into an unreadable strip. Negative best-round and MVP
-scores also avoid an incorrect extra plus sign.
-The legacy API 29 smoke workflow also enables KVM, matching the matrix jobs,
-so input commands are not timed out by software-only emulation.
-The local software-only Android emulator could not maintain its package service,
-so no successful local device run is claimed.
+## Signing and installation
 
-## Release gates still required
+The user approved a fresh install and new stable identity. This APK cannot update
+an old v2.1 installation signed with another key. Export any app-private recovery
+backup before uninstalling. Future updates must reuse this new key.
 
-1. Device instrumentation results and visual inspection of the exact final build.
-   CI matrix is configured for Android 8/API 26, Android 11/API 30 and Android 15/API 35;
-   a configured matrix is not a passed result.
-2. User approved a fresh install and a new stable signing identity on 2026-10-17.
-   A private RSA-3072/PKCS12 key is now created outside GitHub. The signed release
-   candidate passed 68 release JVM tests, lint and APK Signature Scheme v2 verification.
-   It cannot update the old v2.1 install; future updates must reuse this new key.
-   CI release signing still needs the private signing variables; they are not committed.
-3. Production Firebase Android registration/configuration and real-device account,
-   permission and optional FCM delivery verification. User confirmed Android
-   registration/config is unavailable. No production configuration is created.
-4. Side-by-side HH/native visual inspection and full long-name/accessibility review.
-5. Portable archives are limited to 16 MB. Large mutations use recoverable batches,
-   so completed batches persist on interruption; this is not whole-operation atomicity.
-   Browser storage requires an explicit JSON export/import; Android cannot read
-   a browser's localStorage directly.
-
-No final release APK is published or represented as complete. Debug/sandbox APKs
-are internal verification outputs. Native CI uploads reports rather than an
-incomplete APK.
-
-## Large-history recovery follow-up
-
-Baseline commit `6f6998d` passed Build Native APK, the API 29 read-only smoke test,
-and all six sandbox instrumentation tests on each API 26/30/35 (18 executions).
-The 500-document mutation and 10,000-document pagination caps are now removed.
-Rename/clear/restore/import use preconditioned batches, a durable per-account journal,
-full conflict preflight and local recovery snapshots. Settings can resume or explicitly
-stop remaining batches; unrelated writes stay locked while a journal is pending.
-Resuming compares live contents/versions, skipping ambiguous commits already applied.
-Recovery files use atomic writes and exports are validated against the import size limit.
-Commit `3fb00da` passed all seven instrumentation tests on API 26/30/35
-(21 device executions), including 501-record rename/clear/restore and restart recovery.
-
-Session awards now use a view-independent HH-compatible calculator. Sixty-four
-synthetic cases execute the actual HH `endSession` function to generate expected
-leaderboards, all six badges, streaks and win/loss awards. This exposed/fixed a
-removed-player maximum affecting Hukum King/Unlucky awards. Native session stats
-also retain HH's missing-playerIds fallback. All 64 differential cases pass locally.
-Share Studio lists all filtered rounds via pagination instead of only ten recent
-rounds, and paginates completed sessions. New instrumentation includes 2x system
-font scaling and long player names in share cards. Release builds now depend on
-the stable-signing guard automatically; unsigned release assembly is blocked.
-
-Portable archive preflight now validates actual typed values, integer range,
-timestamps, coordinates, bytes/references, map/array shapes, Firestore nesting,
-document IDs, Unicode and the 1 MiB document limit. Untrusted JSON is checked for
-UTF-8, recursion depth and trailing payloads before parsing. A malformed record
-after record 500 must reject before creating a journal or changing any data.
-Seven further JVM cases cover valid types and malformed/oversize input.
-
-Commit `6493f54` passed all eight instrumentation tests on each API 26/30/35
-(24 executions), including large system fonts. Screenshot review still exposed
-word-breaking in the header/navigation and equal-column statistics at 2x text.
-The follow-up stacks header actions and statistic rows at large font scales and
-fits complete navigation labels on one line. Redundant cached-state toasts are
-removed; the toolbar continues to show offline/connecting status. The new large-text
-regression asserts that the complete navigation label fits on one line.
-
-## Folder save and external sharing follow-up
-
-The previous verified application source was `0973807` (68 JVM tests and 24
-instrumentation executions, all passing). Further export verification now targets
-the actual API 26 system folder picker and a receiver installed in the separate
-test APK UID. The share test checks single/multiple intent payloads, ClipData,
-read grants and PNG decoding in that receiver. Android 26 folder save now preserves
-its pending URI list across process recreation, rejects an empty restored request,
-and deletes partially created files after a copy failure. Missing folder handlers
-and cleanup errors report an export failure instead of crashing. These follow-up
-changes require the new exact-commit CI results before certification.
-
-## Fresh-install signing identity
-
-User explicitly approved fresh installation with a new stable key. Public certificate
-SHA-256: `DC:06:97:A0:35:26:61:2B:C5:4C:3D:9A:D0:B4:A1:0E:9E:D9:B3:B6:AD:22:E4:E5:32:69:F9:04:A7:2B:A9:B4`.
+Certificate SHA-256:
+`DC:06:97:A0:35:26:61:2B:C5:4C:3D:9A:D0:B4:A1:0E:9E:D9:B3:B6:AD:22:E4:E5:32:69:F9:04:A7:2B:A9:B4`.
 SHA-1: `E3:71:C5:BA:75:06:0A:3E:23:2E:81:76:80:78:1E:CA:1D:BF:49:0B`.
-The encrypted keystore and its signing variables remain private and outside this
-repository. No final APK is distributed. Android Firebase registration and actual
-push-delivery verification still need the project owner's client configuration.
+Private keystore and password variables remain outside GitHub and APK artifacts.
+
+## Operating limits
+
+Portable archives are limited to 16 MB and validated before import/export. Firestore
+record/type/depth/size validation prevents partially starting a malformed import.
+Large rename/clear/restore operations use version-checked batches of at most 400
+records/6 MB with a durable per-account journal and recovery snapshot. Completed
+batches persist on interruption; this is not whole-operation atomicity. Settings
+can retry or explicitly stop; unrelated writes stay locked while recovery is pending.
+No offline mutation queue exists. Browser localStorage needs explicit JSON export;
+Android cannot silently read it. Recovery snapshots are app-private and disappear
+on uninstall unless exported through Settings.

@@ -24,8 +24,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Build CURRENT source and run scoring tests
-        run: gradle --no-daemon --project-dir 3PattiProNative testDebugUnitTest assembleDebug
+      - name: Build release variant and run scoring tests
+        # This disposable identity tests the release variant. The distributed APK
+        # is signed separately with the owner-approved stable key, never sent to CI.
+        run: |
+          export THREE_PATTI_STORE_FILE="$RUNNER_TEMP/smoke-release.p12"
+          export THREE_PATTI_STORE_PASSWORD="$(openssl rand -hex 24)"
+          export THREE_PATTI_KEY_PASSWORD="$THREE_PATTI_STORE_PASSWORD"
+          export THREE_PATTI_KEY_ALIAS=smoke-release
+          keytool -genkeypair -keystore "$THREE_PATTI_STORE_FILE" -storetype PKCS12 -storepass:env THREE_PATTI_STORE_PASSWORD -keypass:env THREE_PATTI_KEY_PASSWORD -alias "$THREE_PATTI_KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 2 -dname "CN=Disposable release verification"
+          gradle --no-daemon --project-dir 3PattiProNative testReleaseUnitTest lintRelease assembleRelease
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -40,7 +48,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
           script: |
-            adb install 3PattiProNative/app/build/outputs/apk/debug/app-debug.apk
+            adb install 3PattiProNative/app/build/outputs/apk/release/app-release.apk
             adb shell am start -n com.hozefa.threepattipro.nativeapp/.MainActivity
             sleep 8
             python3 3PattiProNative/scripts/smoke_navigation.py

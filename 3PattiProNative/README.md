@@ -1,10 +1,9 @@
-# 3 Patti PRO Native Android — 2.2 development
+# 3 Patti PRO Native Android — 2.2.0
 
 Native Java Android application; no WebView. Source of truth: `hozefa111/hh`
 commit `8b2189d28d7bd9d9c21f509e87bf89717816898f`.
 
-This is development source, not a certified final release. See
-[verification and remaining gates](VERIFICATION.md).
+See the [verification record and operating limits](VERIFICATION.md).
 
 ## Implemented in this iteration
 
@@ -57,7 +56,7 @@ unrelated writes are blocked until this is resolved. Retry reconciles ambiguous
 commits without overwriting newer records and requires the initiating account.
 All pages are read; repeated server page tokens fail closed. Portable imports and
 recovery snapshots remain limited to 16 MB; export validation prevents creation of
-an unrestorable archive. Full unbounded web parity is not claimed.
+an unrestorable archive. Archives larger than that limit must be split before import.
 
 Recovery archives are app-private and are lost on uninstall. Export them through
 Settings for durable storage. Backups contain names and scores; no auth tokens.

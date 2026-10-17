@@ -1,8 +1,8 @@
-# HH web ↔ native parity audit — 2.2 development
+# HH web ↔ native parity audit — 2.2.0
 
 Reference: HH `8b2189d28d7bd9d9c21f509e87bf89717816898f`.
 This table describes implementation, not a claim of complete device verification.
-See [verification record and release gates](VERIFICATION.md).
+See [verification record and limits](VERIFICATION.md).
 
 | Area | Native work in this iteration | Remaining verification/limit |
 |---|---|---|
@@ -25,8 +25,8 @@ See [verification record and release gates](VERIFICATION.md).
 | Search | Player, round, bid/result/date and session search | Large-history performance review |
 | Analytics | Date filters, bid/Hukum metrics, player score bars and cumulative trends | Device/visual review |
 | Share Studio | Palette selection, filtered rankings/rounds, paginated complete round/session selection and preview | Device/visual review |
-| Notifications | HH notification helper integration is not certified | Registered Android Firebase config and FCM device test unavailable |
+| Notifications | `notifications.js` is not loaded by HH index.html; messaging SDK is also absent from the active web entry point | FCM is not part of the active reference workflow and is not implemented/certified in native |
 | Signing | New stable signing identity, signed candidate and fail-closed check | Fresh install explicitly approved; reuse this key for future updates |
 
 Builds/tests never write production Firebase. HH repository remains unchanged.
-100% parity and a final release are explicitly withheld until remaining gates pass.
+The active web workflows are ported; unbounded archive sizes and inactive web notification helpers are not claimed as native features. Device evidence and remaining production-account limits are recorded separately.
