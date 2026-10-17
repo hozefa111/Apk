@@ -80,7 +80,7 @@ public final class FirebaseGateway {
     private volatile boolean animationContinuity;
     private long animationSnapshotAt;
     private volatile boolean signingOut=false;
-    private final Runnable liveRefresh=()->queueLoad(true);
+    private final Runnable liveRefresh=()->{if(!this.freshSnapshot)queueLoad(true);};
     private volatile String idToken;
     private volatile boolean running;
     private volatile boolean freshSnapshot=false;
@@ -150,8 +150,12 @@ public final class FirebaseGateway {
                 if(snapshot.getMetadata().isFromCache()){
                     animationContinuity=false;freshSnapshot=false;listener.syncState(false);scheduleNext();return;
                 }
-                // Metadata-only acknowledgements never justify downloading the table again.
-                if(snapshot.getDocumentChanges().isEmpty())return;
+                // Ignore ordinary metadata acknowledgements. After a cache/offline
+                // transition, verify once on reconnection rather than waiting for polling.
+                if(snapshot.getDocumentChanges().isEmpty()){
+                    if(!freshSnapshot){ui.removeCallbacks(liveRefresh);ui.postDelayed(liveRefresh,500);}
+                    return;
+                }
                 liveRevision.incrementAndGet();freshSnapshot=false;listener.syncState(false);
                 if(!foreground){readAgain.set(true);return;}
                 ui.removeCallbacks(liveRefresh);ui.postDelayed(liveRefresh,500);

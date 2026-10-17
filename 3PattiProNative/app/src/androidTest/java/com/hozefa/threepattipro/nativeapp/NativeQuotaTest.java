@@ -25,7 +25,7 @@ public class NativeQuotaTest {
     private final AtomicBoolean live=new AtomicBoolean(),quota=new AtomicBoolean();
     private final AtomicInteger requests=new AtomicInteger();
     private final AtomicReference<List<Map<String,Object>>> players=new AtomicReference<>(Collections.emptyList());
-    private void await(BooleanSupplier condition)throws Exception{long end=System.currentTimeMillis()+15000;while(System.currentTimeMillis()<end){if(condition.getAsBoolean())return;Thread.sleep(100);}fail("Expected quota/recovery state did not arrive");}
+    private void await(BooleanSupplier condition)throws Exception{long end=System.currentTimeMillis()+15000;while(System.currentTimeMillis()<end){if(condition.getAsBoolean())return;Thread.sleep(100);}fail("Expected quota/recovery state did not arrive: live="+live.get()+", quota="+quota.get()+", REST requests="+requests.get());}
     private FirebaseGateway.Listener listener(){return new FirebaseGateway.Listener(){
         public void dataUpdated(List<Map<String,Object>> p,List<Map<String,Object>> r,List<Map<String,Object>> s){players.set(p);}
         public void authChanged(boolean a){}public void notice(String m){}public void busy(boolean b){}
