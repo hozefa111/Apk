@@ -743,6 +743,12 @@ class MainActivity : Activity() {
         albums = allVideos.asSequence()
             .filter { it.folder !in hiddenFolders }
             .groupBy { it.folder }
+            // Search also works in Albums: match the folder path OR any video inside.
+            // Keep each album's real file count rather than reporting a partial count.
+            .filter { (path, items) ->
+                query.isBlank() || path.contains(query, ignoreCase = true) ||
+                    items.any { it.title.contains(query, ignoreCase = true) }
+            }
             .map { (path, items) ->
                 val recent = items.maxByOrNull { it.modifiedSeconds } ?: items.first()
                 FolderAlbum(path, items.size, recent, items,
