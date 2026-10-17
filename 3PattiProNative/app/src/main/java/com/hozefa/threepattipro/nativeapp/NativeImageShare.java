@@ -211,7 +211,7 @@ public final class NativeImageShare {
         style(activity);
         try{
             List<AwardRow> expanded=new ArrayList<>();
-            TextPaint measure=new TextPaint(Paint.ANTI_ALIAS_FLAG);measure.setTextSize(25);
+            TextPaint measure=new TextPaint(Paint.ANTI_ALIAS_FLAG);measure.setTextSize(25);measure.setTypeface(Typeface.create("sans-serif",Typeface.BOLD));
             for(AwardRow award:awards){
                 String value=award.value==null?"":award.value;
                 android.text.StaticLayout layout=android.text.StaticLayout.Builder.obtain(value,0,value.length(),measure,W-2*PAD-64).setIncludePad(false).build();
@@ -286,7 +286,7 @@ public final class NativeImageShare {
             int[] position={0};Bitmap[] displayed={null};
             Runnable show=()->{
                 try{
-                    preview.setImageDrawable(null);if(displayed[0]!=null)displayed[0].recycle();
+                    preview.setImageDrawable(null);displayed[0]=null;
                     Uri uri=images.get(position[0]);BitmapFactory.Options opts=new BitmapFactory.Options();opts.inJustDecodeBounds=true;
                     try(java.io.InputStream in=activity.getContentResolver().openInputStream(uri)){BitmapFactory.decodeStream(in,null,opts);}
                     opts.inSampleSize=1;int target=activity.getResources().getDisplayMetrics().widthPixels;
@@ -301,7 +301,7 @@ public final class NativeImageShare {
                 .setView(body).setNegativeButton("Close",null)
                 .setNeutralButton("Save Images",(d,w)->saveImages(activity,images))
                 .setPositiveButton("Share",(d,w)->sendImages(activity,images,title)).create();
-            dialog.setOnDismissListener(d->{preview.setImageDrawable(null);if(displayed[0]!=null){displayed[0].recycle();displayed[0]=null;}});
+            dialog.setOnDismissListener(d->{preview.setImageDrawable(null);displayed[0]=null;});
             dialog.show();show.run();
         });
     }

@@ -38,6 +38,19 @@ the missing stable signing configuration.
   full round form, image preview/pagination, search and settings recreation.
   Their result must be recorded below before claiming these paths device-verified.
 
+## Initial CI device run and corrections
+
+The first matrix run on `c202a38` compiled and passed JVM/lint checks. UI search,
+settings and navigation passed on API 26 and 35; full form/share preview passed
+on API 26 and 35. It exposed a Firestore Emulator DELETE query-precondition
+parsing issue (reproduced separately against the local emulator), plus timing
+races in direct-gateway tests and an asynchronous preview dialog focus check on
+API 30. Delete now uses a version-checked atomic commit, admitted writes refresh
+an invalidated snapshot, and tests wait for stable sync and the intended dialog.
+A corrected matrix run is required; the initial failures are not counted as passes.
+The local software-only Android emulator could not maintain its package service,
+so no successful local device run is claimed.
+
 ## Release gates still required
 
 1. Device instrumentation results and visual inspection of the exact final build.

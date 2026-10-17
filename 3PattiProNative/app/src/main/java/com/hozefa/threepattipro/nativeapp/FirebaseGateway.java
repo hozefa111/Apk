@@ -427,9 +427,10 @@ public final class FirebaseGateway {
     public void deleteDocument(String collection,String id,String success,String expectedVersion){
         final Map<String,String> expected=new HashMap<>(versions);expected.put(collection+"/"+id,expectedVersion);
         write(success,token->{
-            String url=dbRoot+"/"+collection+"/"+encoded(id)+"?currentDocument.updateTime="+encoded(precondition(expected,collection+"/"+id).getString("updateTime"));
+            JSONObject deletion=new JSONObject().put("delete",documentRoot+"/"+collection+"/"+id)
+                .put("currentDocument",precondition(expected,collection+"/"+id));
             preserveBackup();
-            jsonCall("DELETE",url,null,token);
+            jsonCall("POST",dbRoot+":commit",new JSONObject().put("writes",new JSONArray().put(deletion)),token);
         });
     }
     public interface Action { void run(String token) throws Exception; }
@@ -457,7 +458,7 @@ public final class FirebaseGateway {
             try {
                 ensureIdToken();
                 if(idToken==null || signingOut)throw new IOException("Login expired");
-                if(System.currentTimeMillis()-snapshotAt>60000)load();
+                if(!freshSnapshot || System.currentTimeMillis()-snapshotAt>60000)load();
                 if(!freshSnapshot)throw new IOException("Data changed. Refresh and retry.");
                 action.run(idToken);
                 notify(success);
