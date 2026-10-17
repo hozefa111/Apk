@@ -114,6 +114,25 @@ class MainActivity : Activity() {
             else -> Tab.FOLDERS
         }
         if (tab == Tab.VIDEOS) chosenFolder = preferences.lastFolder
+        // Android may recreate this screen on rotation or after process eviction.
+        // Restore the user's live context rather than dumping them into default Albums.
+        savedInstanceState?.let { state ->
+            tab = Tab.values().firstOrNull { it.name == state.getString("orbit_tab") } ?: tab
+            filter = Filter.values().firstOrNull { it.name == state.getString("orbit_filter") } ?: filter
+            sort = Sort.values().getOrNull(state.getInt("orbit_sort", sort.ordinal)) ?: sort
+            chosenFolder = state.getString("orbit_folder", chosenFolder) ?: chosenFolder
+            albumSort = state.getInt("orbit_album_sort", 0).coerceIn(0, 2)
+            gallery = state.getBoolean("orbit_gallery", gallery)
+            currentPlaylist = state.getString("orbit_playlist")?.takeIf {
+                it in collections.names()
+            }
+            query = state.getString("orbit_query", "") ?: ""
+        }
+        // Let RecyclerView restore its scroll offset after asynchronous MediaStore results.
+        adapter.stateRestorationPolicy =
+            RecyclerView.Adapter.StateRestorationPolicy.PREVENT_WHEN_EMPTY
+        albumAdapter.stateRestorationPolicy =
+            RecyclerView.Adapter.StateRestorationPolicy.PREVENT_WHEN_EMPTY
         gridManager = GridLayoutManager(this, if (gallery) 2 else 1)
         videos.layoutManager = gridManager
         videos.adapter = adapter
@@ -155,11 +174,24 @@ class MainActivity : Activity() {
             override fun afterTextChanged(s: Editable?) = Unit
         })
 
+        if (query.isNotBlank()) search.setText(query)
         updatePermissionsUi()
         applyAppearance()
         previousLibraryAccess = hasLibraryPermission()
         if (previousLibraryAccess == true) scan() else filterVideos()
         showPreviousCrashReport()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("orbit_tab", tab.name)
+        outState.putString("orbit_filter", filter.name)
+        outState.putInt("orbit_sort", sort.ordinal)
+        outState.putString("orbit_folder", chosenFolder)
+        outState.putInt("orbit_album_sort", albumSort)
+        outState.putBoolean("orbit_gallery", gallery)
+        outState.putString("orbit_playlist", currentPlaylist)
+        outState.putString("orbit_query", query)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onStart() {
