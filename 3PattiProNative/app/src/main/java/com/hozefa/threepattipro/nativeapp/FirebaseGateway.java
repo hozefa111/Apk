@@ -278,6 +278,7 @@ public final class FirebaseGateway {
                     ui.post(()->{if(running) listener.authChanged(false);});
                 }
             }
+            readAgain.set(false); // Changes already observed are included in this fetch.
             long revision=liveRevision.get();
             // Fetch independent collections in parallel rather than blocking the
             // admin action queue for the sum of three HTTP latencies.
@@ -303,7 +304,7 @@ public final class FirebaseGateway {
             animationContinuity=false;
             freshSnapshot=false;
             ui.post(()->{if(running){listener.snapshotContinuity(false);listener.syncState(false);}});
-            if(!retry.quota()){
+            if(!retry.quota()||retry.remaining(retryClock.getAsLong())==0){
                 retry.unavailable(retryClock.getAsLong());
                 publishProblem("Cannot connect to the shared table. Check your internet connection. Saved data remains available; retry is automatic.");
             }else publishProblem(quotaMessage());

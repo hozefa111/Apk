@@ -450,7 +450,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         }
         if(!hasData && tab<6 && syncProblem!=null){
             gap(content,24);content.addView(text("Your table has not loaded yet",20,GOLD,true));gap(content,12);
-            content.addView(text("No points have been deleted. A fresh install needs one successful connection before an offline table is available. You can leave this screen; the app will retry while open.",14,MUTED,false));
+            content.addView(text("This connection error does not delete your points. A fresh install needs one successful connection before an offline table is available. You can leave this screen; the app will retry while open.",14,MUTED,false));
         }else if(!hasData && tab<6) {
             gap(content,80);content.addView(text("♠  Loading your table…",20,GOLD,true));
             gap(content,16);content.addView(text("Connecting to your shared table",13,MUTED,false));

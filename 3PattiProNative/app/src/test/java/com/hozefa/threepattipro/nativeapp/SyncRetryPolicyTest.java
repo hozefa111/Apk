@@ -29,6 +29,7 @@ public class SyncRetryPolicyTest {
     }
     @Test public void genericNetworkFailureCannotShortenActiveQuota(){
         SyncRetryPolicy p=new SyncRetryPolicy(0,0,0);p.rateLimited(1000,"3600");p.unavailable(2000);assertTrue(p.quota());assertEquals(3601000,p.deadline());
+        p.unavailable(3602000);assertFalse(p.quota());assertEquals(30000,p.remaining(3602000));
     }
     @Test public void invalidStoredDeadlineIsBoundedAndExpiredDeadlineDoesNotBlock(){
         SyncRetryPolicy p=new SyncRetryPolicy(1000,Long.MAX_VALUE,999);assertEquals(86400000,p.remaining(1000));
