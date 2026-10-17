@@ -19,7 +19,11 @@ public class FirebaseGatewayEmulatorTest {
     private final AtomicReference<List<Map<String,Object>>> players=new AtomicReference<>(Collections.emptyList());
     private final AtomicLong syncEvent=new AtomicLong();
     private final AtomicReference<String> notice=new AtomicReference<>("");
-    private void await(BooleanSupplier condition)throws Exception{long deadline=System.currentTimeMillis()+45000;while(!condition.getAsBoolean()&&System.currentTimeMillis()<deadline)Thread.sleep(100);assertTrue(notice.get(),condition.getAsBoolean());}
+    private void await(BooleanSupplier condition)throws Exception{
+        long deadline=System.currentTimeMillis()+45000;
+        while(System.currentTimeMillis()<deadline){if(condition.getAsBoolean())return;Thread.sleep(100);}
+        fail(notice.get());
+    }
     private void ready(Runnable operation)throws Exception{
         await(()->live.get()&&!busy.get()&&System.currentTimeMillis()-syncEvent.get()>500);
         AtomicBoolean sent=new AtomicBoolean();
