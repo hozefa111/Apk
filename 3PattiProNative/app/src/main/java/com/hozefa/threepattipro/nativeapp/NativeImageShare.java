@@ -277,8 +277,10 @@ public final class NativeImageShare {
         activity.runOnUiThread(()->{
             if(activity.isFinishing()||activity.isDestroyed())return;
             android.widget.LinearLayout body=new android.widget.LinearLayout(activity);body.setOrientation(android.widget.LinearLayout.VERTICAL);
-            android.widget.ImageView preview=new android.widget.ImageView(activity);preview.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
-            body.addView(preview,new android.widget.LinearLayout.LayoutParams(-1,(int)(activity.getResources().getDisplayMetrics().heightPixels*0.5f)));
+            android.widget.ImageView preview=new android.widget.ImageView(activity);preview.setAdjustViewBounds(true);preview.setScaleType(android.widget.ImageView.ScaleType.FIT_START);
+            android.widget.ScrollView previewScroll=new android.widget.ScrollView(activity);previewScroll.setContentDescription("Scroll full share image");
+            previewScroll.addView(preview,new android.widget.FrameLayout.LayoutParams(-1,-2));
+            body.addView(previewScroll,new android.widget.LinearLayout.LayoutParams(-1,(int)(activity.getResources().getDisplayMetrics().heightPixels*0.5f)));
             android.widget.LinearLayout controls=new android.widget.LinearLayout(activity);controls.setGravity(android.view.Gravity.CENTER);
             android.widget.Button previous=new android.widget.Button(activity),next=new android.widget.Button(activity);
             android.widget.TextView pageLabel=new android.widget.TextView(activity);pageLabel.setGravity(android.view.Gravity.CENTER);
@@ -292,7 +294,7 @@ public final class NativeImageShare {
                     opts.inSampleSize=1;int target=activity.getResources().getDisplayMetrics().widthPixels;
                     while(opts.outWidth/(opts.inSampleSize*2)>=target)opts.inSampleSize*=2;opts.inJustDecodeBounds=false;
                     try(java.io.InputStream in=activity.getContentResolver().openInputStream(uri)){displayed[0]=BitmapFactory.decodeStream(in,null,opts);}
-                    preview.setImageBitmap(displayed[0]);preview.setContentDescription(title+" preview page "+(position[0]+1));
+                    preview.setImageBitmap(displayed[0]);previewScroll.scrollTo(0,0);preview.setContentDescription(title+" preview page "+(position[0]+1));
                     pageLabel.setText((position[0]+1)+" / "+images.size());previous.setEnabled(position[0]>0);next.setEnabled(position[0]<images.size()-1);
                 }catch(Exception error){errorToast(activity,error);}
             };

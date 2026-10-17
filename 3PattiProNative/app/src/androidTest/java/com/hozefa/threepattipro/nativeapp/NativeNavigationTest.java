@@ -65,7 +65,9 @@ public class NativeNavigationTest {
             onView(withText("✓  Save Round to Firebase")).perform(click());onView(withText("Save Round")).perform(click());
             waitForDialog("Round saved successfully");onView(withText("Share Result")).perform(click());waitForDialog("3 Patti PRO - Round Result");capture("09-share-round");onView(withText("Close")).perform(click());
             scenario.onActivity(activity->{java.util.List<NativeImageShare.RankRow> rows=new java.util.ArrayList<>();for(int i=0;i<75;i++)rows.add(new NativeImageShare.RankRow("Synthetic Player "+i,100-i,10,5,5,3,4));NativeImageShare.leaderboard(activity,"Synthetic pagination test",rows);});
-            waitForDialog("3 Patti PRO - Rankings");onView(withText("1 / 3")).check(matches(isDisplayed()));onView(withText("Next")).perform(click());onView(withText("2 / 3")).check(matches(isDisplayed()));capture("10-share-ranks-page-2");
+            waitForDialog("3 Patti PRO - Rankings");onView(withText("1 / 3")).check(matches(isDisplayed()));onView(withText("Next")).perform(click());onView(withText("2 / 3")).check(matches(isDisplayed()));
+            onView(withContentDescription("Scroll full share image")).perform(swipeUp()).check((view,error)->{if(error!=null)throw error;org.junit.Assert.assertTrue("Long image must scroll at full preview width",view.getScrollY()>0);});
+            capture("10-share-ranks-page-2");
             if(android.os.Build.VERSION.SDK_INT>=29){
                 int before=galleryCount();onView(withText("Save Images")).perform(click());long deadline=System.currentTimeMillis()+30000;
                 while(galleryCount()<before+3&&System.currentTimeMillis()<deadline)Thread.sleep(100);

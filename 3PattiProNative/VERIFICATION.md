@@ -62,6 +62,8 @@ collection finishes; missing image artifacts now fail verification. Captures use
 app-private files and `run-as` so Android 11 scoped storage does not block retrieval.
 Visual inspection found an unsupported card-brand glyph and ambiguous zero-score
 dashes; the brand now uses supported text and score previews/cards show `0`.
+Long image previews also use a full-width scrollable viewport rather than shrinking
+the whole ranking page into an unreadable strip.
 The local software-only Android emulator could not maintain its package service,
 so no successful local device run is claimed.
 
