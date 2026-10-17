@@ -44,4 +44,10 @@ public class MotionEventsTest {
         MotionEvents e=new MotionEvents();e.update(rounds(),true,now);
         assertTrue(e.update(rounds("a",now+5000,"b",now-120000),true,now));
     }
+    @Test public void recentlyDeletedAndRestoredRoundIsNotANewWin() {
+        MotionEvents e=new MotionEvents();e.update(rounds("a",now),true,now);
+        assertFalse(e.update(rounds(),true,now+1000));
+        assertFalse(e.update(rounds("a",now),true,now+2000));
+        assertTrue(e.update(rounds("a",now,"b",now+3000),true,now+3000));
+    }
 }

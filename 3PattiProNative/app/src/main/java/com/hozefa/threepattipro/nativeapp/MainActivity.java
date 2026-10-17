@@ -347,17 +347,17 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private void label(LinearLayout c,String heading) {
         c.addView(text(heading.toUpperCase(Locale.ROOT),11,GOLD,true));gap(c,12);
     }
-    private void line(LinearLayout c,String left,String right,int rightColor) {
+    private TextView line(LinearLayout c,String left,String right,int rightColor) {
         LinearLayout r=row();
         TextView l=text(left,13,MUTED,false);
         if(getResources().getConfiguration().fontScale>1.3f){
             r.setOrientation(LinearLayout.VERTICAL);r.setGravity(Gravity.START);
-            r.addView(l,lp(-1,-2));gap(r,4);TextView value=text(right,14,rightColor,true);r.addView(value,lp(-1,-2));gap(r,12);c.addView(r);return;
+            r.addView(l,lp(-1,-2));gap(r,4);TextView value=text(right,14,rightColor,true);r.addView(value,lp(-1,-2));gap(r,12);c.addView(r);return value;
         }
         l.setMinHeight(dp(30));r.addView(l,new LinearLayout.LayoutParams(0,-2,1));
         TextView value=text(right,14,rightColor,true);value.setGravity(Gravity.END);
         r.addView(value,new LinearLayout.LayoutParams(0,-2,1));
-        c.addView(r);
+        c.addView(r);return value;
     }
     private void buildShell() {
         motion.cancelAll();
@@ -601,7 +601,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             names.addView(text(active?"● Active player":"● Benched",12,active?GREEN:MUTED,false));
             top.addView(names,new LinearLayout.LayoutParams(0,-2,1));
             int score=scoreOf(id,rounds);
-            top.addView(text((score>=0?"+":"")+score,17,score>=0?GREEN:RED,true));
+            TextView points=text((score>=0?"+":"")+score,17,score>=0?GREEN:RED,true);
+            points.setTag(new MotionEngine.Anchor("player-score:"+id,score,true));top.addView(points);
             card.addView(top);
             card.setClickable(true);
             card.setFocusable(true);
@@ -747,7 +748,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         LinearLayout stats=panel();
         int rankIndex=rankedFor(filtered).indexOf(target);
         line(stats,"Rank",rankIndex<0?"—":"#"+(rankIndex+1),GOLD);
-        line(stats,"Total Score",(totalScore>=0?"+":"")+totalScore,totalScore>=0?GREEN:RED);
+        line(stats,"Total Score",(totalScore>=0?"+":"")+totalScore,totalScore>=0?GREEN:RED).setTag(new MotionEngine.Anchor("profile-score:"+pid+":"+rankFilter+":"+customStart+":"+customEnd,totalScore,true));
         line(stats,"Rounds",String.valueOf(individual.size()),WHITE);
         line(stats,"Win Rate",individual.isEmpty()?"0%":Math.round(100.0*wins/individual.size())+"%",GOLD);
         line(stats,"Wins / Losses",wins+"W / "+losses+"L",WHITE);
@@ -1592,7 +1593,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         List<Map<String,Object>> ranked=rankedFor(games);int maxScore=1;
         for(Map<String,Object> p:ranked)maxScore=Math.max(maxScore,Math.abs(scoreOf(id(p),games)));
         for(Map<String,Object> p:ranked){String pid=id(p);int score=scoreOf(pid,games),played=played(pid,games),won=wins(pid,games);
-            LinearLayout card=panel();line(card,str(p,"name"),(score>0?"+":"")+score,score>=0?GREEN:RED);
+            LinearLayout card=panel();line(card,str(p,"name"),(score>0?"+":"")+score,score>=0?GREEN:RED).setTag(new MotionEngine.Anchor("analytics-score:"+pid+":"+rankFilter+":"+customStart+":"+customEnd,score,score>0));
             android.widget.ProgressBar bar=new android.widget.ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
             bar.setMax(maxScore);motion.progress(bar,Math.abs(score),screenEntry);bar.setProgressTintList(android.content.res.ColorStateList.valueOf(score>=0?GREEN:RED));
             card.addView(bar,lp(-1,12));gap(card,8);

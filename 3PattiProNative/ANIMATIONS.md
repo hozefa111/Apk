@@ -45,11 +45,11 @@ Gateway snapshot continuity is presentation metadata only: SDK cache/error,
 authentication changes, failed REST reads or a long reconciliation gap reset the
 motion baseline. Healthy realtime invalidation still keeps existing write locks.
 A coherent no-op snapshot primes the baseline after reconnect/resume without
-rebuilding the screen. Backfilled/old/future-invalid rounds do not trigger deltas.
+rebuilding the screen. Backfilled/old/future-invalid rounds and recently restored round IDs do not trigger deltas.
 
 ## Verification
 
-82 JVM tests pass locally, including motion policy, overflow-safe counting,
+83 JVM tests pass locally, including motion policy, overflow-safe counting,
 initial-cache/backfill/reconnect/background event guards and existing HH scoring
 and session vectors. Debug/sandbox app and instrumentation APK compilation and
 lint are run before device CI. New instrumentation exercises actual intermediate
