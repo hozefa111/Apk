@@ -66,8 +66,24 @@ wait_for_ui() {
   return 1
 }
 wait_for_ui "$PACKAGE:id/folderTitle"
+wait_for_ui "$PACKAGE:id/folderMore"
+python3 scripts/tap_android_view.py "$PACKAGE:id/folderMore"
+adb shell uiautomator dump /sdcard/orbit-folder-options.xml >/dev/null
+adb exec-out cat /sdcard/orbit-folder-options.xml > qa/folder-options.xml
+grep -F 'text="Play all videos"' qa/folder-options.xml >/dev/null || {
+  echo "Folder overflow menu did not expose working actions"; exit 1;
+}
+adb shell input keyevent 4
 python3 scripts/tap_android_view.py "$PACKAGE:id/folderTitle"
 wait_for_ui "$PACKAGE:id/title"
+wait_for_ui "$PACKAGE:id/moreOptions"
+python3 scripts/tap_android_view.py "$PACKAGE:id/moreOptions"
+adb shell uiautomator dump /sdcard/orbit-video-options.xml >/dev/null
+adb exec-out cat /sdcard/orbit-video-options.xml > qa/video-options.xml
+grep -F 'text="Add to playlist"' qa/video-options.xml >/dev/null || {
+  echo "Video overflow menu did not expose playlist actions"; exit 1;
+}
+adb shell input keyevent 4
 python3 scripts/tap_android_view.py "$PACKAGE:id/title"
 for attempt in $(seq 1 25); do
   adb logcat -d -v brief > qa/gallery-player-logcat.txt
