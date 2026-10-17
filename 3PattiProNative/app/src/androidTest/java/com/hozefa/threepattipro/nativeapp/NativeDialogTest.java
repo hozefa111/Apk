@@ -88,7 +88,16 @@ public class NativeDialogTest {
                 AtomicBoolean rotated=new AtomicBoolean();end=System.currentTimeMillis()+15000;
                 while(!rotated.get()&&System.currentTimeMillis()<end){scenario.onActivity(a->rotated.set(a.getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE));Thread.sleep(100);}assertTrue(rotated.get());
                 List<Map<String,Object>> rows=fixture();scenario.onActivity(a->{seed(a,rows);role(a,rows);});waitFor("Hukum · 47 rounds");
-                onData(anything()).inAdapterView(withContentDescription("Role round history")).atPosition(47).check(matches(isDisplayed()));onView(withText("Close")).check(matches(isCompletelyDisplayed()));capture("19-role-landscape-large-font");onView(withText("Close")).perform(click());
+                // An oversized card cannot fit entirely inside a large-font landscape viewport.
+                // Select the final adapter item, then swipe through the card itself.
+                onView(withContentDescription("Role round history")).perform(new androidx.test.espresso.ViewAction(){
+                    public org.hamcrest.Matcher<View> getConstraints(){return isAssignableFrom(ListView.class);}
+                    public String getDescription(){return "Select last history item before swiping oversized card";}
+                    public void perform(androidx.test.espresso.UiController ui,View view){((ListView)view).setSelection(47);ui.loopMainThreadUntilIdle();}
+                });
+                onView(withContentDescription("Role round history")).perform(swipeUp());
+                onView(withContentDescription("Role round history")).check((view,error)->{if(error!=null)throw error;assertEquals(47,((ListView)view).getLastVisiblePosition());});
+                onView(withText("Close")).check(matches(isCompletelyDisplayed()));capture("19-role-landscape-large-font");onView(withText("Close")).perform(click());
                 scenario.onActivity(a->{List<NativeImageShare.RankRow> ranks=new ArrayList<>();for(int i=0;i<75;i++)ranks.add(new NativeImageShare.RankRow(LONG_NAME+i,100-i,10,5,5,3,4));NativeImageShare.leaderboard(a,"Landscape large text",ranks);});
                 waitFor("3 Patti PRO - Rankings");onView(withText("Close")).check(matches(isCompletelyDisplayed()));onView(withText("Save Images")).check(matches(isCompletelyDisplayed()));onView(withText("Next")).check(matches(isCompletelyDisplayed())).perform(click());onView(withText("2 / 3")).check(matches(isDisplayed()));capture("20-share-landscape-large-font");onView(withText("Close")).perform(click());
                 }finally{
