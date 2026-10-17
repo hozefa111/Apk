@@ -77,6 +77,8 @@ class MainActivity : Activity() {
     private var previousLibraryAccess: Boolean? = null
     private var destroyed = false
     private var observerActive = false
+    // Never sort thousands of videos repeatedly while the user is still typing.
+    private val searchLater = Runnable { if (!destroyed) filterVideos() }
     private val refreshLater = Runnable { if (!destroyed && hasLibraryPermission()) scan() }
     private val mediaObserver = object : ContentObserver(handler) {
         override fun onChange(selfChange: Boolean) {
@@ -146,7 +148,8 @@ class MainActivity : Activity() {
                 query = s?.toString()?.trim().orEmpty()
                 findViewById<View>(R.id.clearSearch).visibility =
                     if (query.isBlank()) View.GONE else View.VISIBLE
-                filterVideos()
+                handler.removeCallbacks(searchLater)
+                handler.postDelayed(searchLater, 180)
             }
             override fun afterTextChanged(s: Editable?) = Unit
         })
@@ -345,11 +348,13 @@ class MainActivity : Activity() {
         val historyOrder = history.withIndex().associate { it.value to it.index }
         val cutoff = nowSeconds - 30L * 24L * 60L * 60L
         val playlistOrder = currentPlaylist?.let { collections.items(it) }
+        val playlistPositions = playlistOrder?.withIndex()?.associate { it.value to it.index }
+        val hiddenFolders = preferences.folders("hidden")
         val favorites = if (filter == Filter.FAVORITES) collections.favorites() else emptySet()
         val filtered = allVideos.asSequence()
-            .filter { !preferences.hasFolder("hidden", it.folder) }
+            .filter { it.folder !in hiddenFolders }
             .filter { chosenFolder == "All folders" || it.folder == chosenFolder }
-            .filter { playlistOrder == null || it.uri.toString() in playlistOrder }
+            .filter { playlistPositions == null || it.uri.toString() in playlistPositions }
             .filter { query.isBlank() || it.title.contains(query, ignoreCase = true) ||
                 it.folder.contains(query, ignoreCase = true) }
             .filter {
@@ -365,7 +370,9 @@ class MainActivity : Activity() {
                 }
             }
         visibleVideos = when {
-            playlistOrder != null -> filtered.sortedBy { playlistOrder.indexOf(it.uri.toString()) }
+            playlistPositions != null -> filtered.sortedBy {
+                playlistPositions[it.uri.toString()] ?: Int.MAX_VALUE
+            }
             filter == Filter.HISTORY -> filtered.sortedBy {
                 historyOrder[it.uri.toString()] ?: Int.MAX_VALUE
             }
@@ -626,6 +633,7 @@ class MainActivity : Activity() {
         chosenFolder = "All folders"
         filter = Filter.ALL
         search.setText("")
+        handler.removeCallbacks(searchLater)
         filterVideos()
         videos.scrollToPosition(0)
     }
@@ -672,6 +680,7 @@ class MainActivity : Activity() {
             .takeIf { it in folderOptions } ?: "All folders"
             else "All folders"
         search.setText("")
+        handler.removeCallbacks(searchLater)
         filterVideos()
         videos.scrollToPosition(0)
         if (next == Tab.SEARCH) {
@@ -723,13 +732,15 @@ class MainActivity : Activity() {
     }
 
     private fun updateAlbums() {
+        val hiddenFolders = preferences.folders("hidden")
+        val pinnedFolders = preferences.folders("pinned")
         albums = allVideos.asSequence()
-            .filter { !preferences.hasFolder("hidden", it.folder) }
+            .filter { it.folder !in hiddenFolders }
             .groupBy { it.folder }
             .map { (path, items) ->
                 val recent = items.maxByOrNull { it.modifiedSeconds } ?: items.first()
                 FolderAlbum(path, items.size, recent, items,
-                    preferences.hasFolder("pinned", path))
+                    path in pinnedFolders)
             }.let { a ->
                 when (albumSort) {
                     1 -> a.sortedWith(compareByDescending<FolderAlbum> { it.pinned }
@@ -758,6 +769,7 @@ class MainActivity : Activity() {
         preferences.lastFolder = album.path
         filter = Filter.ALL
         search.setText("")
+        handler.removeCallbacks(searchLater)
         filterVideos()
         videos.scrollToPosition(0)
     }
@@ -801,6 +813,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         destroyed = true
         handler.removeCallbacks(refreshLater)
+        handler.removeCallbacks(searchLater)
         ++scanGeneration
         executor.shutdownNow()
         adapter.dispose()
