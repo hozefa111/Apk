@@ -29,7 +29,6 @@ public final class NativeImageShare {
     private static final ExecutorService RENDERER=Executors.newSingleThreadExecutor();
     private NativeImageShare() {}
     private static final ThreadLocal<String> STYLE=new ThreadLocal<>();
-    private static List<Uri> pendingSave=Collections.emptyList();
     private static int accent(){String s=STYLE.get();return "emerald".equals(s)?0xFF57D9AC:"midnight".equals(s)?0xFF9FA8FF:GOLD;}
     private static int background(){String s=STYLE.get();return "emerald".equals(s)?0xFF071D18:"midnight".equals(s)?0xFF0A1028:BACKGROUND;}
     private static void style(Activity activity){STYLE.set(activity.getSharedPreferences("preferences",0).getString("share_style","classic"));}
@@ -328,8 +327,14 @@ public final class NativeImageShare {
     }
     private static void saveImages(Activity activity,List<Uri> images){
         if(android.os.Build.VERSION.SDK_INT<29){
-            pendingSave=new ArrayList<>(images);
-            activity.startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE),701);return;
+            org.json.JSONArray pending=new org.json.JSONArray();for(Uri image:images)pending.put(image.toString());
+            if(!activity.getSharedPreferences("image_exports",Activity.MODE_PRIVATE).edit().putString("pending",pending.toString()).commit()){
+                errorToast(activity,new IOException("Cannot preserve image export request. Please retry."));return;
+            }
+            try{activity.startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION),701);}
+            catch(Exception error){activity.getSharedPreferences("image_exports",Activity.MODE_PRIVATE).edit().remove("pending").commit();errorToast(activity,error);}
+            return;
         }
         RENDERER.execute(()->{
             List<Uri> created=new ArrayList<>();
@@ -345,20 +350,34 @@ public final class NativeImageShare {
                 }
                 for(Uri target:created){android.content.ContentValues values=new android.content.ContentValues();values.put(android.provider.MediaStore.Images.Media.IS_PENDING,0);activity.getContentResolver().update(target,values,null,null);}
                 activity.runOnUiThread(()->android.widget.Toast.makeText(activity,"Saved "+images.size()+" images to Pictures/3 Patti PRO",android.widget.Toast.LENGTH_LONG).show());
-            }catch(Exception error){for(Uri target:created)activity.getContentResolver().delete(target,null,null);errorToast(activity,error);}
+            }catch(Exception error){for(Uri target:created)try{activity.getContentResolver().delete(target,null,null);}catch(Exception cleanup){error.addSuppressed(cleanup);}errorToast(activity,error);}
         });
     }
     public static void onActivityResult(Activity activity,int request,int result,Intent data){
         if(request!=701)return;
-        List<Uri> sources=new ArrayList<>(pendingSave);pendingSave=Collections.emptyList();
-        if(result!=Activity.RESULT_OK||data==null||data.getData()==null)return;
+        android.content.SharedPreferences draft=activity.getSharedPreferences("image_exports",Activity.MODE_PRIVATE);
+        if(result!=Activity.RESULT_OK||data==null||data.getData()==null){draft.edit().remove("pending").commit();return;}
+        List<Uri> sources=new ArrayList<>();
+        try{
+            org.json.JSONArray pending=new org.json.JSONArray(draft.getString("pending","[]"));
+            for(int i=0;i<pending.length();i++){
+                Uri uri=Uri.parse(pending.getString(i));
+                if(!"content".equals(uri.getScheme())||!(activity.getPackageName()+".fileprovider").equals(uri.getAuthority()))throw new IOException("Invalid export image");
+                sources.add(uri);
+            }
+            if(sources.isEmpty())throw new IOException("Export images are unavailable. Open the preview and save again.");
+        }catch(Exception error){draft.edit().remove("pending").commit();errorToast(activity,error);return;}
         final Uri tree=data.getData();
         RENDERER.execute(()->{
+            List<Uri> created=new ArrayList<>();
             try{
                 Uri parent=android.provider.DocumentsContract.buildDocumentUriUsingTree(tree,android.provider.DocumentsContract.getTreeDocumentId(tree));
-                for(Uri source:sources){Uri target=android.provider.DocumentsContract.createDocument(activity.getContentResolver(),parent,"image/png","3patti-"+System.nanoTime()+".png");if(target==null)throw new IOException("Cannot create image");copy(activity,source,target);}
+                for(Uri source:sources){Uri target=android.provider.DocumentsContract.createDocument(activity.getContentResolver(),parent,"image/png","3patti-"+System.nanoTime()+".png");if(target==null)throw new IOException("Cannot create image");created.add(target);copy(activity,source,target);}
                 activity.runOnUiThread(()->android.widget.Toast.makeText(activity,"Saved "+sources.size()+" images",android.widget.Toast.LENGTH_LONG).show());
-            }catch(Exception error){errorToast(activity,error);}
+            }catch(Exception error){
+                for(Uri target:created)try{android.provider.DocumentsContract.deleteDocument(activity.getContentResolver(),target);}catch(Exception cleanup){error.addSuppressed(cleanup);}
+                errorToast(activity,error);
+            }finally{draft.edit().remove("pending").commit();}
         });
     }
     private static void errorToast(Activity activity,Exception ex){

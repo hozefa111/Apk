@@ -72,7 +72,12 @@ public class NativeNavigationTest {
                 int before=galleryCount();onView(withText("Save Images")).perform(click());long deadline=System.currentTimeMillis()+30000;
                 while(galleryCount()<before+3&&System.currentTimeMillis()<deadline)Thread.sleep(100);
                 org.junit.Assert.assertEquals("All three ranking pages must be saved to the gallery",before+3,galleryCount());
-            }else onView(withText("Close")).perform(click());
+            }else{
+                int before=folderImageCount();onView(withText("Save Images")).perform(click());
+                selectFolder();long deadline=System.currentTimeMillis()+30000;
+                while(folderImageCount()<before+3&&System.currentTimeMillis()<deadline)Thread.sleep(200);
+                org.junit.Assert.assertEquals("All three PNG pages must be saved through the actual folder picker",before+3,folderImageCount());
+            }
         }
     }
     private android.view.View findText(android.view.View view,String label){
@@ -98,6 +103,27 @@ public class NativeNavigationTest {
         try(java.io.InputStream in=new android.os.ParcelFileDescriptor.AutoCloseInputStream(descriptor);java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream()){
             byte[] buffer=new byte[1024];int count;while((count=in.read(buffer))!=-1)out.write(buffer,0,count);return out.toString("UTF-8").trim();
         }
+    }
+    private int folderImageCount()throws Exception{
+        String files=shell("find /sdcard/ -type f -name '3patti-*.png' 2>/dev/null");return files.isEmpty()?0:files.split("\\n").length;
+    }
+    private android.view.accessibility.AccessibilityNodeInfo findSystemNode(android.view.accessibility.AccessibilityNodeInfo node,String label){
+        if(node==null)return null;
+        if(node.isEnabled()&&(label.equalsIgnoreCase(String.valueOf(node.getText()))||label.equalsIgnoreCase(String.valueOf(node.getContentDescription()))))return node;
+        for(int i=0;i<node.getChildCount();i++){android.view.accessibility.AccessibilityNodeInfo found=findSystemNode(node.getChild(i),label);if(found!=null)return found;}return null;
+    }
+    private boolean clickSystem(String label){
+        android.view.accessibility.AccessibilityNodeInfo node=findSystemNode(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getUiAutomation().getRootInActiveWindow(),label);
+        while(node!=null){if(node.isClickable())return node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);node=node.getParent();}return false;
+    }
+    private void selectFolder()throws Exception{
+        long deadline=System.currentTimeMillis()+30000;boolean selected=false;
+        while(System.currentTimeMillis()<deadline){
+            if(clickSystem("SELECT")||clickSystem("Use this folder")){selected=true;break;}
+            clickSystem("Show roots");Thread.sleep(200);clickSystem("Downloads");Thread.sleep(300);
+        }
+        org.junit.Assert.assertTrue("System folder selector must allow choosing a writable folder",selected);
+        Thread.sleep(500);clickSystem("ALLOW");
     }
     @Test public void navigationAndSettingsRemainUsableWithLargeText()throws Exception{
         Assume.assumeTrue(BuildConfig.USE_EMULATORS);String original=shell("settings get system font_scale");

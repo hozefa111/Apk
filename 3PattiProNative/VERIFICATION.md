@@ -132,3 +132,15 @@ The follow-up stacks header actions and statistic rows at large font scales and
 fits complete navigation labels on one line. Redundant cached-state toasts are
 removed; the toolbar continues to show offline/connecting status. The new large-text
 regression asserts that the complete navigation label fits on one line.
+
+## Folder save and external sharing follow-up
+
+The previous verified application source was `0973807` (68 JVM tests and 24
+instrumentation executions, all passing). Further export verification now targets
+the actual API 26 system folder picker and a receiver installed in the separate
+test APK UID. The share test checks single/multiple intent payloads, ClipData,
+read grants and PNG decoding in that receiver. Android 26 folder save now preserves
+its pending URI list across process recreation, rejects an empty restored request,
+and deletes partially created files after a copy failure. Missing folder handlers
+and cleanup errors report an export failure instead of crashing. These follow-up
+changes require the new exact-commit CI results before certification.
