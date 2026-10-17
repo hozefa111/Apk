@@ -116,6 +116,12 @@ public class FirebaseGatewayEmulatorTest {
         int original=rounds.get().size();AtomicReference<byte[]> archive=new AtomicReference<>();CountDownLatch exported=new CountDownLatch(1);
         ready(()->gateway.exportBackup(bytes->{archive.set(bytes);exported.countDown();}));completed(exported,"large export");
         assertTrue(BackupArchive.validate(archive.get(),"demo-three-patti").size()>500);
+        JSONObject invalid=new JSONObject(new String(archive.get(),java.nio.charset.StandardCharsets.UTF_8));
+        JSONArray invalidDocs=invalid.getJSONArray("documents");
+        invalidDocs.getJSONObject(invalidDocs.length()-1).getJSONObject("fields").put("invalidInteger",new JSONObject().put("integerValue","not a number"));
+        byte[] invalidArchive=invalid.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);notice.set("");
+        ready(()->gateway.restoreBackup(invalidArchive));await(()->notice.get().startsWith("Not saved:"));
+        assertEquals(original,rounds.get().size());assertFalse(gateway.hasPendingBulkOperation());
         ready(()->{try{gateway.clearHistory(BackupArchive.fingerprint(archive.get(),"demo-three-patti"));}catch(Exception e){throw new RuntimeException(e);}});
         await(()->rounds.get().isEmpty()&&live.get()&&!busy.get());assertFalse(gateway.hasPendingBulkOperation());assertEquals(3,players.get().size());
         ready(()->gateway.restoreBackup(archive.get()));await(()->rounds.get().size()==original&&live.get()&&!busy.get());assertFalse(gateway.hasPendingBulkOperation());

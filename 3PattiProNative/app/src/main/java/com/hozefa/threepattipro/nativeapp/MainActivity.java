@@ -1598,7 +1598,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 try(java.io.InputStream in=getContentResolver().openInputStream(uri);java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream()){
                     if(in==null)throw new java.io.IOException("Cannot read backup");byte[] buffer=new byte[8192];int n;
                     while((n=in.read(buffer))!=-1){if(out.size()+n>16_000_000)throw new java.io.IOException("Backup exceeds 16 MB");out.write(buffer,0,n);}
-                    byte[] raw=out.toByteArray();boolean legacy=new org.json.JSONObject(new String(raw,java.nio.charset.StandardCharsets.UTF_8)).has("totalPlayers");
+                    byte[] raw=out.toByteArray();boolean legacy=BackupArchive.parseJson(raw).has("totalPlayers");
                     String project=BuildConfig.USE_EMULATORS?"demo-three-patti":"patti-pro-a61d8";
                     byte[] bytes=legacy?LegacyImport.convert(raw,project):raw;
                     List<org.json.JSONObject> docs=BackupArchive.validate(bytes,project);

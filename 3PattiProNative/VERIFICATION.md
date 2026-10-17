@@ -16,7 +16,7 @@ Repeat the read-only audit explicitly with:
 
 ## Automated checks
 
-Latest completed local run: **61 JVM tests passed, 0 failures/errors**; 840 HH
+Latest completed local run: **68 JVM tests passed, 0 failures/errors**; 840 HH
 scoring vectors are checked within the parity test. Debug/sandbox app and
 instrumentation APK compilation passed. Lint: **0 errors, 20 warnings**.
 `verifyReleaseSigning` was also exercised and correctly refused release without
@@ -105,7 +105,8 @@ full conflict preflight and local recovery snapshots. Settings can resume or exp
 stop remaining batches; unrelated writes stay locked while a journal is pending.
 Resuming compares live contents/versions, skipping ambiguous commits already applied.
 Recovery files use atomic writes and exports are validated against the import size limit.
-New unit and 501-record device tests require verification for the new source.
+Commit `3fb00da` passed all seven instrumentation tests on API 26/30/35
+(21 device executions), including 501-record rename/clear/restore and restart recovery.
 
 Session awards now use a view-independent HH-compatible calculator. Sixty-four
 synthetic cases execute the actual HH `endSession` function to generate expected
@@ -116,3 +117,10 @@ Share Studio lists all filtered rounds via pagination instead of only ten recent
 rounds, and paginates completed sessions. New instrumentation includes 2x system
 font scaling and long player names in share cards. Release builds now depend on
 the stable-signing guard automatically; unsigned release assembly is blocked.
+
+Portable archive preflight now validates actual typed values, integer range,
+timestamps, coordinates, bytes/references, map/array shapes, Firestore nesting,
+document IDs, Unicode and the 1 MiB document limit. Untrusted JSON is checked for
+UTF-8, recursion depth and trailing payloads before parsing. A malformed record
+after record 500 must reject before creating a journal or changing any data.
+Seven further JVM cases cover valid types and malformed/oversize input.
