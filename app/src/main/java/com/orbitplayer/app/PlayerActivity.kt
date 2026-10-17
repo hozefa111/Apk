@@ -16,6 +16,8 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.database.Cursor
 import android.media.AudioManager
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -40,7 +42,6 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.session.MediaSession
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlin.math.roundToInt
@@ -248,7 +249,7 @@ class PlayerActivity : Activity() {
         playerView.player = exo
         // Controls from wired/Bluetooth headsets are routed to this foreground player.
         // Background playback requires a separate MediaSessionService (not claimed here).
-        mediaSession = MediaSession.Builder(this, exo).build()
+        setupSystemMediaSession()
         if (BuildConfig.DEBUG) android.util.Log.i("OrbitPlayerQA", "MEDIA_SESSION_READY")
         prefs.edit().putString("last_played_uri", videoUri).apply()
         recordWatchHistory(videoUri)
@@ -286,6 +287,7 @@ class PlayerActivity : Activity() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                updateSystemPlaybackState()
                 updatePlayPauseButton()
                 if (isPlaying) scheduleAutoHide() else {
                     handler.removeCallbacks(hideControlsTask)
@@ -297,6 +299,8 @@ class PlayerActivity : Activity() {
                 if (BuildConfig.DEBUG && playbackState == Player.STATE_READY) {
                     android.util.Log.i("OrbitPlayerQA", "STATE_READY")
                 }
+                if (playbackState == Player.STATE_READY) updateSystemMetadata()
+                updateSystemPlaybackState()
                 updateProgress()
                 updatePlayPauseButton()
 
@@ -330,6 +334,65 @@ class PlayerActivity : Activity() {
         handler.removeCallbacks(progressUpdater)
         handler.post(progressUpdater)
         scheduleAutoHide()
+    }
+
+    /** Platform MediaSession works on Android 8+ without an extra coroutine dependency. */
+    private fun setupSystemMediaSession() {
+        mediaSession = MediaSession(this, "OrbitPlayerPro").apply {
+            setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or
+                MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
+            setCallback(object : MediaSession.Callback() {
+                override fun onPlay() {
+                    player?.play()
+                    updateSystemPlaybackState()
+                }
+                override fun onPause() {
+                    player?.pause()
+                    updateSystemPlaybackState()
+                }
+                override fun onSkipToNext() { switchQueue(1) }
+                override fun onSkipToPrevious() { switchQueue(-1) }
+                override fun onSeekTo(pos: Long) {
+                    player?.seekTo(pos.coerceAtLeast(0L))
+                    updateSystemPlaybackState()
+                }
+                override fun onStop() {
+                    player?.pause()
+                    updateSystemPlaybackState()
+                }
+            }, handler)
+            isActive = true
+        }
+        updateSystemMetadata()
+        updateSystemPlaybackState()
+    }
+
+    private fun updateSystemMetadata() {
+        mediaSession?.setMetadata(android.media.MediaMetadata.Builder()
+            .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, videoTitle)
+            .putLong(android.media.MediaMetadata.METADATA_KEY_DURATION,
+                (player?.duration ?: 0L).coerceAtLeast(0L))
+            .build())
+    }
+
+    private fun updateSystemPlaybackState() {
+        val exo = player ?: return
+        val state = when {
+            exo.playbackState == Player.STATE_ENDED -> PlaybackState.STATE_STOPPED
+            exo.isPlaying -> PlaybackState.STATE_PLAYING
+            exo.playbackState == Player.STATE_BUFFERING && exo.playWhenReady ->
+                PlaybackState.STATE_BUFFERING
+            else -> PlaybackState.STATE_PAUSED
+        }
+        val actions = PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
+            PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_SEEK_TO or
+            PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+            PlaybackState.ACTION_STOP
+        mediaSession?.setPlaybackState(PlaybackState.Builder()
+            .setActions(actions)
+            .setState(state, exo.currentPosition.coerceAtLeast(0L),
+                if (exo.isPlaying) exo.playbackParameters.speed else 0f)
+            .build())
     }
 
     private fun buildMediaItem(): MediaItem {
@@ -381,6 +444,7 @@ class PlayerActivity : Activity() {
         recordWatchHistory(videoUri)
         videoTitle = adjacent.title
         playerTitle.text = videoTitle
+        updateSystemMetadata()
         subtitleUri = null
         lastSavedPosition = if (userOptions.resume) savedProgress(videoUri) else 0L
         try {

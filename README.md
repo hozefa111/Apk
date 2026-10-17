@@ -21,7 +21,7 @@ This is a **native APK**, not a website packaged in a WebView. All local video p
 - Play All with next-video playback, repeat-one support, stable/persisted queues and recovery from unreadable files.
 - Native full-screen playback with bottom transport/timeline, touch lock, pinch/gesture seeking, volume and brightness gestures.
 - Playback speed, audio and subtitle tracks, external subtitle picker (SRT/ASS/SSA/VTT depending on Media3/device support), fit/crop/stretch and orientation.
-- Picture-in-picture, foreground MediaSession support for wired/Bluetooth headset playback controls, configurable settings, sleep timer and saved playback progress.
+- Picture-in-picture, foreground Android MediaSession support for wired/Bluetooth headset play/pause/next/previous controls, configurable settings, sleep timer and saved playback progress.
 - Android 13+ video permission flow, partial selected-video permission on Android 14+, and Android file picker.
 - Optional **user-initiated** GitHub update checks; other local playback is offline.
 
