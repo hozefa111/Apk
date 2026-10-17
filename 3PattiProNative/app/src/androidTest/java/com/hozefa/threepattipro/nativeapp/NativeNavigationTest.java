@@ -37,6 +37,12 @@ public class NativeNavigationTest {
             onView(withContentDescription("More options")).perform(click());onView(withText("Search")).perform(click());
             onView(withHint("Name, bid, result or session")).perform(typeText("Player"),androidx.test.espresso.action.ViewActions.closeSoftKeyboard());
             onView(withText("♣  Player a")).check(matches(isDisplayed()));capture("03-search");
+            // Simulate a second client's realtime edit while the user is typing.
+            org.junit.Assert.assertTrue(BuildConfig.USE_EMULATORS);
+            com.google.firebase.firestore.FirebaseFirestore store=com.google.firebase.firestore.FirebaseFirestore.getInstance(com.google.firebase.FirebaseApp.getInstance("three-patti-native"));
+            com.google.android.gms.tasks.Tasks.await(store.collection("players").document("a").update("name","Player a updated"),15,java.util.concurrent.TimeUnit.SECONDS);
+            waitFor("♣  Player a updated");onView(withHint("Name, bid, result or session")).check(matches(hasFocus())).check(matches(withText("Player")));
+            com.google.android.gms.tasks.Tasks.await(store.collection("players").document("a").update("name","Player a"),15,java.util.concurrent.TimeUnit.SECONDS);
             onView(withContentDescription("More options")).perform(click());onView(withText("Analytics")).perform(click());onView(withText("Table Analytics")).check(matches(isDisplayed()));capture("04-analytics");
             onView(withContentDescription("More options")).perform(click());onView(withText("Share Studio")).perform(click());onView(withText("CARD STYLE")).check(matches(isDisplayed()));capture("05-share-studio");
             onView(withContentDescription("More options")).perform(click());onView(withText("Settings")).perform(click());onView(withText("Compact round history")).check(matches(isDisplayed()));capture("06-settings");

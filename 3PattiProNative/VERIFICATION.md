@@ -54,6 +54,10 @@ Corrected commit `0df3607` passed all four instrumentation tests on each API 26,
 share preview flow. Subsequent ordering/layout fixes and screenshot/gallery
 coverage require another run for the final source; the initial failures are not
 counted as passes.
+A regression check also simulates a second client renaming a player during Search;
+results update without rebuilding the query field or losing focus. Gallery checks
+on API 29+ require all paginated images to be saved, and CI collects native screen
+captures for visual inspection.
 The local software-only Android emulator could not maintain its package service,
 so no successful local device run is claimed.
 

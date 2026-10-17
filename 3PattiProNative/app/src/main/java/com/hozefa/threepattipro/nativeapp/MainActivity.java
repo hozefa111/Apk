@@ -36,6 +36,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private AlertDialog authDialog;
     private android.content.SharedPreferences settings;
     private String rosterFilter="all",searchQuery="";
+    private Runnable refreshSearch;
     private String pendingRoundTimestamp=null,pendingRoundJson=null;
     private final android.os.Handler clock=new android.os.Handler(android.os.Looper.getMainLooper());
     private TextView sessionTimer;
@@ -130,7 +131,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(playing!=null && pendingRoundId==null) playing.retainAll(activeIds());
         // New rounds and sessions can arrive while the form is open. Update only
         // its score preview unless the player roster itself changed.
-        if(tab==2 && !rosterChanged && roundBidView!=null && roundPreviewSection!=null)
+        if(tab==6 && refreshSearch!=null)refreshSearch.run();
+        else if(tab==2 && !rosterChanged && roundBidView!=null && roundPreviewSection!=null)
             updateRoundForm();
         else render(false);
     }
@@ -372,7 +374,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     private void render(boolean reset) {
         if(content==null||navigation==null)return;
-        sessionTimer=null;
+        sessionTimer=null;refreshSearch=null;
         if(settings.getBoolean("keep_awake",false)&&activeSession()!=null)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         int prev=reset?0:scroll.getScrollY();
         content.removeAllViews();
@@ -1579,6 +1581,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             }
             results.addView(text(count+" results",12,MUTED,false));
         };
+        refreshSearch=find;
         input.setText(searchQuery);input.setSelection(input.length());
         input.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){} public void onTextChanged(CharSequence s,int a,int b,int c){searchQuery=s.toString();find.run();}public void afterTextChanged(android.text.Editable e){}});
         find.run();
