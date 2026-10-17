@@ -83,6 +83,10 @@ class FolderAdapter(
                 }
             }
         }
+        holder.more.contentDescription = "Options for ${album.displayName}"
+        holder.more.setOnClickListener {
+            holder.bindingAdapterPosition.takeIf { it in items.indices }?.let { onOptions(items[it]) }
+        }
         holder.itemView.setOnClickListener {
             holder.bindingAdapterPosition.takeIf { it in items.indices }?.let { onOpen(items[it]) }
         }
@@ -102,5 +106,6 @@ class FolderAdapter(
         val title: TextView = root.findViewById(R.id.folderTitle)
         val count: TextView = root.findViewById(R.id.folderCount)
         val pin: TextView = root.findViewById(R.id.folderPinned)
+        val more: View = root.findViewById(R.id.folderMore)
     }
 }
