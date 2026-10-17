@@ -6,7 +6,7 @@ Date: 2026-10-17 UTC.
 
 ## Production safety
 
-HH source checkout is unchanged. Production Firestore was accessed with GET only:
+HH source checkout is unchanged. The production schema/scoring audit used GET only:
 6 players, 324 rounds, 19 sessions. All 324 saved rounds matched HH scoring, with
 valid player/partner roles and bids. No account sign-in or production write was
 performed by development/tests. No private production snapshot is committed.
@@ -57,7 +57,8 @@ counted as passes.
 A regression check also simulates a second client renaming a player during Search;
 results update without rebuilding the query field or losing focus. Gallery checks
 on API 29+ require all paginated images to be saved, and CI collects native screen
-captures for visual inspection.
+captures for visual inspection. Gradle must retain test APKs until screenshot
+collection finishes; missing image artifacts now fail verification.
 The local software-only Android emulator could not maintain its package service,
 so no successful local device run is claimed.
 
