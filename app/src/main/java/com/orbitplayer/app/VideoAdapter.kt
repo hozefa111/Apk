@@ -115,6 +115,11 @@ class VideoAdapter(
                 }
             }
         }
+        holder.more.contentDescription = "Options for ${item.title}"
+        holder.more.setOnClickListener {
+            val current = holder.bindingAdapterPosition
+            if (current != RecyclerView.NO_POSITION && current < items.size) onLongPress(items[current])
+        }
         holder.itemView.setOnClickListener {
             val current = holder.bindingAdapterPosition
             if (current != RecyclerView.NO_POSITION && current < items.size) onOpen(items[current])
@@ -155,5 +160,6 @@ class VideoAdapter(
         val thumb: ImageView = view.findViewById(R.id.thumb)
         val glyph: TextView = view.findViewById(R.id.playGlyph)
         val watchProgress: ProgressBar = view.findViewById(R.id.watchProgress)
+        val more: View = view.findViewById(R.id.moreOptions)
     }
 }
