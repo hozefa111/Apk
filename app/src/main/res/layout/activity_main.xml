@@ -142,6 +142,9 @@
             <TextView android:id="@+id/filterFavorites" style="@style/OrbitLibraryChip"
                 android:layout_width="wrap_content" android:layout_height="36dp"
                 android:text="★ Favorites" />
+            <TextView android:id="@+id/formatFilter" style="@style/OrbitLibraryChip"
+                android:layout_width="wrap_content" android:layout_height="36dp"
+                android:text="Format  ▾" android:contentDescription="Filter videos by file type"/>
             <TextView android:id="@+id/filterProgress" style="@style/OrbitLibraryChip"
                 android:layout_width="wrap_content" android:layout_height="36dp"
                 android:text="Continue" />
@@ -154,9 +157,6 @@
             <TextView android:id="@+id/folderFilter" style="@style/OrbitLibraryChip"
                 android:layout_width="wrap_content" android:layout_height="36dp"
                 android:text="All folders  ▾" />
-            <TextView android:id="@+id/formatFilter" style="@style/OrbitLibraryChip"
-                android:layout_width="wrap_content" android:layout_height="36dp"
-                android:text="Format  ▾" android:contentDescription="Filter videos by file type"/>
         </LinearLayout>
     </HorizontalScrollView>
 

@@ -84,6 +84,22 @@ grep -F 'text="Add to playlist"' qa/video-options.xml >/dev/null || {
   echo "Video overflow menu did not expose playlist actions"; exit 1;
 }
 adb shell input keyevent 4
+# Exercise the real file type and video duration sort selectors.
+wait_for_ui "$PACKAGE:id/formatFilter"
+python3 scripts/tap_android_view.py "$PACKAGE:id/formatFilter"
+adb shell uiautomator dump /sdcard/orbit-formats.xml >/dev/null
+adb exec-out cat /sdcard/orbit-formats.xml > qa/format-choices.xml
+grep -F 'text="MP4"' qa/format-choices.xml >/dev/null || {
+  echo "Library format filter did not discover the actual MP4 video"; exit 1;
+}
+adb shell input keyevent 4
+python3 scripts/tap_android_view.py "$PACKAGE:id/btnSort"
+adb shell uiautomator dump /sdcard/orbit-sorts.xml >/dev/null
+adb exec-out cat /sdcard/orbit-sorts.xml > qa/sort-choices.xml
+grep -F 'text="Longest video first"' qa/sort-choices.xml >/dev/null || {
+  echo "Library duration sort is unavailable"; exit 1;
+}
+adb shell input keyevent 4
 python3 scripts/tap_android_view.py "$PACKAGE:id/title"
 for attempt in $(seq 1 25); do
   adb logcat -d -v brief > qa/gallery-player-logcat.txt
