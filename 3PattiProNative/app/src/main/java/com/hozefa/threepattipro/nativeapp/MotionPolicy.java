@@ -14,4 +14,9 @@ final class MotionPolicy {
         double f = Math.max(0, Math.min(1, fraction));
         return (int)Math.round(from + ((double)to - from) * f);
     }
+    static int deltaTop(int scoreTop,int scoreBottom,int height,int labelHeight,int gap) {
+        if(scoreTop-labelHeight-gap>=gap)return scoreTop-labelHeight-gap;
+        if(scoreBottom+gap+labelHeight<=height-gap)return scoreBottom+gap;
+        return -1; // Large fonts: keep the actual score readable instead of drawing over it.
+    }
 }

@@ -24,7 +24,7 @@ bounded to 64 simultaneous animators; scrolling never replays card-entry effects
 - Loading placeholders, refresh rotation, busy progress and validation feedback.
 - In-place player/role/result selection, bid counting and progressive form sections.
 - Live score counting, signed floating deltas, visible rank-row movement and
-  new-leader highlight. Only visible rows animate; actual final points remain the
+  new-leader highlight. Floating deltas occupy free space above/below the number, and are omitted when large fonts leave no room. Only visible rows animate; actual final points remain the
   accessibility/readable result after completion or cancellation.
 - Active-session pulse, confirmed-round checkmark, session winner/top-three reveal,
   award entry and bounded Canvas confetti with a Skip animation control. Reopening
@@ -49,7 +49,7 @@ rebuilding the screen. Backfilled/old/future-invalid rounds and recently restore
 
 ## Verification
 
-83 JVM tests pass locally, including motion policy, overflow-safe counting,
+85 JVM tests pass locally, including motion policy, overflow-safe counting,
 initial-cache/backfill/reconnect/background event guards and existing HH scoring
 and session vectors. Debug/sandbox app and instrumentation APK compilation and
 lint are run before device CI. New instrumentation exercises actual intermediate

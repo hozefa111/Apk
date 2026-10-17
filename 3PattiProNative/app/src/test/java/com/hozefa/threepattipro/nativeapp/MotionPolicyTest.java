@@ -42,4 +42,11 @@ public class MotionPolicyTest {
         assertEquals("-155",MotionPolicy.points(-155,true));
         assertEquals("310",MotionPolicy.points(310,false));
     }
+    @Test public void floatingDeltaUsesFreeSpaceAndNeverOverlapsTheScore() {
+        assertEquals(12,MotionPolicy.deltaTop(30,50,80,14,4));
+        assertEquals(34,MotionPolicy.deltaTop(8,30,70,18,4));
+    }
+    @Test public void largeFontWithoutFreeSpaceOmitsTheDecorativeDelta() {
+        assertEquals(-1,MotionPolicy.deltaTop(12,50,65,30,4));
+    }
 }

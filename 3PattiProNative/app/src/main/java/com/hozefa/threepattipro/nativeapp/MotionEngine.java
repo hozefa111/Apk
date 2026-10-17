@@ -239,9 +239,13 @@ final class MotionEngine {
         text.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);text.setClickable(false);
         text.measure(View.MeasureSpec.makeMeasureSpec(parent.getWidth(),View.MeasureSpec.AT_MOST),View.MeasureSpec.makeMeasureSpec((int)dp(26),View.MeasureSpec.AT_MOST));
         int[] childXY=new int[2],parentXY=new int[2];anchor.getLocationInWindow(childXY);parent.getLocationInWindow(parentXY);
-        int x=Math.max(0,childXY[0]-parentXY[0]+anchor.getWidth()-text.getMeasuredWidth()),y=Math.max(0,childXY[1]-parentXY[1]);
+        int scoreTop=childXY[1]-parentXY[1],scoreBottom=scoreTop+anchor.getHeight();
+        int x=Math.max(0,childXY[0]-parentXY[0]+anchor.getWidth()-text.getMeasuredWidth());
+        int y=MotionPolicy.deltaTop(scoreTop,scoreBottom,parent.getHeight(),text.getMeasuredHeight(),(int)dp(4));
+        if(y<0)return;
         text.layout(x,y,x+text.getMeasuredWidth(),y+text.getMeasuredHeight());parent.getOverlay().add(text);deltaCount++;
-        AnimatorSet set=new AnimatorSet();set.playTogether(ObjectAnimator.ofFloat(text,View.TRANSLATION_Y,0,-dp(20)),ObjectAnimator.ofFloat(text,View.ALPHA,1,0));set.setDuration(650);
+        float travel=y<scoreTop?-Math.min(dp(12),y-dp(2)):Math.min(dp(12),parent.getHeight()-y-text.getMeasuredHeight()-dp(2));
+        AnimatorSet set=new AnimatorSet();set.playTogether(ObjectAnimator.ofFloat(text,View.TRANSLATION_Y,0,travel),ObjectAnimator.ofFloat(text,View.ALPHA,1,0));set.setDuration(650);
         start(parent,set,()->overlay.getOverlay().remove(text));
     }
     void progress(ProgressBar bar,int target,boolean reveal) {
