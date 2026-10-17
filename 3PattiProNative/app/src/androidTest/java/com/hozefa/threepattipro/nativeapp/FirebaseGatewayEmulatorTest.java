@@ -43,6 +43,11 @@ public class FirebaseGatewayEmulatorTest {
         Assume.assumeTrue(BuildConfig.USE_EMULATORS);
         Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();assertTrue(context.getPackageName().endsWith(".sandbox"));
         for(String id:Arrays.asList("a","b","c"))request("PATCH","/players/"+id,new JSONObject().put("fields",new JSONObject().put("name",new JSONObject().put("stringValue","Player "+id)).put("active",new JSONObject().put("booleanValue",true))));
+        startGateway();
+    }
+    private void startGateway()throws Exception{
+        live.set(false);busy.set(false);admin.set(false);
+        Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
         CountDownLatch started=new CountDownLatch(1);
         InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{
             gateway=new FirebaseGateway(context,new FirebaseGateway.Listener(){
@@ -92,5 +97,43 @@ public class FirebaseGatewayEmulatorTest {
         ready(()->gateway.clearHistory(current));await(()->rounds.get().isEmpty()&&live.get()&&!busy.get());assertEquals(3,players.get().size());
         ready(()->gateway.restoreBackup(currentArchive.get()));await(()->rounds.get().size()==originalRounds&&live.get()&&!busy.get());
         assertTrue("Session history must also be restored",request("GET","/sessions/fixture-session",null).has("fields"));
+    }
+    @Test public void largeClearRestoreAndInterruptedCommitRecoverAfterRestart()throws Exception{
+        String root="projects/demo-three-patti/databases/(default)/documents/";
+        JSONObject fields=request("GET","/rounds/fixture-round",null).getJSONObject("fields");
+        JSONArray seed=new JSONArray();
+        for(int i=0;i<501;i++){
+            seed.put(new JSONObject().put("update",new JSONObject().put("name",root+"rounds/bulk-"+i).put("fields",fields)).put("currentDocument",new JSONObject().put("exists",false)));
+            if(seed.length()==400||i==500){request("POST",":commit",new JSONObject().put("writes",seed));seed=new JSONArray();}
+        }
+        await(()->rounds.get().stream().filter(r->String.valueOf(r.get("id")).startsWith("bulk-")).count()==501&&live.get()&&!busy.get());
+        Map<String,Object> player=players.get().stream().filter(p->"a".equals(p.get("id"))).findFirst().get();
+        ready(()->gateway.renamePlayer("a","Bulk renamed",new ArrayList<>(rounds.get()),String.valueOf(player.get("_updateTime"))));
+        await(()->rounds.get().stream().filter(r->String.valueOf(r.get("id")).startsWith("bulk-")&&"Bulk renamed".equals(r.get("hukumName"))).count()==501&&live.get()&&!busy.get());
+        Map<String,Object> renamed=players.get().stream().filter(p->"a".equals(p.get("id"))).findFirst().get();
+        ready(()->gateway.renamePlayer("a","Player a",new ArrayList<>(rounds.get()),String.valueOf(renamed.get("_updateTime"))));
+        await(()->rounds.get().stream().filter(r->String.valueOf(r.get("id")).startsWith("bulk-")&&"Player a".equals(r.get("hukumName"))).count()==501&&live.get()&&!busy.get());
+        int original=rounds.get().size();AtomicReference<byte[]> archive=new AtomicReference<>();CountDownLatch exported=new CountDownLatch(1);
+        ready(()->gateway.exportBackup(bytes->{archive.set(bytes);exported.countDown();}));completed(exported,"large export");
+        assertTrue(BackupArchive.validate(archive.get(),"demo-three-patti").size()>500);
+        ready(()->{try{gateway.clearHistory(BackupArchive.fingerprint(archive.get(),"demo-three-patti"));}catch(Exception e){throw new RuntimeException(e);}});
+        await(()->rounds.get().isEmpty()&&live.get()&&!busy.get());assertFalse(gateway.hasPendingBulkOperation());assertEquals(3,players.get().size());
+        ready(()->gateway.restoreBackup(archive.get()));await(()->rounds.get().size()==original&&live.get()&&!busy.get());assertFalse(gateway.hasPendingBulkOperation());
+        // Simulate process loss after a remote commit but before its local acknowledgement.
+        JSONArray deletes=new JSONArray();
+        for(Map<String,Object> r:rounds.get())if(String.valueOf(r.get("id")).startsWith("bulk-"))deletes.put(new JSONObject().put("delete",root+"rounds/"+r.get("id")).put("currentDocument",new JSONObject().put("updateTime",r.get("_updateTime"))));
+        String owner=com.google.firebase.auth.FirebaseAuth.getInstance(com.google.firebase.FirebaseApp.getInstance("three-patti-native")).getCurrentUser().getUid();
+        BulkWritePlan plan=BulkWritePlan.create("demo-three-patti",owner,"clear",deletes);
+        Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+        android.util.AtomicFile journal=new android.util.AtomicFile(new java.io.File(context.getFilesDir(),"pending-data-operation.json"));
+        java.io.FileOutputStream out=journal.startWrite();out.write(plan.bytes());out.getFD().sync();journal.finishWrite(out);
+        request("POST",":commit",new JSONObject().put("writes",plan.batch()));
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.stop());startGateway();assertTrue(gateway.hasPendingBulkOperation());
+        notice.set("");ready(()->gateway.patchDocument("players","a",FirebaseGateway.map("blockedBulkWrite",true),"Must not save"));
+        await(()->notice.get().contains("interrupted data operation"));
+        assertFalse(request("GET","/players/a",null).getJSONObject("fields").has("blockedBulkWrite"));
+        ready(()->gateway.resumeBulkOperation());
+        await(()->!gateway.hasPendingBulkOperation()&&rounds.get().stream().noneMatch(r->String.valueOf(r.get("id")).startsWith("bulk-"))&&live.get()&&!busy.get());
+        assertEquals(original-501,rounds.get().size());assertEquals(3,players.get().size());
     }
 }

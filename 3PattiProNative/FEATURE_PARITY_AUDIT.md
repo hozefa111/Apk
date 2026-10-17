@@ -12,14 +12,14 @@ See [verification record and release gates](VERIFICATION.md).
 | Round retry | Durable full payload/UUID, locked unconfirmed selections, Settings recovery, payload-checked reconciliation | Process death/network fault device coverage |
 | Scoring | Original formula, all bids, role combinations and results | 840 original-web vectors; no differences in 324 production records |
 | Dashboard/session | Table totals, active timer, empty-session confirmation, summary after save | Device/visual review |
-| Players | Active/benched grouping/filter, validation, edit/bench/restore/remove, atomic history rename | Atomic rename capped at 500 documents |
+| Players | Active/benched grouping/filter, validation, edit/bench/restore/remove, recoverable history rename | Multi-batch interruption/concurrent-change review |
 | Ranks/profile | Stable creation-order ties, medals, roles, streaks, win rate, best/worst, H2H, complete role histories | Visual and accessibility review |
 | Date filters | Sunday week; bounded month/year; inclusive custom days; DST-safe | Unit tests include 23/25-hour days |
 | Round/session history | Opponents, score deltas, durations and detailed summaries | Visual review and interaction matrix |
 | Session awards | HH zero-score hot-streak behavior; six badge types | Differential session-summary/device review |
 | Sharing | Round/rank/session PNGs, pages, wrapped award values, bounded preview, palettes, gallery/folder save | Real share targets and extreme names review |
-| Backup/restore | Typed JSON archive; restore missing records; reject conflicts atomically; recovery archives | Max 500 records per restore |
-| Clear All | Saved current backup required; two confirmations and typed CONFIRM; players retained | Max 500 rounds/sessions per atomic clear |
+| Backup/restore | Typed JSON archive; restore missing records; preflight conflicts; recovery archives and replay journal | 16 MB archive limit; large restores use recoverable batches |
+| Clear All | Saved current backup required; two confirmations and typed CONFIRM; players retained | Recoverable batches; completed batches persist if interrupted |
 | Legacy migration | Explicit import of HH 3PattiProState JSON, stable IDs, empty-roster guard | Cannot silently access browser localStorage |
 | Settings | Appearance, compact history, haptics, keep-awake, account and backup controls | Device review |
 | Search | Player, round, bid/result/date and session search | Large-history performance review |

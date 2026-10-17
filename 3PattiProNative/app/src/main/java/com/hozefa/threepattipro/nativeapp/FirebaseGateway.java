@@ -292,7 +292,8 @@ public final class FirebaseGateway {
     private CollectionSnapshot fetchCollection(String name) throws Exception {
         CollectionSnapshot result=new CollectionSnapshot();
         String next=null;
-        for(int page=0;page<20;page++) {
+        Set<String> pageTokens=new HashSet<>();
+        while(true) {
             String url=dbRoot + "/" + name + "?pageSize=500"
                     + (next==null?"":"&pageToken="+encoded(next));
             JSONObject data=jsonCall("GET",url,null,idToken);
@@ -309,8 +310,8 @@ public final class FirebaseGateway {
             }
             next=data.optString("nextPageToken","");
             if(next.isEmpty()) break;
+            if(!pageTokens.add(next))throw new IOException("Repeated Firebase page token. Refusing incomplete records.");
         }
-        if(next!=null&&!next.isEmpty())throw new IOException("Firestore history exceeds page limit. Refusing to show incomplete records.");
         return result;
     }
     private Map<String,Object> decodeFields(JSONObject fields) throws Exception {
@@ -367,8 +368,7 @@ public final class FirebaseGateway {
         return out;
     }
     /**
-     * Atomic rename: changing the player and the historical embedded names
-     * either ALL succeeds or NONE succeeds. Never partially rename Firebase.
+     * Version-checked rename. Large histories use the same recoverable journal as restore.
      */
     public void renamePlayer(String playerId,String newName,List<Map<String,Object>> rounds,String playerVersion) {
         final Map<String,String> expected=new HashMap<>(versions);
@@ -404,8 +404,6 @@ public final class FirebaseGateway {
                     edits.put("nonPartnerNames",names);
                 }
                 if(edits.isEmpty())continue;
-                if(operations.length()>=500)
-                    throw new IOException("Too many rounds for an atomic rename. No records changed.");
                 JSONObject update=new JSONObject();
                 update.put("name",documentRoot+"/rounds/"+rid);
                 update.put("fields",encodeFields(edits));
@@ -416,7 +414,7 @@ public final class FirebaseGateway {
                         .put("updateMask",new JSONObject().put("fieldPaths",fields))
                         .put("currentDocument",precondition(expected,"rounds/"+rid)));
             }
-            jsonCall("POST",dbRoot+":commit",new JSONObject().put("writes",operations),token);
+            startBulk("rename",operations,token);
         });
     }
     private String findRoundName(Map<String,Object> round,String idsKey,String namesKey,Object target){
@@ -447,6 +445,9 @@ public final class FirebaseGateway {
         write(success,action,null,null);
     }
     public void write(String success,Action action,Runnable onSuccess,Runnable onFailure) {
+        write(success,action,onSuccess,onFailure,false);
+    }
+    private void write(String success,Action action,Runnable onSuccess,Runnable onFailure,boolean resumeBulk) {
         if(!loggedIn()){
             notify("Please log in before saving changes");
             onUi(onFailure);
@@ -469,6 +470,7 @@ public final class FirebaseGateway {
                 if(idToken==null || signingOut)throw new IOException("Login expired");
                 if(!freshSnapshot || System.currentTimeMillis()-snapshotAt>60000)load();
                 if(!freshSnapshot)throw new IOException("Data changed. Refresh and retry.");
+                if(hasPendingBulkOperation()&&!resumeBulk)throw new IOException("An interrupted data operation needs attention in Settings before other changes");
                 action.run(idToken);
                 notify(success);
                 onUi(onSuccess);
@@ -497,6 +499,7 @@ public final class FirebaseGateway {
                 JSONObject backup=new JSONObject().put("format","3patti-firestore-v1").put("project",project)
                     .put("exportedAt",Instant.now().toString()).put("documents",new JSONArray(rawDocuments.values()));
                 byte[] bytes=backup.toString(2).getBytes(StandardCharsets.UTF_8);
+                BackupArchive.validate(bytes,project);
                 ui.post(()->{if(running)callback.ready(bytes);});
             }catch(Exception error){notify("Backup failed: "+error.getMessage());}
             finally{setBusy(false);}
@@ -518,20 +521,74 @@ public final class FirebaseGateway {
         JSONObject backup=new JSONObject().put("format","3patti-firestore-v1").put("project",project)
             .put("exportedAt",Instant.now().toString()).put("documents",new JSONArray(rawDocuments.values()));
         File folder=new File(context.getFilesDir(),"recovery");if(!folder.exists()&&!folder.mkdirs())throw new IOException("Cannot create recovery backup");
-        File target=new File(folder,"backup-"+System.currentTimeMillis()+".json");
-        try(FileOutputStream out=new FileOutputStream(target)){out.write(backup.toString().getBytes(StandardCharsets.UTF_8));out.getFD().sync();}
+        File target=new File(folder,"backup-"+System.currentTimeMillis()+"-"+UUID.randomUUID()+".json");
+        byte[] bytes=backup.toString().getBytes(StandardCharsets.UTF_8);BackupArchive.validate(bytes,project);
+        atomicSave(new android.util.AtomicFile(target),bytes);
+    }
+    private android.util.AtomicFile bulkFile(){return new android.util.AtomicFile(new File(context.getFilesDir(),"pending-data-operation.json"));}
+    private static void atomicSave(android.util.AtomicFile file,byte[] bytes)throws IOException{
+        FileOutputStream out=null;
+        try{out=file.startWrite();out.write(bytes);out.getFD().sync();file.finishWrite(out);}
+        catch(IOException error){if(out!=null)file.failWrite(out);throw error;}
+    }
+    public boolean hasPendingBulkOperation(){
+        File file=bulkFile().getBaseFile();return file.exists()||new File(file.getPath()+".bak").exists();
+    }
+    private String bulkOwner()throws IOException{
+        if(auth.getCurrentUser()==null)throw new IOException("Login required");return auth.getCurrentUser().getUid();
+    }
+    private void startBulk(String kind,JSONArray writes,String token)throws Exception{
+        BulkWritePlan plan=BulkWritePlan.create(project,bulkOwner(),kind,writes);
+        // Validate the complete plan before any remote write, including batch size limits.
+        plan=plan.reconcile(rawDocuments);
+        preserveBackup();atomicSave(bulkFile(),plan.bytes());runBulk(plan,token);
+    }
+    private void runBulk(BulkWritePlan plan,String token)throws Exception{
+        try{
+            while(plan.remaining.length()>0){
+                if(signingOut||auth.getCurrentUser()==null||!plan.owner.equals(bulkOwner()))throw new IOException("Login changed");
+                JSONArray batch=plan.batch();
+                jsonCall("POST",dbRoot+":commit",new JSONObject().put("writes",batch),token);
+                plan=plan.acknowledged(batch.length());
+                // If this save fails, replay reconciles already committed document contents.
+                atomicSave(bulkFile(),plan.bytes());
+            }
+            bulkFile().delete();
+            if(hasPendingBulkOperation())throw new IOException("Cannot finish local recovery journal");
+        }catch(Exception error){
+            throw new IOException("Data operation paused ("+(plan.total-plan.remaining.length())+"/"+plan.total+" confirmed). Retry in Settings. Recovery backup is saved. "+error.getMessage(),error);
+        }
+    }
+    public void resumeBulkOperation(){
+        write("Data operation completed",token->{
+            if(!hasPendingBulkOperation())throw new IOException("No interrupted operation");
+            byte[] bytes;try(FileInputStream in=bulkFile().openRead()){bytes=readAll(in);}
+            BulkWritePlan plan=BulkWritePlan.parse(bytes,project,bulkOwner());
+            load();if(!freshSnapshot)throw new IOException("Live data required");
+            plan=plan.reconcile(rawDocuments);atomicSave(bulkFile(),plan.bytes());runBulk(plan,token);
+        },null,null,true);
+    }
+    private static byte[] readAll(InputStream in)throws IOException{
+        ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int count;
+        while((count=in.read(buffer))!=-1)out.write(buffer,0,count);return out.toByteArray();
+    }
+    /** Explicitly stops further batches; completed remote batches remain in place. */
+    public void abandonBulkOperation(){
+        write("Pending operation stopped. Completed batches remain; use the recovery backup if needed.",token->{
+            byte[] bytes;try(FileInputStream in=bulkFile().openRead()){bytes=readAll(in);}
+            BulkWritePlan.parse(bytes,project,bulkOwner());bulkFile().delete();
+            if(hasPendingBulkOperation())throw new IOException("Cannot remove recovery journal");
+        },null,null,true);
     }
     public void clearHistory(String exportedFingerprint){
-        final Map<String,String> expected=new HashMap<>(versions);
         write("All rounds and sessions cleared",token->{
             if(!fingerprint().equals(exportedFingerprint))throw new IOException("Table changed since backup. Export a new backup first.");
+            Map<String,String> expected=new TreeMap<>(versions);
             JSONArray writes=new JSONArray();
             for(String path:expected.keySet())if(path.startsWith("rounds/")||path.startsWith("sessions/")){
                 writes.put(new JSONObject().put("delete",documentRoot+"/"+path).put("currentDocument",precondition(expected,path)));
             }
-            if(writes.length()>500)throw new IOException("Atomic clear supports up to 500 rounds and sessions. Nothing deleted.");
-            preserveBackup();
-            if(writes.length()>0)jsonCall("POST",dbRoot+":commit",new JSONObject().put("writes",writes),token);
+            startBulk("clear",writes,token);
         });
     }
     public void restoreBackup(byte[] bytes){restoreBackup(bytes,false);}
@@ -551,8 +608,7 @@ public final class FirebaseGateway {
                 writes.put(new JSONObject().put("update",new JSONObject().put("name",documentRoot+"/"+path).put("fields",doc.getJSONObject("fields")))
                     .put("currentDocument",new JSONObject().put("exists",false)));
             }
-            preserveBackup();
-            if(writes.length()>0)jsonCall("POST",dbRoot+":commit",new JSONObject().put("writes",writes),token);
+            startBulk("restore",writes,token);
         });
     }
     public static Map<String,Object> map(Object... v) {

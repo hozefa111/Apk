@@ -16,7 +16,7 @@ Repeat the read-only audit explicitly with:
 
 ## Automated checks
 
-Latest completed local run: **49 JVM tests passed, 0 failures/errors**; 840 HH
+Latest completed local run: **60 JVM tests passed, 0 failures/errors**; 840 HH
 scoring vectors are checked within the parity test. Debug/sandbox app and
 instrumentation APK compilation passed. Lint: **0 errors, 20 warnings**.
 `verifyReleaseSigning` was also exercised and correctly refused release without
@@ -26,7 +26,7 @@ the missing stable signing configuration.
 - JVM tests cover score validation, gameplay wins and streaks, zero-score session
   hot-streak behavior, head-to-head, month/year boundaries and 23/25-hour DST days,
   retry payload equality, durable JSON draft preservation, archive project/path
-  restrictions, duplicate records, atomic size limits, backup version fingerprints,
+  restrictions, duplicate records, large archives, backup version fingerprints,
   and HH legacy JSON conversion.
 - Debug and sandbox APKs plus sandbox instrumentation compile locally.
 - Android lint runs without error; remaining warnings include existing hardcoded
@@ -86,10 +86,23 @@ so no successful local device run is claimed.
    permission and optional FCM delivery verification. User confirmed Android
    registration/config is unavailable. No production configuration is created.
 4. Side-by-side HH/native visual inspection and full long-name/accessibility review.
-5. Operations exceeding 500 affected documents still fail safely before mutation;
-   full unbounded web parity is not claimed. Browser storage requires an explicit
-   JSON export/import; Android cannot read a browser's localStorage directly.
+5. Portable archives are limited to 16 MB. Large mutations use recoverable batches,
+   so completed batches persist on interruption; this is not whole-operation atomicity.
+   Browser storage requires an explicit JSON export/import; Android cannot read
+   a browser's localStorage directly.
 
 No final release APK is published or represented as complete. Debug/sandbox APKs
 are internal verification outputs. Native CI uploads reports rather than an
 incomplete APK.
+
+## Large-history recovery follow-up
+
+Baseline commit `6f6998d` passed Build Native APK, the API 29 read-only smoke test,
+and all six sandbox instrumentation tests on each API 26/30/35 (18 executions).
+The 500-document mutation and 10,000-document pagination caps are now removed.
+Rename/clear/restore/import use preconditioned batches, a durable per-account journal,
+full conflict preflight and local recovery snapshots. Settings can resume or explicitly
+stop remaining batches; unrelated writes stay locked while a journal is pending.
+Resuming compares live contents/versions, skipping ambiguous commits already applied.
+Recovery files use atomic writes and exports are validated against the import size limit.
+New unit and 501-record device tests require verification for the new source.

@@ -7,7 +7,6 @@ import java.io.IOException;
 /** Strict portable Firestore archive; never contains tokens or account credentials. */
 public final class BackupArchive {
     private BackupArchive(){}
-    public static final int MAX_DOCUMENTS=500;
     public static String path(JSONObject document,String project)throws Exception{
         String prefix="projects/"+project+"/databases/(default)/documents/";
         String name=document.getString("name");
@@ -28,7 +27,6 @@ public final class BackupArchive {
         JSONObject backup=new JSONObject(new String(bytes,java.nio.charset.StandardCharsets.UTF_8));
         if(!"3patti-firestore-v1".equals(backup.optString("format")) || !project.equals(backup.optString("project")))throw new IOException("Choose a 3 Patti PRO backup for this Firebase project");
         JSONArray documents=backup.getJSONArray("documents");
-        if(documents.length()>MAX_DOCUMENTS)throw new IOException("Atomic restore supports up to 500 records. No data changed.");
         List<JSONObject> result=new ArrayList<>();Set<String> paths=new HashSet<>();
         for(int i=0;i<documents.length();i++){
             JSONObject doc=documents.getJSONObject(i);String path=path(doc,project);

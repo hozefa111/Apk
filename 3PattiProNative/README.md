@@ -48,10 +48,16 @@ regenerate with `node scripts/generate_parity_vectors.js /path/to/hh/app.js`.
 
 Development/build/tests do not modify HH or production Firestore. Production audit
 uses GET only. UI mutations require a user action and a verified login/live state.
-Atomic rename, restore, migration and clear are limited to 500 documents. Larger
-operations fail before changing any record. The read path refuses histories over
-10,000 records rather than publishing partial data. This safety limit means full
-unbounded web parity is not claimed.
+Rename, restore, migration and clear use version-checked/create-only batches of
+at most 400 records and 6 MB. The complete plan is preflighted before starting.
+A private, atomic recovery journal is saved before remote writes and after each
+confirmed batch. Large operations are recoverable, not globally atomic: interruption
+can leave completed batches in place. Settings offers retry or an explicit stop;
+unrelated writes are blocked until this is resolved. Retry reconciles ambiguous
+commits without overwriting newer records and requires the initiating account.
+All pages are read; repeated server page tokens fail closed. Portable imports and
+recovery snapshots remain limited to 16 MB; export validation prevents creation of
+an unrestorable archive. Full unbounded web parity is not claimed.
 
 Recovery archives are app-private and are lost on uninstall. Export them through
 Settings for durable storage. Backups contain names and scores; no auth tokens.

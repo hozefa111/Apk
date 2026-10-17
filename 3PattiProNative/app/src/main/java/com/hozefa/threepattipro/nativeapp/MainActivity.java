@@ -158,6 +158,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     @Override public void busy(boolean b) {
         busy=b;
         updateToolbar();
+        if(!b&&tab==9&&api!=null&&shownPendingBulk!=api.hasPendingBulkOperation())render(false);
         if(tab==2&&roundSaveView!=null&&roundPreviewSection!=null&&roundHintView!=null)
             updateRoundForm();
     }
@@ -1191,6 +1192,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         name.setSelectAllOnFocus(true);
         pad(name,20,10,20,10);
         new AlertDialog.Builder(this).setTitle("Edit Player Name")
+                .setMessage("Names in past rounds will also change. Large histories use recoverable batches; retry interrupted changes from Settings.")
                 .setView(name).setNegativeButton("Cancel",null)
                 .setPositiveButton("Save",(d,w)->{
                     String newName=name.getText().toString().trim();
@@ -1643,7 +1645,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     private byte[] pendingExport;
     private String exportedFingerprint=null,pendingExportFingerprint=null;
+    private boolean shownPendingBulk;
     private void settingsPage(){
+        shownPendingBulk=api!=null&&api.hasPendingBulkOperation();
         title(content,"Settings","Your preferences and data safety");
         LinearLayout info=panel();line(info,"Account",loggedIn?"Admin":"Visitor",loggedIn?GREEN:MUTED);line(info,"Connection",liveConnected?"Live":"Offline",liveConnected?GREEN:RED);content.addView(info);gap(content,14);
         content.addView(button(loggedIn?"Log out":"Admin login",false,loggedIn?this::confirmLogout:this::loginDialog));gap(content,14);
@@ -1661,6 +1665,11 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(pendingRoundId!=null){content.addView(button("Retry unconfirmed round",true,this::retryPendingRound));gap(content,12);}
         content.addView(button("Discard local round draft",false,()->new AlertDialog.Builder(this).setTitle("Discard draft?").setMessage(pendingRoundId==null?"Remove your unsaved form selections?":"This round has an unconfirmed save. Refresh and check History before discarding; it may already be saved.").setNegativeButton("Keep",null).setPositiveButton("Discard draft",(d,w)->{resetRound();notice("Local draft discarded");}).show()));
         if(loggedIn){
+            if(shownPendingBulk){
+                gap(content,12);content.addView(text("An interrupted data operation needs attention. Completed batches stay saved. Other changes are paused until you retry or stop it.",13,GOLD,false));
+                gap(content,12);content.addView(button("Retry interrupted data operation",true,api::resumeBulkOperation));
+                gap(content,12);content.addView(button("Stop interrupted operation",false,()->new AlertDialog.Builder(this).setTitle("Stop remaining batches?").setMessage("Already completed batches stay in Firebase. Export the recovery backup before resolving a partial clear or restore. Stopping does not undo completed changes.").setNegativeButton("Keep pending",null).setPositiveButton("Stop remaining",(d,w)->api.abandonBulkOperation()).show()));
+            }
             gap(content,12);content.addView(button("Restore backup / import HH legacy JSON",false,()->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/json");startActivityForResult(intent,702);}));
             gap(content,12);content.addView(button("Clear all rounds and sessions",false,this::clearHistoryDialog));
         }
@@ -1684,7 +1693,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                     String project=BuildConfig.USE_EMULATORS?"demo-three-patti":"patti-pro-a61d8";
                     byte[] bytes=legacy?LegacyImport.convert(raw,project):raw;
                     List<org.json.JSONObject> docs=BackupArchive.validate(bytes,project);
-                    runOnUiThread(()->new AlertDialog.Builder(this).setTitle("Restore backup?").setMessage(docs.size()+" records. Only missing records will be created. Any conflict cancels the whole restore.").setNegativeButton("Cancel",null).setPositiveButton("Restore",(d,w)->api.restoreBackup(bytes,legacy)).show());
+                    runOnUiThread(()->new AlertDialog.Builder(this).setTitle("Restore backup?").setMessage(docs.size()+" records. Only missing records will be created. Conflicts found before starting cancel the restore. Large restores use recoverable batches; if interrupted, retry from Settings. Existing records are never overwritten.").setNegativeButton("Cancel",null).setPositiveButton("Restore",(d,w)->api.restoreBackup(bytes,legacy)).show());
                 }catch(Exception error){runOnUiThread(()->notice("Cannot restore: "+error.getMessage()));}
             }).start();
         }
@@ -1692,7 +1701,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     private void clearHistoryDialog(){
         if(exportedFingerprint==null){notice("Export and save a current JSON backup before clearing history.");return;}
-        new AlertDialog.Builder(this).setTitle("Clear all game data?").setMessage("This deletes all rounds and sessions. Players stay. Your exported backup can restore missing records.")
+        new AlertDialog.Builder(this).setTitle("Clear all game data?").setMessage("This deletes all rounds and sessions. Players stay. Your exported backup can restore missing records. Large clears run in recoverable batches; if interrupted, completed batches stay deleted and Settings offers retry.")
             .setNegativeButton("Cancel",null).setPositiveButton("Continue",(d,w)->{
                 EditText confirm=new EditText(this);confirm.setSingleLine(true);confirm.setHint("Type CONFIRM");
                 AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Final confirmation").setView(confirm).setNegativeButton("Cancel",null).setPositiveButton("Clear All",null).create();
