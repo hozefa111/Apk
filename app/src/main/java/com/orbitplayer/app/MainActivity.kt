@@ -47,6 +47,7 @@ class MainActivity : Activity() {
     private val preferences by lazy { OrbitSettings(this) }
     private val collections by lazy { OrbitCollections(this) }
     private var currentPlaylist: String? = null
+    private var advanced = OrbitSearchFilter()
     private lateinit var albumAdapter: FolderAdapter
     private var tab = Tab.FOLDERS
     private var albums = emptyList<FolderAlbum>()
@@ -116,8 +117,9 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.btnSettings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
-        findViewById<View>(R.id.btnPick).setOnClickListener { openDocument() }
+        findViewById<View>(R.id.btnPick).setOnClickListener { showOpenSourceMenu() }
         findViewById<View>(R.id.btnPlaylists).setOnClickListener { showPlaylists() }
+        findViewById<View>(R.id.btnAdvancedFilters).setOnClickListener { showAdvancedFilters() }
         videos.setItemViewCacheSize(8)
 
         findViewById<View>(R.id.btnRefresh).setOnClickListener {
@@ -213,6 +215,42 @@ class MainActivity : Activity() {
             else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
         requestPermissions(requested, requestLibrary)
+    }
+
+    private fun showOpenSourceMenu() {
+        val options = arrayOf("Choose local video", "Open secure video link (HTTPS)", "Browse a connected file provider", "Browse SMB2/SMB3 network share")
+        AlertDialog.Builder(this).setTitle("Open a video")
+            .setItems(options) { _, selected ->
+                when (selected) {
+                    0, 2 -> openDocument() // Android SAF supports installed SMB/drive document providers.
+                    3 -> startActivity(Intent(this, SmbBrowserActivity::class.java))
+                    1 -> {
+                        val field = EditText(this).apply {
+                            hint = "https://example.com/video.mp4"
+                            setSingleLine(true)
+                            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+                        }
+                        AlertDialog.Builder(this).setTitle("Secure network video")
+                            .setMessage("Supports direct HTTPS video files and HLS/DASH streams. An installed document provider can browse remote network folders.")
+                            .setView(field)
+                            .setNegativeButton("Cancel", null)
+                            .setPositiveButton("Play") { _, _ ->
+                                val url = NetworkVideoUrl.validated(field.text.toString())
+                                if (url == null) {
+                                    Toast.makeText(this, "Enter a valid HTTPS URL without login details", Toast.LENGTH_LONG).show()
+                                } else {
+                                    PlaybackQueue.replace(emptyList())
+                                    PlaybackQueue.persist(this)
+                                    val title = android.net.Uri.parse(url).lastPathSegment ?: "Network video"
+                                    startActivity(Intent(this, PlayerActivity::class.java).apply {
+                                        putExtra(PlayerActivity.EXTRA_URI, url)
+                                        putExtra(PlayerActivity.EXTRA_TITLE, title)
+                                    })
+                                }
+                            }.show()
+                    }
+                }
+            }.show()
     }
 
     private fun openDocument() {
@@ -334,6 +372,7 @@ class MainActivity : Activity() {
             .filter { !preferences.hasFolder("hidden", it.folder) }
             .filter { chosenFolder == "All folders" || it.folder == chosenFolder }
             .filter { playlistOrder == null || it.uri.toString() in playlistOrder }
+            .filter { advanced.matches(it) }
             .filter { query.isBlank() || it.title.contains(query, ignoreCase = true) ||
                 it.folder.contains(query, ignoreCase = true) }
             .filter {
@@ -374,7 +413,8 @@ class MainActivity : Activity() {
             filter == Filter.FAVORITES -> "No favorite videos yet. Long press any video to add one."
             else -> "Nothing matches this folder or search."
         }
-        status.text = "${visibleVideos.size} videos  ·  ${allVideos.size} total"
+        status.text = "${visibleVideos.size} videos  ·  ${allVideos.size} total" +
+            if (advanced.active) "  ·  FILTERED" else ""
         findViewById<TextView>(R.id.sectionTitle).text = when {
             currentPlaylist != null -> "Playlist: $currentPlaylist"
             filter == Filter.FAVORITES -> "Favorite Videos"
@@ -612,6 +652,41 @@ class MainActivity : Activity() {
         search.setText("")
         filterVideos()
         videos.scrollToPosition(0)
+    }
+
+    private fun showAdvancedFilters() {
+        val fields = arrayOf(
+            "File format · ${if (advanced.extension.isBlank()) "Any" else advanced.extension.uppercase()}",
+            "Minimum resolution · ${if (advanced.minimumHeight == 0) "Any" else "${advanced.minimumHeight}p"}",
+            "Duration · ${listOf("Any", "Under 5 min", "5–30 min", "30+ min")[advanced.durationGroup]}",
+            "File size · ${listOf("Any", "Under 100 MB", "Over 1 GB")[advanced.sizeGroup]}",
+            "Clear all filters"
+        )
+        AlertDialog.Builder(this).setTitle("Advanced video search")
+            .setItems(fields) { _, index ->
+                when (index) {
+                    0 -> pickSearchOption("Video format", listOf("Any","MP4","MKV","MOV","AVI","WEBM","3GP")) { selected ->
+                        advanced = advanced.copy(extension = if (selected == "Any") "" else selected.lowercase())
+                    }
+                    1 -> pickSearchOption("Minimum video resolution", listOf("Any","480p","720p","1080p","2160p")) {
+                        advanced = advanced.copy(minimumHeight = if (it == "Any") 0 else it.removeSuffix("p").toInt())
+                    }
+                    2 -> pickSearchOption("Duration", listOf("Any","Under 5 min","5–30 min","30+ min")) {
+                        advanced = advanced.copy(durationGroup = listOf("Any","Under 5 min","5–30 min","30+ min").indexOf(it))
+                    }
+                    3 -> pickSearchOption("File size", listOf("Any","Under 100 MB","Over 1 GB")) {
+                        advanced = advanced.copy(sizeGroup = listOf("Any","Under 100 MB","Over 1 GB").indexOf(it))
+                    }
+                    else -> { advanced = OrbitSearchFilter(); filterVideos() }
+                }
+            }.setNegativeButton("Close", null).show()
+    }
+
+    private fun pickSearchOption(title: String, options: List<String>, select: (String) -> Unit) {
+        AlertDialog.Builder(this).setTitle(title).setItems(options.toTypedArray()) { _, which ->
+            select(options[which])
+            filterVideos()
+        }.setNegativeButton("Cancel", null).show()
     }
 
     private fun showPreviousCrashReport() {

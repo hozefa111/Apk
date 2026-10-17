@@ -30,6 +30,9 @@ class OrbitSettings(context: Context) {
     var resume: Boolean
         get() = prefs.getBoolean("resume", true)
         set(value) = prefs.edit().putBoolean("resume", value).apply()
+    var backgroundPlayback: Boolean
+        get() = prefs.getBoolean("background_playback", false)
+        set(value) = prefs.edit().putBoolean("background_playback", value).apply()
     var autoplay: Boolean
         get() = prefs.getBoolean("autoplay", true)
         set(value) = prefs.edit().putBoolean("autoplay", value).apply()
@@ -54,6 +57,15 @@ class OrbitSettings(context: Context) {
     var gestureHoldSpeed: Boolean
         get() = prefs.getBoolean("gesture_hold_speed", true)
         set(value) = prefs.edit().putBoolean("gesture_hold_speed", value).apply()
+    var subtitleDelayMs: Long
+        get() = prefs.getLong("subtitle_delay_ms", 0L).coerceIn(-15000L, 15000L)
+        set(value) = prefs.edit().putLong("subtitle_delay_ms", value.coerceIn(-15000L,15000L)).apply()
+    var subtitleColor: Int
+        get() = prefs.getInt("subtitle_color", android.graphics.Color.WHITE)
+        set(value) = prefs.edit().putInt("subtitle_color", value).apply()
+    var subtitleBackground: Boolean
+        get() = prefs.getBoolean("subtitle_background", false)
+        set(value) = prefs.edit().putBoolean("subtitle_background", value).apply()
     var subtitleScale: Float
         get() = prefs.getFloat("subtitle_scale", 1f).coerceIn(0.75f,1.6f)
         set(value) = prefs.edit().putFloat("subtitle_scale", value.coerceIn(0.75f,1.6f)).apply()

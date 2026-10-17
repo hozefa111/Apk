@@ -2,6 +2,11 @@ package com.orbitplayer.app
 
 import android.app.Activity
 import android.app.Dialog
+import android.content.ComponentName
+import android.content.Context
+import android.content.ServiceConnection
+import android.os.IBinder
+import androidx.media3.common.MediaMetadata
 import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
 import android.graphics.Color
@@ -31,6 +36,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.media3.common.Timeline
+import androidx.media3.extractor.metadata.Chapter
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -89,9 +96,38 @@ class PlayerActivity : Activity() {
     private val userOptions by lazy { OrbitSettings(this) }
     private fun skipMs() = userOptions.seekSeconds * 1000L
     private var player: ExoPlayer? = null
+    private var bound = false
+    private var playbackService: OrbitPlaybackService? = null
+    private var playerListener: Player.Listener? = null
+    private val playbackConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, binder: IBinder) {
+            if (isFinishing || isDestroyed) return
+            val instance = binder as? OrbitPlaybackService.PlayerBinder ?: return
+            playbackService = instance.service
+            try {
+                preparePlayer(instance.player)
+            } catch (error: Exception) {
+                android.util.Log.e("OrbitPlayer", "Player session startup failed", error)
+                if (!isFinishing) AlertDialog.Builder(this@PlayerActivity)
+                    .setTitle("Player could not start")
+                    .setMessage(error.message ?: error.javaClass.simpleName)
+                    .setPositiveButton("Close") { _, _ -> finish() }
+                    .show()
+            }
+        }
+        override fun onServiceDisconnected(name: ComponentName) {
+            playbackService = null
+            playerView.player = null
+            player = null
+            playerListener = null
+        }
+    }
     private var videoUri = ""
     private var videoTitle = "Video"
     private var subtitleUri: Uri? = null
+    private var externalSubtitleUri: Uri? = null
+    private var subtitleTimeline: SubtitleTimeline? = null
+    private lateinit var externalSubtitle: TextView
     private var lastSavedPosition = 0L
     private var repeatOne = false
     private var resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
@@ -122,6 +158,8 @@ class PlayerActivity : Activity() {
         gestureHud = findViewById(R.id.gestureHud)
         gestureMeter = findViewById(R.id.gestureMeter)
         speedButton = findViewById(R.id.btnSpeed)
+        externalSubtitle = findViewById(R.id.externalSubtitle)
+        configureSubtitleAppearance()
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         videoUri = intent?.data?.toString()
             ?: intent?.getStringExtra(EXTRA_URI).orEmpty()
@@ -202,26 +240,21 @@ class PlayerActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
-        if (videoUri.isNotBlank()) {
-            try {
-                preparePlayer()
-            } catch (error: Exception) {
-                android.util.Log.e("OrbitPlayer", "Player startup failed", error)
-                AlertDialog.Builder(this)
-                    .setTitle("Player could not start")
-                    .setMessage((error.message ?: error.javaClass.simpleName).take(1200) + "\\n\\nPlease copy any error report shown after reopening the app.")
-                    .setPositiveButton("Close") { _, _ -> finish() }
-                    .setCancelable(false)
-                    .show()
-            }
+        if (videoUri.isNotBlank() && !bound) {
+            val intent = Intent(this, OrbitPlaybackService::class.java)
+                .setAction(OrbitPlaybackService.LOCAL_BIND_ACTION)
+            bound = bindService(intent, playbackConnection, Context.BIND_AUTO_CREATE)
         }
     }
 
-    private fun preparePlayer() {
+    private fun preparePlayer(exo: ExoPlayer) {
         if (player != null) return
-        val exo = ExoPlayer.Builder(this).build()
-        exo.setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, true)
-        exo.setHandleAudioBecomingNoisy(true)
+        val alreadyPlayingThisFile =
+            exo.currentMediaItem?.localConfiguration?.uri?.toString() == videoUri
+        if (!alreadyPlayingThisFile && exo.mediaItemCount > 0) {
+            exo.stop()
+            exo.clearMediaItems()
+        }
         player = exo
         playerView.player = exo
         prefs.edit().putString("last_played_uri", videoUri).apply()
@@ -236,13 +269,28 @@ class PlayerActivity : Activity() {
         exo.trackSelectionParameters = params.build()
         playerView.resizeMode = resizeMode
         exo.repeatMode = if (repeatOne) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
-        exo.addListener(object : Player.Listener {
+        val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 if (isFinishing || isDestroyed) return
                 AlertDialog.Builder(this@PlayerActivity)
                     .setTitle("Unable to play this video")
                     .setMessage("Decoder or file problem: ${error.errorCodeName}.\n\n" +
-                        "Orbit Pro uses the decoders available on your device. This codec might require an additional decoder.")
+                        "Orbit Pro uses Android-supported codecs. An uncommon codec may need another player.")
+                    .setNeutralButton("Open with another app") { _, _ ->
+                        val uri = Uri.parse(videoUri)
+                        if (uri.scheme != "orbit-smb") {
+                            runCatching {
+                                startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(uri, "video/*")
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }, "Choose video player"))
+                            }.onFailure {
+                                Toast.makeText(this@PlayerActivity, "No compatible video player found", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            Toast.makeText(this@PlayerActivity, "Private SMB streams cannot be shared with other apps", Toast.LENGTH_LONG).show()
+                        }
+                    }
                     .setPositiveButton("OK", null)
                     .show()
             }
@@ -272,11 +320,15 @@ class PlayerActivity : Activity() {
                     }
                 }
             }
-        })
+        }
+        playerListener = listener
+        exo.addListener(listener)
         try {
-            exo.setMediaItem(buildMediaItem(), lastSavedPosition.coerceAtLeast(0L))
-            exo.prepare()
-            exo.playWhenReady = userOptions.autoplay
+            if (!alreadyPlayingThisFile) {
+                exo.setMediaItem(buildMediaItem(), lastSavedPosition.coerceAtLeast(0L))
+                exo.prepare()
+                exo.playWhenReady = userOptions.autoplay
+            }
         } catch (ex: Exception) {
             AlertDialog.Builder(this)
                 .setTitle("Could not open video")
@@ -293,6 +345,7 @@ class PlayerActivity : Activity() {
 
     private fun buildMediaItem(): MediaItem {
         val item = MediaItem.Builder().setUri(Uri.parse(videoUri))
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(videoTitle).build())
         subtitleUri?.let { uri ->
             item.setSubtitleConfigurations(
                 listOf(MediaItem.SubtitleConfiguration.Builder(uri)
@@ -339,6 +392,9 @@ class PlayerActivity : Activity() {
         videoTitle = adjacent.title
         playerTitle.text = videoTitle
         subtitleUri = null
+        externalSubtitleUri = null
+        subtitleTimeline = null
+        externalSubtitle.visibility = View.GONE
         lastSavedPosition = if (userOptions.resume) savedProgress(videoUri) else 0L
         try {
             player?.apply {
@@ -445,6 +501,13 @@ class PlayerActivity : Activity() {
         if (requestCode == PICK_SUBTITLE && resultCode == RESULT_OK) {
             val uri = data?.data ?: return
             runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            if (subtitleMime(uri) == MimeTypes.APPLICATION_SUBRIP || subtitleMime(uri) == MimeTypes.TEXT_VTT) {
+                loadTimedExternalSubtitle(uri)
+                return
+            }
+            externalSubtitleUri = null
+            subtitleTimeline = null
+            externalSubtitle.visibility = View.GONE
             subtitleUri = uri
             val exo = player ?: return
             val pos = exo.currentPosition.coerceAtLeast(0L)
@@ -478,6 +541,8 @@ class PlayerActivity : Activity() {
         }
         action(R.id.actionTracks) { showTrackChooser() }
         action(R.id.actionInformation) { showVideoInfo() }
+        action(R.id.actionSubtitleSync) { showSubtitleSync() }
+        action(R.id.actionChapters) { showChapters() }
         action(R.id.actionSleep) { showSleepTimer() }
         action(R.id.actionRotate) { rotateVideo() }
         action(R.id.actionAspect) { cycleAspectRatio() }
@@ -512,6 +577,131 @@ class PlayerActivity : Activity() {
         scheduleAutoHide()
     }
 
+    private fun configureSubtitleAppearance() {
+        if (!::externalSubtitle.isInitialized) return
+        externalSubtitle.setTextColor(userOptions.subtitleColor)
+        externalSubtitle.textSize = 18f * userOptions.subtitleScale
+        externalSubtitle.setBackgroundColor(if (userOptions.subtitleBackground) 0xB3000000.toInt() else 0)
+    }
+
+    private fun renderTimedExternalSubtitle(positionMs: Long) {
+        if (!::externalSubtitle.isInitialized) return
+        val cue = subtitleTimeline?.textAt(positionMs, userOptions.subtitleDelayMs).orEmpty()
+        if (cue.isBlank()) {
+            if (externalSubtitle.visibility != View.GONE) externalSubtitle.visibility = View.GONE
+            return
+        }
+        if (externalSubtitle.text.toString() != cue) externalSubtitle.text = cue
+        externalSubtitle.visibility = View.VISIBLE
+        val params = externalSubtitle.layoutParams as FrameLayout.LayoutParams
+        val density = resources.displayMetrics.density
+        val newBottom = ((if (controlsVisible && !touchLocked) 182 else 25) * density).toInt()
+        if (params.bottomMargin != newBottom) {
+            params.bottomMargin = newBottom
+            externalSubtitle.layoutParams = params
+        }
+    }
+
+    /** Native cue tracks are untouched; only an external SRT or VTT cue index is shifted. */
+    private fun loadTimedExternalSubtitle(uri: Uri) {
+        externalSubtitleUri = uri
+        subtitleTimeline = null
+        externalSubtitle.visibility = View.GONE
+        Thread {
+            val decoded = runCatching {
+                val bytes = contentResolver.openInputStream(uri)?.use { input ->
+                    val out = java.io.ByteArrayOutputStream()
+                    val chunk = ByteArray(8192)
+                    while (out.size() <= 4 * 1024 * 1024) {
+                        val got = input.read(chunk)
+                        if (got < 0) break
+                        out.write(chunk, 0, got)
+                    }
+                    out.toByteArray()
+                } ?: error("Cannot read subtitle file")
+                require(bytes.size <= 4 * 1024 * 1024) { "Subtitle file exceeds 4 MB" }
+                SubtitleTimeline.parse(String(bytes, Charsets.UTF_8))
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed || externalSubtitleUri != uri) return@runOnUiThread
+                val timeline = decoded.getOrNull()
+                if (timeline == null || timeline.size == 0) {
+                    Toast.makeText(this, "No readable timed captions in this file", Toast.LENGTH_LONG).show()
+                    externalSubtitleUri = null
+                    return@runOnUiThread
+                }
+                subtitleTimeline = timeline
+                configureSubtitleAppearance()
+                val existing = player ?: return@runOnUiThread
+                val pos = existing.currentPosition
+                val playing = existing.playWhenReady
+                // Remove a previously attached native external text source, if present.
+                val hadNativeExternal = subtitleUri != null
+                subtitleUri = null
+                if (hadNativeExternal) {
+                    existing.setMediaItem(buildMediaItem(), pos)
+                    existing.prepare()
+                    existing.playWhenReady = playing
+                }
+                existing.trackSelectionParameters = existing.trackSelectionParameters.buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
+                renderTimedExternalSubtitle(pos)
+                Toast.makeText(this, "${timeline.size} captions loaded · Timing adjustable", Toast.LENGTH_SHORT).show()
+            }
+        }.start()
+    }
+
+    private fun showSubtitleSync() {
+        if (subtitleTimeline == null) {
+            AlertDialog.Builder(this).setTitle("Subtitle timing")
+                .setMessage("Live timing shift works with an external SRT or WebVTT file. Select SUBS first. Embedded subtitle delay is not supported by the current Media3 renderer.")
+                .setPositiveButton("Choose subtitles") { _, _ -> chooseSubtitle() }
+                .setNegativeButton("Close", null).show()
+            return
+        }
+        val options = arrayOf("−1.0 second", "−0.25 second", "+0.25 second", "+1.0 second", "Reset to zero", "Turn off external captions")
+        AlertDialog.Builder(this).setTitle("Subtitle timing · ${userOptions.subtitleDelayMs} ms")
+            .setItems(options) { _, which ->
+                val delta = longArrayOf(-1000L,-250L,250L,1000L,0L,0L)[which]
+                when(which) {
+                    4 -> userOptions.subtitleDelayMs = 0L
+                    5 -> { subtitleTimeline = null; externalSubtitleUri = null }
+                    else -> userOptions.subtitleDelayMs += delta
+                }
+                renderTimedExternalSubtitle(player?.currentPosition ?: 0L)
+                notifyGesture("Caption offset: ${userOptions.subtitleDelayMs} ms")
+            }.setNegativeButton("Close", null).show()
+    }
+
+    private fun showChapters() {
+        val exo = player ?: return
+        val entries = ArrayList<Pair<String, Long>>()
+        val offsetMs = if (exo.currentTimeline.isEmpty) 0L else
+            exo.currentTimeline.getWindow(exo.currentMediaItemIndex, Timeline.Window())
+                .positionInFirstPeriodUs / 1000L
+        for (group in exo.currentTracks.groups) {
+            for (i in 0 until group.length) {
+                val metadata = group.getTrackFormat(i).metadata ?: continue
+                for (k in 0 until metadata.length()) {
+                    val chapter = metadata[k] as? Chapter ?: continue
+                    if (chapter.isHidden) continue
+                    val start = (chapter.startTimeMs - offsetMs).coerceAtLeast(0L)
+                    entries.add(Pair("${chapter.title?.toString() ?: "Chapter ${entries.size + 1}"}  ·  ${formatTime(start)}", start))
+                }
+            }
+        }
+        val unique = entries.distinctBy { it.second }.sortedBy { it.second }
+        if (unique.isEmpty()) {
+            Toast.makeText(this, "No embedded chapters found in this video", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this).setTitle("Chapters · ${unique.size}")
+            .setItems(unique.map { it.first }.toTypedArray()) { _, selected ->
+                exo.seekTo(unique[selected].second)
+                showControls()
+            }.setNegativeButton("Close", null).show()
+    }
+
     private fun showVideoInfo() {
         val exo = player ?: return
         val size = exo.videoSize
@@ -544,20 +734,8 @@ class PlayerActivity : Activity() {
         val values = intArrayOf(0, 15, 30, 45, 60, 90)
         AlertDialog.Builder(this).setTitle("Sleep timer")
             .setSingleChoiceItems(options, values.indexOf(sleepTimerMinutes).coerceAtLeast(0)) { dialog, which ->
-                sleepTimerRunnable?.let { handler.removeCallbacks(it) }
-                sleepTimerRunnable = null
                 sleepTimerMinutes = values[which]
-                if (sleepTimerMinutes > 0) {
-                    val task = Runnable {
-                        player?.pause()
-                        sleepTimerMinutes = 0
-                        sleepTimerRunnable = null
-                        showControls()
-                        notifyGesture("Sleep timer finished")
-                    }
-                    sleepTimerRunnable = task
-                    handler.postDelayed(task, sleepTimerMinutes * 60_000L)
-                }
+                playbackService?.setSleepTimer(sleepTimerMinutes)
                 notifyGesture(if (sleepTimerMinutes > 0) "Timer: $sleepTimerMinutes min" else "Sleep timer off")
                 dialog.dismiss()
             }.setNegativeButton("Cancel", null).show()
@@ -704,6 +882,7 @@ class PlayerActivity : Activity() {
         if (!::seekBar.isInitialized) return
         val duration = exo.duration
         val position = exo.currentPosition.coerceAtLeast(0L)
+        renderTimedExternalSubtitle(position)
         if (duration > 0L) {
             val totalText = if (showRemainingTime) "−" + formatTime((duration - position).coerceAtLeast(0L))
                 else formatTime(duration)
@@ -891,17 +1070,34 @@ class PlayerActivity : Activity() {
         savePosition()
         holdSpeedRestore?.let { player?.setPlaybackSpeed(it) }
         holdSpeedRestore = null
+        val active = player
         playerView.player = null
-        player?.release()
+        playerListener?.let { active?.removeListener(it) }
+        playerListener = null
+        if (active != null && !userOptions.backgroundPlayback) {
+            active.pause()
+            active.stop()
+            active.clearMediaItems()
+        }
         player = null
+        playbackService = null
+        if (bound) {
+            unbindService(playbackConnection)
+            bound = false
+        }
         super.onStop()
     }
 
     override fun onDestroy() {
-        // PiP may bypass normal onStop cleanup on some devices.
+        // The playback session owns the decoder; never release it from an Activity.
         playerView.player = null
-        player?.release()
+        playerListener?.let { player?.removeListener(it) }
+        playerListener = null
         player = null
+        if (bound) {
+            unbindService(playbackConnection)
+            bound = false
+        }
         sleepTimerRunnable?.let { handler.removeCallbacks(it) }
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()

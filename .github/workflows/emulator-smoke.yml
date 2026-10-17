@@ -1,5 +1,10 @@
 name: Emulator Playback Smoke Test
 
+# Each new PR revision supersedes unfinished smoke/compile runs from its predecessor.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main]
@@ -77,12 +82,16 @@ jobs:
             adb shell input keyevent 4
             adb shell content query --uri content://media/external/video/media --projection _id:_display_name > media-rows.txt
             grep -F 'orbit_smoke.mp4' media-rows.txt
-            adb shell am start -n com.orbitplayer.app/.PlayerActivity --es video_uri "content://media/external/video/media/$(grep -F 'orbit_smoke.mp4' media-rows.txt | sed -E 's/.*_id=([0-9]+).*/\1/' | head -1 | tr -d '\r')"
+            adb shell pm list packages | grep -F com.orbitplayer.app
+            adb shell cmd package resolve-activity --brief -n com.orbitplayer.app/.PlayerActivity
+            adb shell am start -W -n com.orbitplayer.app/.PlayerActivity --es video_uri "content://media/external/video/media/$(grep -F 'orbit_smoke.mp4' media-rows.txt | sed -E 's/.*_id=([0-9]+).*/\1/' | head -1 | tr -d '\r')"
             sleep 8
             adb shell dumpsys activity activities > activity-state.txt
             adb logcat -d -v time > emulator-logcat.txt
             adb shell input tap 180 400 || true
             sleep 1
+            python3 scripts/audit_emulator_ui.py
+            adb shell dumpsys media_session > media-session-state.txt || true
             adb shell screencap -p /sdcard/Download/orbit_screenshot.png || true
             adb pull /sdcard/Download/orbit_screenshot.png orbit-smoke-screen.png || true
             adb shell settings put system accelerometer_rotation 0 || true
@@ -104,6 +113,7 @@ jobs:
             media-rows.txt
             orbit-settings-screen.png
             settings-activity.txt
+            media-session-state.txt
             activity-state.txt
             orbit-smoke-screen.png
             orbit-landscape-screen.png

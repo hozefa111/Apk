@@ -1,0 +1,50 @@
+name: Orbit SMB integration (no APK release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/src/main/java/com/orbitplayer/app/Smb**'
+      - 'app/src/test/java/com/orbitplayer/app/SmbIntegrationTest.kt'
+      - '.github/workflows/smb-integration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smb-protocol-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android SDK components
+        run: |
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Create read-only SMB2/3 test share
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y samba
+          sudo useradd -M -s /usr/sbin/nologin orbitci
+          printf 'orbitpass\norbitpass\n' | sudo smbpasswd -s -a orbitci
+          sudo mkdir -p /tmp/orbit-smb
+          printf '0123456789-Media3-test-content' | sudo tee /tmp/orbit-smb/sample.mp4
+          sudo chmod -R a+rX /tmp/orbit-smb
+          printf '\n[OrbitTest]\npath = /tmp/orbit-smb\nbrowseable = yes\nread only = yes\nvalid users = orbitci\n' | sudo tee -a /etc/samba/smb.conf
+          sudo smbd -D
+          sleep 2
+      - name: Run SMB protocol integration test
+        env:
+          ORBIT_TEST_SMB: '1'
+        run: gradle --no-daemon :app:testDebugUnitTest --tests 'com.orbitplayer.app.SmbIntegrationTest'

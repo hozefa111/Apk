@@ -28,6 +28,12 @@
             android:text="Audio &amp; subtitle tracks"/>
         <TextView android:id="@+id/actionInformation" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="51dp"
             android:text="Video information"/>
+        <TextView android:id="@+id/actionSubtitleSync" style="@style/OrbitProSheetAction"
+            android:layout_width="match_parent" android:layout_height="51dp"
+            android:text="External subtitle timing and style"/>
+        <TextView android:id="@+id/actionChapters" style="@style/OrbitProSheetAction"
+            android:layout_width="match_parent" android:layout_height="51dp"
+            android:text="Video chapters"/>
         <TextView android:id="@+id/actionSleep" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="51dp"
             android:text="Sleep timer"/>
         <TextView android:id="@+id/actionRotate" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="51dp"

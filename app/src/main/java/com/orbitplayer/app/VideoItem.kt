@@ -9,5 +9,7 @@ data class VideoItem(
     val durationMs: Long,
     val sizeBytes: Long,
     val folder: String,
-    val modifiedSeconds: Long
+    val modifiedSeconds: Long,
+    val width: Int = 0,
+    val height: Int = 0
 )
