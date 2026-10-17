@@ -465,7 +465,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             });
         }
         scroll.post(()->scroll.scrollTo(0,prev));
-        if(screenEntry)motion.enter(content,Integer.compare(tab,oldTab));
+        if(screenEntry){motion.enter(content,Integer.compare(tab,oldTab));motion.staged(content);}
         else if(scoreMotion!=null)motion.reconcile(content,scoreMotion);
     }
     private void home() {
@@ -1094,12 +1094,13 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     private void updateRoundChip(TextView view,String label,boolean selected,boolean gold){
         if(view==null)return;
-        motion.selection(view,selected);
+        boolean loss=view==roundLoseView;
+        motion.selection(view,selected,loss?RED:gold?GOLD:GREEN);
         view.setText(label);
-        view.setTextColor(selected?(gold?GOLD:GREEN):WHITE);
+        view.setTextColor(selected?(loss?RED:gold?GOLD:GREEN):WHITE);
         view.setTypeface(Typeface.create("sans-serif",selected?Typeface.BOLD:Typeface.NORMAL));
-        view.setBackground(shape(selected?(gold?0xFF60492E:0xFF1A4B43):PANEL2,
-                12,selected?(gold?GOLD:GREEN):BORDER));
+        view.setBackground(shape(selected?(loss?0xFF4B2426:gold?0xFF60492E:0xFF1A4B43):PANEL2,
+                12,selected?(loss?RED:gold?GOLD:GREEN):BORDER));
     }
     private void updateRoundForm(){
         if(roundBidView==null||tab!=2)return;
@@ -1233,7 +1234,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private void showRoundSaved(Map<String,Object> preview,boolean celebrate){
         LinearLayout display=column();pad(display,22,16,22,16);
         TextView check=text("✓  SAVED",25,"win".equals(str(preview,"result"))?GREEN:GOLD,true);check.setGravity(Gravity.CENTER);display.addView(check);
-        if(celebrate){motion.enter(check,0);motion.staged(display);}
+        gap(display,10);TextView result=text("win".equals(str(preview,"result"))?"Hukum Win":"Hukum Lose",16,"win".equals(str(preview,"result"))?GREEN:RED,true);result.setGravity(Gravity.CENTER);display.addView(result);
+        if(celebrate)motion.staged(display);
         new MotionDialogBuilder(this,motion).setTitle("Round saved successfully").setMessage("Your round is saved. Share its image?").setView(display)
             .setNegativeButton("Not Now",null).setPositiveButton("Share Result",(d,w)->shareRound(preview)).show();
     }

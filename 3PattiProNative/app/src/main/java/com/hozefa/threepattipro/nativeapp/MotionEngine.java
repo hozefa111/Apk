@@ -156,10 +156,10 @@ final class MotionEngine {
         ObjectAnimator scale=ObjectAnimator.ofPropertyValuesHolder(view,PropertyValuesHolder.ofFloat(View.SCALE_X,0.97f,1f),PropertyValuesHolder.ofFloat(View.SCALE_Y,0.97f,1f));
         scale.setDuration(160);start(view,scale,()->{view.setScaleX(1);view.setScaleY(1);});
     }
-    void selection(View view, boolean selected) {
+    void selection(View view, boolean selected, int color) {
         boolean changed=view.isSelected()!=selected;
         view.setSelected(selected);
-        if(changed&&selected&&view.isAttachedToWindow()) { tap(view);highlight(view,0xFFf6d365); }
+        if(changed&&selected&&view.isAttachedToWindow()) { tap(view);highlight(view,color); }
     }
     void show(View view, boolean shown) {
         boolean reveal=shown&&view.getVisibility()!=View.VISIBLE;

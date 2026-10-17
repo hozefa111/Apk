@@ -58,6 +58,9 @@ public class NativeNavigationTest {
             onView(withText("Round")).perform(click());capture("07-round-form");
             onView(withContentDescription("Hukum Player a")).perform(scrollTo(),click());
             onView(withContentDescription("Partner Player b")).perform(scrollTo(),click());
+            onView(withText("✕   Hukum Lose")).perform(scrollTo(),click()).check((view,error)->{if(error!=null)throw error;org.junit.Assert.assertEquals("Loss selection must retain its red result feedback",0xFFE74C3C,((android.widget.TextView)view).getCurrentTextColor());});
+            onView(withText("-155")).perform(scrollTo()).check(matches(isDisplayed()));
+            onView(withText("-78")).perform(scrollTo()).check(matches(isDisplayed()));
             onView(withText("✓   Hukum Win")).perform(scrollTo(),click());
             onView(withText("+310")).perform(scrollTo()).check(matches(isDisplayed()));
             onView(withText("0")).perform(scrollTo()).check(matches(isDisplayed()));
