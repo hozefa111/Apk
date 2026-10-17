@@ -13,9 +13,10 @@ public class NativeNavigationTest {
     }
     private void capture(String name)throws Exception{
         android.app.Instrumentation instrumentation=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation();
+        Thread.sleep(3800); // Allow transient Android toasts to leave the captured frame.
         instrumentation.waitForIdleSync();android.graphics.Bitmap screenshot=instrumentation.getUiAutomation().takeScreenshot();
         if(screenshot==null)throw new AssertionError("Screenshot unavailable");
-        java.io.File directory=new java.io.File(instrumentation.getTargetContext().getExternalFilesDir(null),"verification");
+        java.io.File directory=new java.io.File(instrumentation.getTargetContext().getFilesDir(),"verification");
         if(!directory.exists()&&!directory.mkdirs())throw new java.io.IOException("Cannot create screenshot directory");
         try(java.io.FileOutputStream output=new java.io.FileOutputStream(new java.io.File(directory,name+".png"))){screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG,100,output);}finally{screenshot.recycle();}
     }
@@ -58,8 +59,10 @@ public class NativeNavigationTest {
             onView(withContentDescription("Hukum Player a")).perform(scrollTo(),click());
             onView(withContentDescription("Partner Player b")).perform(scrollTo(),click());
             onView(withText("✓   Hukum Win")).perform(scrollTo(),click());
-            onView(withText("+310")).perform(scrollTo()).check(matches(isDisplayed()));capture("08-score-preview");
-            onView(withText("✓  Save Round to Firebase")).perform(scrollTo(),click());onView(withText("Save Round")).perform(click());
+            onView(withText("+310")).perform(scrollTo()).check(matches(isDisplayed()));
+            onView(withText("0")).perform(scrollTo()).check(matches(isDisplayed()));
+            onView(withText("✓  Save Round to Firebase")).perform(scrollTo());capture("08-score-preview");
+            onView(withText("✓  Save Round to Firebase")).perform(click());onView(withText("Save Round")).perform(click());
             waitForDialog("Round saved successfully");onView(withText("Share Result")).perform(click());waitForDialog("3 Patti PRO - Round Result");capture("09-share-round");onView(withText("Close")).perform(click());
             scenario.onActivity(activity->{java.util.List<NativeImageShare.RankRow> rows=new java.util.ArrayList<>();for(int i=0;i<75;i++)rows.add(new NativeImageShare.RankRow("Synthetic Player "+i,100-i,10,5,5,3,4));NativeImageShare.leaderboard(activity,"Synthetic pagination test",rows);});
             waitForDialog("3 Patti PRO - Rankings");onView(withText("1 / 3")).check(matches(isDisplayed()));onView(withText("Next")).perform(click());onView(withText("2 / 3")).check(matches(isDisplayed()));capture("10-share-ranks-page-2");

@@ -58,7 +58,10 @@ A regression check also simulates a second client renaming a player during Searc
 results update without rebuilding the query field or losing focus. Gallery checks
 on API 29+ require all paginated images to be saved, and CI collects native screen
 captures for visual inspection. Gradle must retain test APKs until screenshot
-collection finishes; missing image artifacts now fail verification.
+collection finishes; missing image artifacts now fail verification. Captures use
+app-private files and `run-as` so Android 11 scoped storage does not block retrieval.
+Visual inspection found an unsupported card-brand glyph and ambiguous zero-score
+dashes; the brand now uses supported text and score previews/cards show `0`.
 The local software-only Android emulator could not maintain its package service,
 so no successful local device run is claimed.
 

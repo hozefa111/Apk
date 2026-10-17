@@ -98,7 +98,7 @@ public final class NativeImageShare {
             canvas.drawText(render,x,base,p);
         }
         void header(String title,String subtitle){
-            draw("🂡  3 Patti PRO",W/2f,y+40,52,GOLD,true,Paint.Align.CENTER,W-140);
+            draw("3 Patti PRO",W/2f,y+40,52,GOLD,true,Paint.Align.CENTER,W-140);
             y+=84;
             draw(title,W/2f,y+26,37,WHITE,true,Paint.Align.CENTER,W-120);
             y+=45;
@@ -123,7 +123,7 @@ public final class NativeImageShare {
         }
     }
 
-    private static String score(int n){return n==0?"—":n>0?"+"+n:String.valueOf(n);}
+    private static String score(int n){return n==0?"0":n>0?"+"+n:String.valueOf(n);}
     public static void round(Activity activity,String date,String hukum,String result,int bid,List<ScoreRow> rows){
         final List<ScoreRow> snapshot=rows==null?Collections.emptyList():new ArrayList<>(rows);
         RENDERER.execute(()->renderRound(activity,date,hukum,result,bid,snapshot));

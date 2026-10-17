@@ -1082,7 +1082,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 if(!playing.contains(pid))continue;
                 int delta=preview.getOrDefault(pid,0);
                 String role=pid.equals(hukum)?"♛ ":partners.contains(pid)?"◈ ":"○ ";
-                line(card,role+str(player,"name"),delta==0?"—":(delta>0?"+":"")+delta,
+                line(card,role+str(player,"name"),delta==0?"0":(delta>0?"+":"")+delta,
                         delta>0?GREEN:delta<0?RED:MUTED);
             }
             roundPreviewSection.addView(card);
