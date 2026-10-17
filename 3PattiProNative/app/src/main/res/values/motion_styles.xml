@@ -1,0 +1,10 @@
+<resources>
+    <style name="MotionDialogFull">
+        <item name="android:windowEnterAnimation">@anim/motion_dialog_enter</item>
+        <item name="android:windowExitAnimation">@anim/motion_dialog_exit</item>
+    </style>
+    <style name="MotionDialogReduced">
+        <item name="android:windowEnterAnimation">@anim/motion_fade_enter</item>
+        <item name="android:windowExitAnimation">@anim/motion_fade_exit</item>
+    </style>
+</resources>

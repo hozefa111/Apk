@@ -275,6 +275,7 @@ public final class NativeImageShare {
         if(images.isEmpty())return;
         activity.runOnUiThread(()->{
             if(activity.isFinishing()||activity.isDestroyed())return;
+            MotionEngine motion=activity instanceof MainActivity?((MainActivity)activity).motionEngine():null;
             android.widget.LinearLayout body=new android.widget.LinearLayout(activity);body.setOrientation(android.widget.LinearLayout.VERTICAL);
             android.widget.ImageView preview=new android.widget.ImageView(activity);preview.setAdjustViewBounds(true);preview.setScaleType(android.widget.ImageView.ScaleType.FIT_START);
             android.widget.ScrollView previewScroll=new android.widget.ScrollView(activity);previewScroll.setContentDescription("Scroll full share image");
@@ -293,12 +294,12 @@ public final class NativeImageShare {
                     opts.inSampleSize=1;int target=activity.getResources().getDisplayMetrics().widthPixels;
                     while(opts.outWidth/(opts.inSampleSize*2)>=target)opts.inSampleSize*=2;opts.inJustDecodeBounds=false;
                     try(java.io.InputStream in=activity.getContentResolver().openInputStream(uri)){displayed[0]=BitmapFactory.decodeStream(in,null,opts);}
-                    preview.setImageBitmap(displayed[0]);previewScroll.scrollTo(0,0);preview.setContentDescription(title+" preview page "+(position[0]+1));
+                    preview.setImageBitmap(displayed[0]);if(motion!=null)motion.enter(preview,0);previewScroll.scrollTo(0,0);preview.setContentDescription(title+" preview page "+(position[0]+1));
                     pageLabel.setText((position[0]+1)+" / "+images.size());previous.setEnabled(position[0]>0);next.setEnabled(position[0]<images.size()-1);
                 }catch(Exception error){errorToast(activity,error);}
             };
             previous.setOnClickListener(v->{position[0]--;show.run();});next.setOnClickListener(v->{position[0]++;show.run();});
-            android.app.AlertDialog dialog=new android.app.AlertDialog.Builder(activity).setTitle(title)
+            android.app.AlertDialog dialog=new MotionDialogBuilder(activity,motion).setTitle(title)
                 .setView(body).setNegativeButton("Close",null)
                 .setNeutralButton("Save Images",(d,w)->saveImages(activity,images))
                 .setPositiveButton("Share",(d,w)->sendImages(activity,images,title)).create();

@@ -37,6 +37,8 @@ public final class FirebaseGateway {
         void notice(String message);
         void busy(boolean active);
         void syncState(boolean online);
+        /** Presentation only: false seeds a new animation baseline after cache/reconnect. */
+        default void snapshotContinuity(boolean continuous) {}
     }
     public static final class Stamp {
         public final String value;
@@ -63,6 +65,8 @@ public final class FirebaseGateway {
     }
     private final java.util.concurrent.atomic.AtomicLong liveRevision=new java.util.concurrent.atomic.AtomicLong();
     private volatile long snapshotAt=0;
+    private volatile boolean animationContinuity;
+    private long animationSnapshotAt;
     private volatile boolean signingOut=false;
     private final Runnable liveRefresh=()->{if(this.running)executor.execute(this::load);};
     private volatile String idToken;
@@ -100,6 +104,7 @@ public final class FirebaseGateway {
         ui.post(() -> listener.authChanged(false));
         authObserver=state->{
             if(!running)return;
+            animationContinuity=false;
             liveRevision.incrementAndGet();freshSnapshot=false;listener.syncState(false);
             if(state.getCurrentUser()==null){idToken=null;listener.authChanged(false);}
             ui.removeCallbacks(liveRefresh);ui.postDelayed(liveRefresh,200);
@@ -109,6 +114,7 @@ public final class FirebaseGateway {
         for(String collection:Arrays.asList("players","rounds","sessions")){
             subscriptions.add(firestore.collection(collection).addSnapshotListener(MetadataChanges.INCLUDE,(snapshot,error)->{
                 if(!running)return;
+                if(error!=null||snapshot==null||snapshot.getMetadata().isFromCache())animationContinuity=false;
                 liveRevision.incrementAndGet();freshSnapshot=false;listener.syncState(false);
                 ui.removeCallbacks(liveRefresh);
                 ui.postDelayed(liveRefresh,200);
@@ -170,6 +176,7 @@ public final class FirebaseGateway {
         executor.execute(()->{auth.signOut();idToken=null;signingOut=false;load();notify("Logged out");});
     }
     public void refresh() {
+        if(!running)return;
         ui.removeCallbacks(refreshLoop);
         executor.execute(this::load);
     }
@@ -202,11 +209,14 @@ public final class FirebaseGateway {
             snapshotAt=System.currentTimeMillis();
             freshSnapshot=revision==liveRevision.get();
             final boolean coherent=freshSnapshot;
+            final boolean continuous=coherent&&animationContinuity&&snapshotAt-animationSnapshotAt<75000;
+            animationContinuity=coherent;animationSnapshotAt=snapshotAt;
             saveCachedSnapshot(p,r,s);
-            ui.post(() -> { if(running) { listener.syncState(coherent); listener.dataUpdated(p,r,s); } });
+            ui.post(() -> { if(running) { listener.snapshotContinuity(continuous);listener.syncState(coherent); listener.dataUpdated(p,r,s); } });
         } catch (Exception ex) {
+            animationContinuity=false;
             freshSnapshot=false;
-            ui.post(()->{if(running)listener.syncState(false);});
+            ui.post(()->{if(running){listener.snapshotContinuity(false);listener.syncState(false);}});
             notify("Sync issue: " + ex.getMessage());
         } finally {
             loading=false;

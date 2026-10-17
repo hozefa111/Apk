@@ -1,9 +1,16 @@
-# 3 Patti PRO Native Android — 2.2.0
+# 3 Patti PRO Native Android — 2.3.0
 
 Native Java Android application; no WebView. Source of truth: `hozefa111/hh`
 commit `8b2189d28d7bd9d9c21f509e87bf89717816898f`.
 
 See the [verification record and operating limits](VERIFICATION.md).
+
+## Animation update
+
+2.3.0 adds lifecycle-safe screen/dialog, form/bid, score/rank, chart and session
+animations. Settings → Animations offers Full, Reduced and Off; Android's system
+animation switches take priority. Scoring and game features are unchanged.
+See [animation behavior and test scope](ANIMATIONS.md).
 
 ## Implemented in this iteration
 
