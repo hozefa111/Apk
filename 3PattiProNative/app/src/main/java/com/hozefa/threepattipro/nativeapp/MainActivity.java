@@ -97,9 +97,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         super.onDestroy();
     }
     @Override public void dataUpdated(List<Map<String,Object>> p,List<Map<String,Object>> r,List<Map<String,Object>> s) {
-        p.sort(Comparator.<Map<String,Object>>comparingLong(a -> time(a.get("createdAt"))).thenComparing(this::id));
-        r.sort((a,b) -> Long.compare(time(b.get("timestamp")),time(a.get("timestamp"))));
-        s.sort((a,b) -> Long.compare(time(b.get("startTime")),time(a.get("startTime"))));
+        p.sort(GameOrder.PLAYERS);
+        r.sort(GameOrder.ROUNDS);
+        s.sort(GameOrder.SESSIONS);
         // Preserve every touch target on empty/no-op Firestore polls.
         if(hasData && players.equals(p) && rounds.equals(r) && sessions.equals(s)) return;
         boolean rosterChanged=!players.equals(p);
@@ -332,7 +332,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         navigation=row();pad(navigation,7,7,7,7);
         navigation.setMinimumHeight(dp(64));
         navigation.setBackgroundColor(0xFF121215);
-        root.addView(navigation,lp(-1,66));
+        root.addView(navigation,lp(-1,-2));
         setContentView(root);
         render(true);
     }
@@ -404,7 +404,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             TextView text=text(navNames[i],10,tab==i?GOLD:MUTED,tab==i);text.setGravity(Gravity.CENTER);
             item.addView(sym);gap(item,2);item.addView(text);
             if(tab==i)item.setBackground(shape(PANEL2,12,0));
-            navigation.addView(item,new LinearLayout.LayoutParams(0,-1,1));
+            item.setMinimumHeight(dp(52));item.setSelected(tab==i);item.setContentDescription(navNames[i]);
+            navigation.addView(item,new LinearLayout.LayoutParams(0,-2,1));
             item.setOnClickListener(v->{
                 if(destination==2&&!loggedIn){loginDialog();return;}
                 profileId=null;
@@ -607,7 +608,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             TextView item=chip(opt[1],rankFilter.equals(opt[0]),true,()->{
                 rankFilter=opt[0];render(false);
             });
-            LinearLayout.LayoutParams one=lp(-2,46);one.rightMargin=dp(8);
+            LinearLayout.LayoutParams one=lp(-2,-2);one.rightMargin=dp(8);
             items.addView(item,one);
         }
         hsv.addView(items);

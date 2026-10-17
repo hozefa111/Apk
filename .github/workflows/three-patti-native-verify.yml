@@ -38,7 +38,7 @@ jobs:
           api-level: ${{ matrix.api }}
           arch: x86_64
           disable-animations: true
-          script: firebase emulators:exec --project demo-three-patti --only auth,firestore --config 3PattiProNative/tests/emulator/firebase.json "python3 3PattiProNative/scripts/seed_emulator.py && gradle -p 3PattiProNative connectedSandboxAndroidTest"
+          script: bash 3PattiProNative/scripts/run_sandbox_verification.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -46,3 +46,4 @@ jobs:
           path: |
             3PattiProNative/app/build/reports/
             3PattiProNative/app/build/outputs/androidTest-results/
+            3PattiProNative/app/build/verification-screenshots/
