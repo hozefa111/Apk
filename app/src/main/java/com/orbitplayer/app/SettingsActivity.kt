@@ -156,14 +156,32 @@ class SettingsActivity : Activity() {
             settings.prefs.edit().putBoolean("needs_rescan", true).apply()
             finish()
         }
-        row("Clear video history", "Erase saved playback positions (not your video files)") {
-            AlertDialog.Builder(this).setTitle("Clear watch history?")
-                .setMessage("This removes Orbit's saved video resume positions. Your actual files are not changed.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Clear history") { _, _ ->
-                    getSharedPreferences("playback_positions_v1", MODE_PRIVATE).edit().clear().apply()
-                    settings.prefs.edit().putBoolean("needs_rescan", true).apply()
-                }.show()
+        row("Clear watch history", "Manage watch history and resume positions separately") {
+            val options = arrayOf("Clear watch history only",
+                "Clear resume positions only", "Clear both history and resume positions")
+            AlertDialog.Builder(this).setTitle("Clear playback data")
+                .setItems(options) { _, selection ->
+                    AlertDialog.Builder(this)
+                        .setTitle("Confirm clear?")
+                        .setMessage("Your video files, favorites and playlists will not be deleted.")
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Clear") { _, _ ->
+                            val store = getSharedPreferences("playback_positions_v1", MODE_PRIVATE)
+                            val editor = store.edit()
+                            if (selection != 1) {
+                                editor.remove("recently_watched")
+                                editor.remove("last_played_uri")
+                            }
+                            if (selection != 0) {
+                                store.all.keys.filter { it.startsWith("position_") }
+                                    .forEach(editor::remove)
+                            }
+                            editor.apply()
+                            settings.prefs.edit().putBoolean("needs_rescan", true).apply()
+                            android.widget.Toast.makeText(this, "Playback data cleared",
+                                android.widget.Toast.LENGTH_SHORT).show()
+                        }.show()
+                }.setNegativeButton("Cancel", null).show()
         }
 
         section("APP & UPDATES")

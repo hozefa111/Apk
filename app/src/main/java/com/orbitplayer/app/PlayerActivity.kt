@@ -148,6 +148,11 @@ class PlayerActivity : Activity() {
         }
         playerView.resizeMode = resizeMode
         findViewById<TextView>(R.id.btnAspect).text = userOptions.defaultAspect.uppercase(java.util.Locale.ROOT)
+        if (intent?.action == Intent.ACTION_VIEW && intent?.data != null) {
+            // External video opens are single-file sessions, not an old library Play All.
+            PlaybackQueue.replace(emptyList(), playAll = false)
+            PlaybackQueue.persist(this)
+        }
         PlaybackQueue.ensureRestored(this)
         runCatching {
             playerView.subtitleView?.setFractionalTextSize(0.0533f * userOptions.subtitleScale)
@@ -206,6 +211,8 @@ class PlayerActivity : Activity() {
             }
             videoUri = savedInstanceState.getString("uri", videoUri)
             videoTitle = savedInstanceState.getString("title", videoTitle)
+            subtitleUri = savedInstanceState.getString("subtitle_uri")?.let(Uri::parse)
+            showRemainingTime = savedInstanceState.getBoolean("show_remaining_time", false)
             playerTitle.text = videoTitle
         } else {
             lastSavedPosition = if (userOptions.resume) savedProgress(videoUri) else 0L
@@ -900,6 +907,8 @@ class PlayerActivity : Activity() {
             player?.playWhenReady ?: savedPlayWhenReady ?: userOptions.autoplay)
         outState.putString("uri", videoUri)
         outState.putString("title", videoTitle)
+        outState.putString("subtitle_uri", subtitleUri?.toString())
+        outState.putBoolean("show_remaining_time", showRemainingTime)
         super.onSaveInstanceState(outState)
     }
 
