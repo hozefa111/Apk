@@ -48,6 +48,9 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
           script: |
+            # Release UI smoke is offline; Firebase integration uses the demo project.
+            adb shell svc wifi disable
+            adb shell svc data disable
             adb install 3PattiProNative/app/build/outputs/apk/release/app-release.apk
             adb shell am start -n com.hozefa.threepattipro.nativeapp/.MainActivity
             sleep 8

@@ -1,4 +1,4 @@
-# 3 Patti PRO Native Android — 2.3.1
+# 3 Patti PRO Native Android — 2.3.2
 
 Native Java Android application; no WebView. Source of truth: `hozefa111/hh`
 commit `8b2189d28d7bd9d9c21f509e87bf89717816898f`.
@@ -82,3 +82,7 @@ Configure `THREE_PATTI_STORE_FILE`, `THREE_PATTI_STORE_PASSWORD`,
 Run `gradle verifyReleaseSigning` before a release. The keystore must match the
 installed APK for update-in-place. Debug APKs are verification builds and are not
 uploaded as final releases by the native build workflow.
+
+## Quota-safe sync (2.3.2)
+
+See [QUOTA_SYNC.md](QUOTA_SYNC.md) for the HTTP 429 fix, read reduction, persistent retry cooldown and offline/recovery behavior. This update cannot reset an exhausted Firebase project quota.

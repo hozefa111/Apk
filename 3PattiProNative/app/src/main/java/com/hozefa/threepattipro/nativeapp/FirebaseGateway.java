@@ -27,6 +27,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.LongSupplier;
+import com.google.firebase.firestore.FirebaseFirestoreException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 
@@ -39,6 +41,8 @@ public final class FirebaseGateway {
         void syncState(boolean online);
         /** Presentation only: false seeds a new animation baseline after cache/reconnect. */
         default void snapshotContinuity(boolean continuous) {}
+        /** A read-only connection problem; retryAt is a wall-clock deadline, not a write queue. */
+        default void syncProblem(String message,long retryAt,boolean quota) {}
     }
     public static final class Stamp {
         public final String value;
@@ -51,7 +55,15 @@ public final class FirebaseGateway {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final ExecutorService fetchers = Executors.newFixedThreadPool(3);
     private final Handler ui = new Handler(Looper.getMainLooper());
-    private final OkHttpClient http = new OkHttpClient.Builder().callTimeout(25, TimeUnit.SECONDS).connectTimeout(14, TimeUnit.SECONDS).readTimeout(14, TimeUnit.SECONDS).build();
+    private final OkHttpClient http;
+    private final LongSupplier retryClock;
+    private final SyncRetryPolicy retry;
+    private final android.content.SharedPreferences retryStore;
+    private final AtomicBoolean readQueued=new AtomicBoolean(),readAgain=new AtomicBoolean();
+    private volatile boolean foreground=true;
+    private volatile long lastRefreshRequestAt;
+    private final Runnable backgroundStop=this::stopInBackground;
+    private void stopInBackground(){if(!foreground){removeSubscriptions();animationContinuity=false;freshSnapshot=false;if(running)listener.syncState(false);}}
     private final FirebaseAuth auth;
     private FirebaseAuth.AuthStateListener authObserver;
     private final FirebaseFirestore firestore;
@@ -68,20 +80,26 @@ public final class FirebaseGateway {
     private volatile boolean animationContinuity;
     private long animationSnapshotAt;
     private volatile boolean signingOut=false;
-    private final Runnable liveRefresh=()->{if(this.running)executor.execute(this::load);};
+    private final Runnable liveRefresh=()->queueLoad(true);
     private volatile String idToken;
     private volatile boolean running;
     private volatile boolean freshSnapshot=false;
     private boolean loading;
     private final AtomicBoolean writeInFlight=new AtomicBoolean(false);
     private boolean reloadRequested=false;
-    private final Runnable refreshLoop=() -> executor.execute(this::load);
+    private final Runnable refreshLoop=()->{startSubscriptions();queueLoad(true);};
     private final String dbRoot;
     private final String documentRoot = "projects/" + project + "/databases/(default)/documents";
 
     public FirebaseGateway(Context c, Listener l, String key) {
+        this(c,l,key,new OkHttpClient.Builder().callTimeout(25,TimeUnit.SECONDS).connectTimeout(14,TimeUnit.SECONDS).readTimeout(14,TimeUnit.SECONDS).build(),System::currentTimeMillis);
+    }
+    FirebaseGateway(Context c,Listener l,String key,OkHttpClient client,LongSupplier clock) {
+        http=client;retryClock=clock;
         context = c.getApplicationContext();
         listener = l;
+        retryStore=context.getSharedPreferences("firebase_sync_retry",Context.MODE_PRIVATE);
+        retry=new SyncRetryPolicy(retryClock.getAsLong(),retryStore.getLong("quota_until",0),retryStore.getInt("quota_failures",0));
         apiKey = BuildConfig.USE_EMULATORS?"demo-key":key;
         FirebaseOptions options=new FirebaseOptions.Builder().setProjectId(project)
                 .setApiKey(apiKey).setApplicationId("1:570573461138:web:4414d0ce87282b91b2f84b").build();
@@ -99,32 +117,67 @@ public final class FirebaseGateway {
         dbRoot = (BuildConfig.USE_EMULATORS?"http://10.0.2.2:8080":"https://firestore.googleapis.com")+"/v1/projects/" + project + "/databases/(default)/documents";
     }
     public void start() {
-        running = true;
-        // A stored refresh token is not proof of a valid admin session.
+        if(running)return;
+        running=true;lastRefreshRequestAt=retryClock.getAsLong();
         ui.post(() -> listener.authChanged(false));
         authObserver=state->{
             if(!running)return;
-            animationContinuity=false;
-            liveRevision.incrementAndGet();freshSnapshot=false;listener.syncState(false);
+            animationContinuity=false;liveRevision.incrementAndGet();freshSnapshot=false;listener.syncState(false);
             if(state.getCurrentUser()==null){idToken=null;listener.authChanged(false);}
-            ui.removeCallbacks(liveRefresh);ui.postDelayed(liveRefresh,200);
+            ui.removeCallbacks(liveRefresh);ui.postDelayed(liveRefresh,500);
         };
         auth.addAuthStateListener(authObserver);
-        executor.execute(() -> { readCachedSnapshot(); load(); });
+        readQueued.set(true);
+        executor.execute(()->{try{readCachedSnapshot();load();}finally{finishQueuedRead();}});
+        startSubscriptions();
+    }
+    private void startSubscriptions(){
+        if(!running||!foreground||!subscriptions.isEmpty()||retry.remaining(retryClock.getAsLong())>0)return;
         for(String collection:Arrays.asList("players","rounds","sessions")){
             subscriptions.add(firestore.collection(collection).addSnapshotListener(MetadataChanges.INCLUDE,(snapshot,error)->{
                 if(!running)return;
-                if(error!=null||snapshot==null||snapshot.getMetadata().isFromCache())animationContinuity=false;
+                if(error!=null){
+                    animationContinuity=false;liveRevision.incrementAndGet();freshSnapshot=false;listener.syncState(false);
+                    if(error.getCode()==FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED)recordQuota(null);
+                    else{retry.unavailable(retryClock.getAsLong());publishProblem("Connection interrupted. Saved data remains available.");ui.post(this::removeSubscriptions);scheduleNext();}
+                    return;
+                }
+                if(snapshot==null)return;
+                if(snapshot.getMetadata().isFromCache()){
+                    animationContinuity=false;freshSnapshot=false;listener.syncState(false);scheduleNext();return;
+                }
+                // Metadata-only acknowledgements never justify downloading the table again.
+                if(snapshot.getDocumentChanges().isEmpty())return;
                 liveRevision.incrementAndGet();freshSnapshot=false;listener.syncState(false);
-                ui.removeCallbacks(liveRefresh);
-                ui.postDelayed(liveRefresh,200);
+                if(!foreground){readAgain.set(true);return;}
+                ui.removeCallbacks(liveRefresh);ui.postDelayed(liveRefresh,500);
             }));
         }
     }
+    private void removeSubscriptions(){
+        for(ListenerRegistration registration:subscriptions)registration.remove();
+        subscriptions.clear();
+    }
+    public void setForeground(boolean visible){
+        foreground=visible;ui.removeCallbacks(backgroundStop);
+        if(!running)return;
+        if(!visible){ui.removeCallbacks(refreshLoop);ui.removeCallbacks(liveRefresh);ui.postDelayed(backgroundStop,60000);return;}
+        startSubscriptions();
+        if(!freshSnapshot||readAgain.get())queueLoad(false);
+        else scheduleNext();
+    }
+    private void queueLoad(boolean followUp){
+        if(!running||!foreground)return;
+        if(!readQueued.compareAndSet(false,true)){if(followUp)readAgain.set(true);return;}
+        executor.execute(()->{try{if(running&&foreground)load();}finally{finishQueuedRead();}});
+    }
+    private void finishQueuedRead(){
+        readQueued.set(false);
+        if(readAgain.getAndSet(false)&&running&&foreground&&retry.remaining(retryClock.getAsLong())==0)queueLoad(false);
+    }
     public void stop() { running=false;
         if(authObserver!=null)auth.removeAuthStateListener(authObserver);
-        for(ListenerRegistration registration:subscriptions)registration.remove();
-        subscriptions.clear();ui.removeCallbacksAndMessages(null);
+        removeSubscriptions();ui.removeCallbacksAndMessages(null);
         http.dispatcher().cancelAll();executor.shutdownNow();fetchers.shutdownNow();
     }
     private void notify(String msg) { ui.post(() -> { if (running) listener.notice(msg); }); }
@@ -136,6 +189,7 @@ public final class FirebaseGateway {
         return e.optString("message", "Connection failed");
     }
     private JSONObject network(String method, String url, String contentType, String body, String bearer) throws Exception {
+        if(retry.quota()&&retry.remaining(retryClock.getAsLong())>0)throw new HttpFailure(429,"Firebase sync is paused until its scheduled retry");
         Request.Builder req = new Request.Builder().url(url).header("Accept", "application/json");
         if(bearer!=null)req.header("Authorization", "Bearer " + bearer);
         if(body!=null) {
@@ -145,8 +199,13 @@ public final class FirebaseGateway {
         else req.method(method,null);
         try (Response response=http.newCall(req.build()).execute()) {
             String content=response.body()==null?"":response.body().string();
-            JSONObject obj=content.isEmpty()?new JSONObject():new JSONObject(content);
-            if(!response.isSuccessful())throw new IOException(getError(obj)+" (HTTP "+response.code()+")");
+            if(response.code()==429)recordQuota(response.header("Retry-After"));
+            JSONObject obj;
+            try{obj=content.isEmpty()?new JSONObject():new JSONObject(content);}catch(org.json.JSONException invalid){
+                if(!response.isSuccessful())throw new HttpFailure(response.code(),"Firebase request failed");
+                throw invalid;
+            }
+            if(!response.isSuccessful())throw new HttpFailure(response.code(),getError(obj));
             return obj;
         }
     }
@@ -175,17 +234,41 @@ public final class FirebaseGateway {
         ui.post(()->{if(running)listener.authChanged(false);});
         executor.execute(()->{auth.signOut();idToken=null;signingOut=false;load();notify("Logged out");});
     }
-    public void refresh() {
-        if(!running)return;
-        ui.removeCallbacks(refreshLoop);
-        executor.execute(this::load);
+    public boolean refresh() {
+        if(!running)return false;
+        long now=retryClock.getAsLong();
+        if(retry.remaining(now)>0){publishProblem(retry.quota()?quotaMessage():"Connection unavailable. Automatic retry is scheduled.");scheduleNext();return false;}
+        synchronized(this){if(now-lastRefreshRequestAt<10000)return false;lastRefreshRequestAt=now;}
+        ui.removeCallbacks(refreshLoop);queueLoad(false);return true;
     }
     private void scheduleNext() {
         ui.removeCallbacks(refreshLoop);
-        ui.postDelayed(refreshLoop, freshSnapshot?60000:12000);
+        if(!running||!foreground)return;
+        long delay=retry.remaining(retryClock.getAsLong());
+        // A healthy listener already delivers real changes. No minute-by-minute full scans.
+        if(delay==0&&freshSnapshot)return;
+        ui.postDelayed(refreshLoop,delay>0?delay:30000);
+    }
+    private String quotaMessage(){return "Firebase request limit reached. Sync is paused; saved data is read-only. Retry is automatic. A daily quota may need its reset or a billing change by the owner.";}
+    private void publishProblem(String message){
+        long deadline=retry.deadline();boolean quota=retry.quota();
+        ui.post(()->{if(running){listener.snapshotContinuity(false);listener.syncState(false);listener.syncProblem(message,deadline,quota);}});
+    }
+    private void recordQuota(String retryAfter){
+        retry.rateLimited(retryClock.getAsLong(),retryAfter);
+        // Commit the small cooldown journal before an Activity/process restart can erase it.
+        retryStore.edit().putLong("quota_until",retry.deadline()).putInt("quota_failures",retry.quotaFailures()).commit();
+        freshSnapshot=false;animationContinuity=false;
+        publishProblem(quotaMessage());
+        ui.post(()->{if(running){removeSubscriptions();ui.removeCallbacks(liveRefresh);scheduleNext();}});
+    }
+    private static final class HttpFailure extends IOException {
+        final int status;
+        HttpFailure(int status,String message){super(message+" (HTTP "+status+")");this.status=status;}
     }
     private void load() {
         if (!running) return;
+        if(retry.remaining(retryClock.getAsLong())>0){publishProblem(retry.quota()?quotaMessage():"Connection unavailable. Automatic retry is scheduled.");scheduleNext();return;}
         if (loading) { reloadRequested=true; return; }
         loading=true;
         try {
@@ -202,6 +285,7 @@ public final class FirebaseGateway {
             Future<CollectionSnapshot> roundFetch=fetchers.submit(()->fetchCollection("rounds"));
             Future<CollectionSnapshot> sessionFetch=fetchers.submit(()->fetchCollection("sessions"));
             CollectionSnapshot ps=playerFetch.get(),rs=roundFetch.get(),ss=sessionFetch.get();
+            if(retry.quota()&&retry.remaining(retryClock.getAsLong())>0)throw new HttpFailure(429,"Firebase request limit reached");
             List<Map<String,Object>> p=ps.rows,r=rs.rows,s=ss.rows;
             Map<String,String> nextVersions=new HashMap<>();Map<String,JSONObject> nextDocuments=new HashMap<>();
             for(CollectionSnapshot collection:Arrays.asList(ps,rs,ss)){nextVersions.putAll(collection.versions);nextDocuments.putAll(collection.documents);}
@@ -211,16 +295,21 @@ public final class FirebaseGateway {
             final boolean coherent=freshSnapshot;
             final boolean continuous=coherent&&animationContinuity&&snapshotAt-animationSnapshotAt<75000;
             animationContinuity=coherent;animationSnapshotAt=snapshotAt;
+            retry.succeeded();retryStore.edit().remove("quota_until").remove("quota_failures").apply();
             saveCachedSnapshot(p,r,s);
+            ui.post(()->{if(running){listener.syncProblem(null,0,false);startSubscriptions();}});
             ui.post(() -> { if(running) { listener.snapshotContinuity(continuous);listener.syncState(coherent); listener.dataUpdated(p,r,s); } });
         } catch (Exception ex) {
             animationContinuity=false;
             freshSnapshot=false;
             ui.post(()->{if(running){listener.snapshotContinuity(false);listener.syncState(false);}});
-            notify("Sync issue: " + ex.getMessage());
+            if(!retry.quota()){
+                retry.unavailable(retryClock.getAsLong());
+                publishProblem("Cannot connect to the shared table. Check your internet connection. Saved data remains available; retry is automatic.");
+            }else publishProblem(quotaMessage());
         } finally {
             loading=false;
-            if (running && reloadRequested){reloadRequested=false;ui.removeCallbacks(refreshLoop);executor.execute(this::load);}
+            if (running && reloadRequested){reloadRequested=false;queueLoad(true);}
             else if(running) scheduleNext();
         }
     }

@@ -80,9 +80,11 @@ public class NativeDialogTest {
     @Test public void largeFontLandscapeKeepsHistoryAndShareActionsOnScreen()throws Exception{
         Assume.assumeTrue(BuildConfig.USE_EMULATORS);String old=shell("settings get system font_scale");
         try{
-            shell("settings put system font_scale 2.0");long end=System.currentTimeMillis()+10000;while(Math.abs(context().getResources().getConfiguration().fontScale-2f)>.01f&&System.currentTimeMillis()<end)Thread.sleep(100);
-            assertEquals(2f,context().getResources().getConfiguration().fontScale,.01f);
             try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
+                waitFor("Table Status");
+                shell("settings put system font_scale 2.0");long end=System.currentTimeMillis()+10000;
+                while(Math.abs(context().getResources().getConfiguration().fontScale-2f)>.01f&&System.currentTimeMillis()<end)Thread.sleep(100);
+                assertEquals(2f,context().getResources().getConfiguration().fontScale,.01f);
                 try{
                 scenario.onActivity(a->a.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
                 AtomicBoolean rotated=new AtomicBoolean();end=System.currentTimeMillis()+15000;
@@ -105,6 +107,11 @@ public class NativeDialogTest {
                     while(!restored.get()&&System.currentTimeMillis()<resetEnd){scenario.onActivity(a->restored.set(a.getResources().getConfiguration().orientation==Configuration.ORIENTATION_PORTRAIT));Thread.sleep(100);}assertTrue(restored.get());
                 }
             }
-        }finally{shell("null".equals(old)?"settings delete system font_scale":"settings put system font_scale "+old);}
+        }finally{
+            shell("null".equals(old)?"settings delete system font_scale":"settings put system font_scale "+old);
+            float scale="null".equals(old)?1f:Float.parseFloat(old);long end=System.currentTimeMillis()+10000;
+            while(Math.abs(context().getResources().getConfiguration().fontScale-scale)>.01f&&System.currentTimeMillis()<end)Thread.sleep(100);
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        }
     }
 }

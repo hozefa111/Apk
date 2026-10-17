@@ -63,6 +63,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private LinearLayout root, content, navigation, toolbar;
     private ScrollView scroll;
     private boolean loggedIn=false, busy=false, hasData=false, liveConnected=false;
+    private String syncProblem;
+    private long syncRetryAt;
+    private boolean quotaPaused;
     private int tab=0, historyTab=0;
     private String profileId=null, rankFilter="all";
     private long customStart=0L, customEnd=0L;
@@ -175,6 +178,11 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         updateToolbar();
         if(tab==2&&roundSaveView!=null&&roundHintView!=null&&roundPreviewSection!=null)updateRoundForm();
     }
+    @Override public void syncProblem(String message,long retryAt,boolean quota){
+        boolean changed=!Objects.equals(syncProblem,message)||syncRetryAt!=retryAt||quotaPaused!=quota;
+        syncProblem=message;syncRetryAt=retryAt;quotaPaused=quota;
+        if(changed){updateToolbar();render(false);}
+    }
     @Override public void notice(String msg) {
         if("Session started".equals(msg))sessionStartRevealUntil=resumed?android.os.SystemClock.uptimeMillis()+10000:0;
         Toast.makeText(this,msg,Toast.LENGTH_LONG).show();
@@ -190,12 +198,12 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);persistDraft();state.putInt("tab",tab);state.putInt("historyTab",historyTab);state.putString("rankFilter",rankFilter);state.putString("profileId",profileId);state.putLong("customStart",customStart);state.putLong("customEnd",customEnd);state.putString("searchQuery",searchQuery);}
     @Override protected void onResume(){
-        super.onResume();resumed=true;motion.resume();motionEvents.invalidate();if(api!=null)api.refresh();
+        super.onResume();resumed=true;motion.resume();motionEvents.invalidate();if(api!=null)api.setForeground(true);
         if(launchReveal){launchReveal=false;motion.enter(root,0);}
         if(deferredRoundResult!=null){Map<String,Object> result=deferredRoundResult;deferredRoundResult=null;showRoundSaved(result,false);}
         if(deferredSessionSummary!=null){Map<String,Object> result=deferredSessionSummary;deferredSessionSummary=null;showSessionSummary(result,false);}
     }
-    @Override protected void onPause(){resumed=false;sessionStartRevealUntil=0;motionEvents.invalidate();if(motion!=null)motion.pause();persistDraft();super.onPause();}
+    @Override protected void onPause(){if(api!=null)api.setForeground(false);resumed=false;sessionStartRevealUntil=0;motionEvents.invalidate();if(motion!=null)motion.pause();persistDraft();super.onPause();}
     MotionEngine motionEngine(){return motion;}
 
     private boolean persistDraft(){
@@ -390,7 +398,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(largeText){appName.setMaxLines(1);appName.setAutoSizeTextTypeUniformWithConfiguration(16,21,1,android.util.TypedValue.COMPLEX_UNIT_SP);}
         heading.addView(appName);
         gap(heading,5);
-        heading.addView(text(liveConnected?"●  LIVE SYNC":"○  OFFLINE / CONNECTING",9,
+        heading.addView(text(liveConnected?"●  LIVE SYNC":quotaPaused?"○  SYNC PAUSED · LIMIT REACHED":hasData?"○  OFFLINE · SAVED TABLE":"○  OFFLINE / CONNECTING",9,
                 liveConnected?GREEN:MUTED,true));
         toolbar.addView(heading,largeText?lp(-1,-2):new LinearLayout.LayoutParams(0,-2,1));
         LinearLayout actions=largeText?row():toolbar;
@@ -408,8 +416,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         refresh.setMinWidth(dp(48));refresh.setMinHeight(dp(48));
         refresh.setOnClickListener(v->{
             if(api!=null) {
-                motion.refresh(refresh);api.refresh();
-                Toast.makeText(this,"Refreshing scores...",Toast.LENGTH_SHORT).show();
+                if(api.refresh()){motion.refresh(refresh);Toast.makeText(this,"Refreshing scores...",Toast.LENGTH_SHORT).show();}
+                else if(syncProblem!=null)new MotionDialogBuilder(this,motion).setTitle(quotaPaused?"Sync paused":"Connection unavailable").setMessage(syncProblem+retryDescription()).setPositiveButton("Close",null).show();
             }
         });
         LinearLayout.LayoutParams rp=lp(48,48);rp.leftMargin=dp(8);
@@ -421,6 +429,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             .setNegativeButton("Close",null).show());actions.addView(more);
 
     }
+    private String retryDescription(){
+        return syncRetryAt>0?"\nNext retry: "+DateTimeFormatter.ofPattern("dd MMM, hh:mm a").withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(syncRetryAt))+". Refresh does not bypass this wait.":"";
+    }
     private void render(boolean reset) {
         if(content==null||navigation==null)return;
         int oldTab=displayedTab;screenEntry=reset||oldTab!=tab;displayedTab=tab;
@@ -430,7 +441,17 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         int prev=reset?0:scroll.getScrollY();
         content.removeAllViews();
         navigation.removeAllViews();
-        if(!hasData && tab<6) {
+        if(syncProblem!=null){
+            LinearLayout banner=panel();
+            banner.addView(text(quotaPaused?"Sync paused · Firebase limit":"Connection unavailable",16,GOLD,true));gap(banner,10);
+            banner.addView(text(syncProblem+retryDescription(),13,MUTED,false));
+            if(hasData){gap(banner,8);banner.addView(text("Showing the last saved table. Changes are disabled until live sync returns.",13,WHITE,false));}
+            content.addView(banner);gap(content,14);
+        }
+        if(!hasData && tab<6 && syncProblem!=null){
+            gap(content,24);content.addView(text("Your table has not loaded yet",20,GOLD,true));gap(content,12);
+            content.addView(text("No points have been deleted. A fresh install needs one successful connection before an offline table is available. You can leave this screen; the app will retry while open.",14,MUTED,false));
+        }else if(!hasData && tab<6) {
             gap(content,80);content.addView(text("♠  Loading your table…",20,GOLD,true));
             gap(content,16);content.addView(text("Connecting to your shared table",13,MUTED,false));
             for(int i=0;i<3;i++){gap(content,16);View skeleton=new View(this);skeleton.setBackground(shape(PANEL2,16,0));content.addView(skeleton,lp(-1,64));motion.loading(skeleton);}
