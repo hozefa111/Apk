@@ -69,6 +69,8 @@ dashes; the brand now uses supported text and score previews/cards show `0`.
 Long image previews also use a full-width scrollable viewport rather than shrinking
 the whole ranking page into an unreadable strip. Negative best-round and MVP
 scores also avoid an incorrect extra plus sign.
+The legacy API 29 smoke workflow also enables KVM, matching the matrix jobs,
+so input commands are not timed out by software-only emulation.
 The local software-only Android emulator could not maintain its package service,
 so no successful local device run is claimed.
 

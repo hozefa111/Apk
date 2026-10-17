@@ -53,7 +53,7 @@ public class FirebaseGatewayEmulatorTest {
                 public void syncState(boolean value){syncEvent.set(System.currentTimeMillis());live.set(value);}
             },"demo-key");gateway.start();started.countDown();
         });assertTrue(started.await(5,TimeUnit.SECONDS));await(()->live.get()&&players.get().size()>=3);
-        gateway.signIn("tester@example.test","test-password-123");await(()->admin.get()&&live.get()&&!busy.get());
+        gateway.signIn("tester@example.test","test-password-123");await(()->admin.get()&&live.get()&&!busy.get());ready(()->{});
     }
     @After public void cleanup()throws Exception{if(gateway!=null)InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.stop());}
     @Test public void roundRetryAndPayloadConflictAndVersionedDelete()throws Exception{
