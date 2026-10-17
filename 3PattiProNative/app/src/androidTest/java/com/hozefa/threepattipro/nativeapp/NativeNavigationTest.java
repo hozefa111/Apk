@@ -64,7 +64,7 @@ public class NativeNavigationTest {
             onView(withText("✓  Save Round to Firebase")).perform(scrollTo());capture("08-score-preview");
             onView(withText("✓  Save Round to Firebase")).perform(click());onView(withText("Save Round")).perform(click());
             waitForDialog("Round saved successfully");onView(withText("Share Result")).perform(click());waitForDialog("3 Patti PRO - Round Result");capture("09-share-round");onView(withText("Close")).perform(click());
-            scenario.onActivity(activity->{java.util.List<NativeImageShare.RankRow> rows=new java.util.ArrayList<>();for(int i=0;i<75;i++)rows.add(new NativeImageShare.RankRow("Synthetic Player "+i,100-i,10,5,5,3,4));NativeImageShare.leaderboard(activity,"Synthetic pagination test",rows);});
+            scenario.onActivity(activity->{java.util.List<NativeImageShare.RankRow> rows=new java.util.ArrayList<>();for(int i=0;i<75;i++)rows.add(new NativeImageShare.RankRow(i%3==0?"Synthetic player with a forty-letter name "+i:"Synthetic Player "+i,100-i,10,5,5,3,4));NativeImageShare.leaderboard(activity,"Synthetic pagination test",rows);});
             waitForDialog("3 Patti PRO - Rankings");onView(withText("1 / 3")).check(matches(isDisplayed()));onView(withText("Next")).perform(click());onView(withText("2 / 3")).check(matches(isDisplayed()));
             onView(withContentDescription("Scroll full share image")).perform(swipeUp()).check((view,error)->{if(error!=null)throw error;org.junit.Assert.assertTrue("Long image must scroll at full preview width",view.getScrollY()>0);});
             capture("10-share-ranks-page-2");
@@ -92,5 +92,24 @@ public class NativeNavigationTest {
             });
             androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync();waitFor("ADMIN");
         }
+    }
+    private String shell(String command)throws Exception{
+        android.os.ParcelFileDescriptor descriptor=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand(command);
+        try(java.io.InputStream in=new android.os.ParcelFileDescriptor.AutoCloseInputStream(descriptor);java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream()){
+            byte[] buffer=new byte[1024];int count;while((count=in.read(buffer))!=-1)out.write(buffer,0,count);return out.toString("UTF-8").trim();
+        }
+    }
+    @Test public void navigationAndSettingsRemainUsableWithLargeText()throws Exception{
+        Assume.assumeTrue(BuildConfig.USE_EMULATORS);String original=shell("settings get system font_scale");
+        try{
+            shell("settings put system font_scale 2.0");
+            try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
+                waitFor("Table Status");onView(withContentDescription("Players")).perform(click());
+                onView(withContentDescription("More options")).perform(click());onView(withText("Settings")).perform(click());
+                onView(withText("Compact round history")).perform(scrollTo()).check(matches(isDisplayed()));capture("11-settings-large-text");
+                scenario.recreate();onView(withContentDescription("More options")).check(matches(isDisplayed()));
+                onView(withText("Export JSON backup")).perform(scrollTo()).check(matches(isDisplayed()));
+            }
+        }finally{shell("null".equals(original)?"settings delete system font_scale":"settings put system font_scale "+original);}
     }
 }

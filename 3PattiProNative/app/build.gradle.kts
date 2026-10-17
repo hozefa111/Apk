@@ -57,10 +57,14 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
 }
 
-tasks.register("verifyReleaseSigning") {
+val verifyReleaseSigning = tasks.register("verifyReleaseSigning") {
     doLast {
         check(android.signingConfigs.findByName("stableRelease") != null) {
             "Final release blocked: configure the stable THREE_PATTI_* signing variables. Debug signing is not a verified release."
         }
+        check(android.signingConfigs.getByName("stableRelease").storeFile?.isFile == true) {
+            "Final release blocked: the configured stable release keystore does not exist."
+        }
     }
 }
+tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(verifyReleaseSigning) }

@@ -16,7 +16,7 @@ Repeat the read-only audit explicitly with:
 
 ## Automated checks
 
-Latest completed local run: **60 JVM tests passed, 0 failures/errors**; 840 HH
+Latest completed local run: **61 JVM tests passed, 0 failures/errors**; 840 HH
 scoring vectors are checked within the parity test. Debug/sandbox app and
 instrumentation APK compilation passed. Lint: **0 errors, 20 warnings**.
 `verifyReleaseSigning` was also exercised and correctly refused release without
@@ -106,3 +106,13 @@ stop remaining batches; unrelated writes stay locked while a journal is pending.
 Resuming compares live contents/versions, skipping ambiguous commits already applied.
 Recovery files use atomic writes and exports are validated against the import size limit.
 New unit and 501-record device tests require verification for the new source.
+
+Session awards now use a view-independent HH-compatible calculator. Sixty-four
+synthetic cases execute the actual HH `endSession` function to generate expected
+leaderboards, all six badges, streaks and win/loss awards. This exposed/fixed a
+removed-player maximum affecting Hukum King/Unlucky awards. Native session stats
+also retain HH's missing-playerIds fallback. All 64 differential cases pass locally.
+Share Studio lists all filtered rounds via pagination instead of only ten recent
+rounds, and paginates completed sessions. New instrumentation includes 2x system
+font scaling and long player names in share cards. Release builds now depend on
+the stable-signing guard automatically; unsigned release assembly is blocked.

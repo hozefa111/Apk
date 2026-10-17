@@ -1378,10 +1378,6 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 .setNegativeButton("Cancel",null)
                 .setPositiveButton("End Session",(d,w)->completeSession(active)).show();
     }
-    @SuppressWarnings("unchecked")
-    private List<String> stringsMutable(Map<String,Object> owner,String key) {
-        return (List<String>)owner.get(key);
-    }
     private void completeSession(Map<String,Object> s) {
         long start=time(s.get("startTime")), end=System.currentTimeMillis();
         if(start<=0){Toast.makeText(this,"Session start time missing",Toast.LENGTH_SHORT).show();return;}
@@ -1390,104 +1386,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             long t=time(game.get("timestamp"));
             if(t>=start&&t<=end)r.add(game);
         }
-        List<Map<String,Object>> ranked=new ArrayList<>(players);
-        ranked.removeIf(p->played(id(p),r)==0);
-        ranked.sort((a,b)->Integer.compare(scoreOf(id(b),r),scoreOf(id(a),r)));
-        List<Map<String,Object>> leaderboard=new ArrayList<>();
-        int place=0;
-        for(Map<String,Object> p:ranked){
-            place++;
-            leaderboard.add(FirebaseGateway.map("rank",place,"id",id(p),"name",str(p,"name"),
-                    "score",scoreOf(id(p),r),"roundsPlayed",played(id(p),r)));
-        }
-        Map<String,Object> mvp=ranked.isEmpty()?null:FirebaseGateway.map(
-                "name",str(ranked.get(0),"name"),"score",scoreOf(id(ranked.get(0)),r));
-        String winningName="-",losingName="-";
-        int best=0,worst=0;
-        for(Map<String,Object> round:r)for(Map.Entry<String,Object> score:map(round.get("scoreChanges")).entrySet()){
-            int v=num(score.getValue());
-            if(v>best){best=v;winningName=nameOf(score.getKey());}
-            if(v<worst){worst=v;losingName=nameOf(score.getKey());}
-        }
-        Map<String,Object> bestHukum=null;
-        double topWinRate=-1;int topHukumRounds=-1;
-        Map<String,Integer> hukumCount=new HashMap<>(),hukumWins=new HashMap<>(),playerLosses=new HashMap<>();
-        int maxBid=0;
-        for(Map<String,Object> round:r){
-            String pid=str(round,"hukumId");
-            hukumCount.merge(pid,1,Integer::sum);
-            if("win".equals(str(round,"result")))hukumWins.merge(pid,1,Integer::sum);
-            maxBid=Math.max(maxBid,num(round.get("bid")));
-            for(String playerId:strings(round.get("playerIds"))) {
-                boolean winsThisRound="win".equals(str(round,"result"))==
-                        (pid.equals(playerId)||strings(round.get("partnerIds")).contains(playerId));
-                if(!winsThisRound)playerLosses.merge(playerId,1,Integer::sum);
-            }
-        }
-        for(Map<String,Object> p:players){
-            String pid=id(p);int n=hukumCount.getOrDefault(pid,0),w=hukumWins.getOrDefault(pid,0);
-            if(n==0)continue;
-            double rate=(double)w/n;
-            if(rate>topWinRate||(rate==topWinRate&&n>topHukumRounds)){
-                topWinRate=rate;topHukumRounds=n;
-                bestHukum=FirebaseGateway.map("name",str(p,"name"),"winRate",Math.round(rate*100),
-                        "wins",w,"total",n);
-            }
-        }
-        Map<String,Object> badges=new LinkedHashMap<>();
-        for(String key:new String[]{"hukumKing","hotStreak","unlucky","sharpPartner","mvp","riskTaker"})
-            badges.put(key,new ArrayList<String>());
-        int maxHukum=0,maxLosses=0;
-        for(String playerId:hukumCount.keySet())maxHukum=Math.max(maxHukum,hukumCount.get(playerId));
-        for(String playerId:playerLosses.keySet())maxLosses=Math.max(maxLosses,playerLosses.get(playerId));
-        for(Map<String,Object> p:players){
-            String pid=id(p);
-            if(maxHukum>0&&hukumCount.getOrDefault(pid,0)==maxHukum)stringsMutable(badges,"hukumKing").add(pid);
-            if(maxLosses>0&&playerLosses.getOrDefault(pid,0)==maxLosses)stringsMutable(badges,"unlucky").add(pid);
-            int partnerCount=0,partnerWins=0,currentStreak=0,topStreak=0;
-            List<Map<String,Object>> chron=new ArrayList<>(r);
-            Collections.reverse(chron);
-            for(Map<String,Object> round:chron){
-                boolean present=strings(round.get("playerIds")).contains(pid);
-                if(!present)continue;
-                boolean isPartner=strings(round.get("partnerIds")).contains(pid);
-                if(isPartner){partnerCount++;if("win".equals(str(round,"result")))partnerWins++;}
-                boolean won=RoundAnalytics.won(round,pid);
-                if(won){currentStreak++;topStreak=Math.max(topStreak,currentStreak);}
-                else currentStreak=0;
-            }
-            if(partnerCount>=3&&(double)partnerWins/partnerCount>=0.8)stringsMutable(badges,"sharpPartner").add(pid);
-            if(RoundAnalytics.longestPositiveStreak(pid,r)>=3)stringsMutable(badges,"hotStreak").add(pid);
-        }
-        if(!ranked.isEmpty()) {
-            int highScore=scoreOf(id(ranked.get(0)),r);
-            for(Map<String,Object> p:ranked)if(scoreOf(id(p),r)==highScore)stringsMutable(badges,"mvp").add(id(p));
-        }
-        for(Map<String,Object> round:r)if(maxBid>0&&num(round.get("bid"))==maxBid){
-            String playerId=str(round,"hukumId");
-            if(!stringsMutable(badges,"riskTaker").contains(playerId))stringsMutable(badges,"riskTaker").add(playerId);
-        }
-        List<Map<String,Object>> streaks=new ArrayList<>();
-        for(Map<String,Object> player:players){
-            String pid=id(player);
-            int streak=0;
-            for(Map<String,Object> round:r){
-                if(!strings(round.get("playerIds")).contains(pid))continue;
-                boolean onHukumSide=pid.equals(str(round,"hukumId"))||
-                        strings(round.get("partnerIds")).contains(pid);
-                boolean won="win".equals(str(round,"result"))==onHukumSide;
-                if(won)streak++;else break;
-            }
-            if(streak>=2)streaks.add(FirebaseGateway.map("name",str(player,"name"),"streak",streak));
-        }
-        streaks.sort((a,b)->Integer.compare(num(b.get("streak")),num(a.get("streak"))));
-        Map<String,Object> update=FirebaseGateway.map(
-                "bestHukum",bestHukum,"badges",badges,"streaks",streaks,
-                "endTime",FirebaseGateway.now(),
-                "duration",end-start,"totalRounds",r.size(),
-                "leaderboard",leaderboard,"mvp",mvp,
-                "biggestWin",FirebaseGateway.map("name",winningName,"score",best),
-                "biggestLoss",FirebaseGateway.map("name",losingName,"score",worst));
+        Map<String,Object> update=SessionSummary.compute(players,r);
+        update.put("endTime",FirebaseGateway.now());
+        update.put("duration",end-start);
         api.patchDocument("sessions",id(s),update,"Session ended · Summary saved",str(s,"_updateTime"),()->{Map<String,Object> summary=new HashMap<>(s);summary.putAll(update);summary.put("endTime",Instant.ofEpochMilli(end).toString());showSessionSummary(summary);});
     }
     private List<NativeImageShare.RankRow> shareRankRows(List<Map<String,Object>> games) {
@@ -1629,6 +1530,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             paint.setColor(MUTED);paint.setTextSize(dp(10));canvas.drawText("Cumulative score • oldest → newest",left,getHeight()-dp(2),paint);
         }
     }
+    private int studioRoundVisible=20,studioSessionVisible=20;
     private void shareStudioPage(){
         title(content,"Share Studio","Preview, save and share your game cards");
         label(content,"CARD STYLE");
@@ -1638,10 +1540,17 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         }
         gap(content,12);dateFilterBar(content);
         content.addView(button("Preview Rankings",true,this::shareLeaderboard));gap(content,12);
-        label(content,"RECENT ROUNDS");
-        for(int i=0;i<Math.min(10,gameRounds().size());i++){Map<String,Object> round=gameRounds().get(i);content.addView(button(str(round,"hukumName")+" · Bid "+str(round,"bid")+" · "+when(round.get("timestamp")),false,()->shareRound(round)));gap(content,8);}
+        label(content,"ROUNDS IN SELECTED PERIOD");
+        List<Map<String,Object>> shareRounds=filteredRounds();int roundCount=Math.min(studioRoundVisible,shareRounds.size());
+        if(shareRounds.isEmpty())content.addView(text("No rounds in this period",13,MUTED,false));
+        for(int i=0;i<roundCount;i++){Map<String,Object> round=shareRounds.get(i);content.addView(button(str(round,"hukumName")+" · Bid "+str(round,"bid")+" · "+when(round.get("timestamp")),false,()->shareRound(round)));gap(content,8);}
+        if(roundCount<shareRounds.size()){content.addView(button("Show more rounds",false,()->{studioRoundVisible+=20;render(false);}));gap(content,8);}
         label(content,"SESSIONS");
-        for(Map<String,Object> session:sessions)if(session.get("endTime")!=null){content.addView(button(str(session,"sessionName"),false,()->shareSession(session)));gap(content,8);}
+        List<Map<String,Object>> ended=new ArrayList<>();for(Map<String,Object> session:sessions)if(session.get("endTime")!=null)ended.add(session);
+        if(ended.isEmpty())content.addView(text("No completed sessions yet",13,MUTED,false));
+        int sessionCount=Math.min(studioSessionVisible,ended.size());
+        for(int i=0;i<sessionCount;i++){Map<String,Object> session=ended.get(i);content.addView(button(str(session,"sessionName"),false,()->shareSession(session)));gap(content,8);}
+        if(sessionCount<ended.size())content.addView(button("Show more sessions",false,()->{studioSessionVisible+=20;render(false);}));
     }
     private byte[] pendingExport;
     private String exportedFingerprint=null,pendingExportFingerprint=null;

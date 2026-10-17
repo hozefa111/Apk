@@ -16,7 +16,7 @@ See [verification record and release gates](VERIFICATION.md).
 | Ranks/profile | Stable creation-order ties, medals, roles, streaks, win rate, best/worst, H2H, complete role histories | Visual and accessibility review |
 | Date filters | Sunday week; bounded month/year; inclusive custom days; DST-safe | Unit tests include 23/25-hour days |
 | Round/session history | Opponents, score deltas, durations and detailed summaries | Visual review and interaction matrix |
-| Session awards | HH zero-score hot-streak behavior; six badge types | Differential session-summary/device review |
+| Session awards | HH zero-score hot-streak behavior; six badge types | 64 actual-HH differential session fixtures; device review pending |
 | Sharing | Round/rank/session PNGs, pages, wrapped award values, bounded preview, palettes, gallery/folder save | Real share targets and extreme names review |
 | Backup/restore | Typed JSON archive; restore missing records; preflight conflicts; recovery archives and replay journal | 16 MB archive limit; large restores use recoverable batches |
 | Clear All | Saved current backup required; two confirmations and typed CONFIRM; players retained | Recoverable batches; completed batches persist if interrupted |
@@ -24,7 +24,7 @@ See [verification record and release gates](VERIFICATION.md).
 | Settings | Appearance, compact history, haptics, keep-awake, account and backup controls | Device review |
 | Search | Player, round, bid/result/date and session search | Large-history performance review |
 | Analytics | Date filters, bid/Hukum metrics, player score bars and cumulative trends | Device/visual review |
-| Share Studio | Palette selection, filtered rankings, round/session selection and preview | Device/visual review |
+| Share Studio | Palette selection, filtered rankings/rounds, paginated complete round/session selection and preview | Device/visual review |
 | Notifications | HH notification helper integration is not certified | Registered Android Firebase config and FCM device test unavailable |
 | Signing | Stable release signing hooks and fail-closed check | Stable key unavailable; v2.1 update compatibility unverified |
 
