@@ -73,6 +73,8 @@ class MainActivity : Activity() {
     private var chosenFolder = "All folders"
     private var continueVideo: VideoItem? = null
     private var scanGeneration = 0
+    // Android can revoke video access while the app is in the background.
+    private var previousLibraryAccess: Boolean? = null
     private var destroyed = false
     private var observerActive = false
     private val refreshLater = Runnable { if (!destroyed && hasLibraryPermission()) scan() }
@@ -151,7 +153,8 @@ class MainActivity : Activity() {
 
         updatePermissionsUi()
         applyAppearance()
-        if (hasLibraryPermission()) scan() else filterVideos()
+        previousLibraryAccess = hasLibraryPermission()
+        if (previousLibraryAccess == true) scan() else filterVideos()
         showPreviousCrashReport()
     }
 
@@ -175,16 +178,29 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        val hasAccess = hasLibraryPermission()
+        val accessChanged = previousLibraryAccess != null && previousLibraryAccess != hasAccess
+        previousLibraryAccess = hasAccess
         updatePermissionsUi()
         if (::adapter.isInitialized) {
             applyAppearance()
             adapter.refreshProgress()
-            refreshContinueCard()
             if (gallery != preferences.gallery && tab != Tab.FOLDERS) setGalleryMode(preferences.gallery)
             val rescan = preferences.prefs.getBoolean("needs_rescan", false)
             if (rescan) preferences.prefs.edit().putBoolean("needs_rescan", false).apply()
-            if (hasLibraryPermission() && (allVideos.isEmpty() || rescan)) scan()
-            else filterVideos()
+            if (!hasAccess) {
+                // Forget the stale on-screen MediaStore rows, not any saved user favorites.
+                ++scanGeneration
+                allVideos = emptyList()
+                continueVideo = null
+                rebuildFolders()
+                filterVideos()
+            } else if (accessChanged || allVideos.isEmpty() || rescan) {
+                scan()
+            } else {
+                filterVideos()
+            }
+            refreshContinueCard()
         }
     }
 
