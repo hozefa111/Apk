@@ -20,6 +20,9 @@ class VideoRepository(private val context: Context) {
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             columns.add(MediaStore.Video.Media.RELATIVE_PATH)
+        } else {
+            // Only legacy Android exposes full DATA paths for album grouping.
+            columns.add(MediaStore.Video.Media.DATA)
         }
         val projection = columns.toTypedArray()
         context.contentResolver.query(
@@ -37,11 +40,16 @@ class VideoRepository(private val context: Context) {
             val bucketIndex = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.BUCKET_DISPLAY_NAME)
             val relativeIndex = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                 cursor.getColumnIndex(MediaStore.Video.Media.RELATIVE_PATH) else -1
+            val legacyPathIndex = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q)
+                cursor.getColumnIndex(MediaStore.Video.Media.DATA) else -1
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idIndex)
                 val uri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
                 val rawFolder = if (relativeIndex >= 0) cursor.getString(relativeIndex) else null
+                val legacyFolder = if (legacyPathIndex >= 0)
+                    legacyMediaFolder(cursor.getString(legacyPathIndex)) else null
                 val folder = rawFolder?.trim('/')?.takeIf { it.isNotBlank() }
+                    ?: legacyFolder
                     ?: cursor.getString(bucketIndex)?.takeIf { it.isNotBlank() } ?: "Other"
                 result.add(
                     VideoItem(
