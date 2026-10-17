@@ -141,6 +141,13 @@ class PlayerActivity : Activity() {
             else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
         repeatOne = userOptions.repeat
+        resizeMode = when (userOptions.defaultAspect) {
+            "Crop" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            "Stretch" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+            else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+        }
+        playerView.resizeMode = resizeMode
+        findViewById<TextView>(R.id.btnAspect).text = userOptions.defaultAspect.uppercase(java.util.Locale.ROOT)
         PlaybackQueue.ensureRestored(this)
         runCatching {
             playerView.subtitleView?.setFractionalTextSize(0.0533f * userOptions.subtitleScale)
@@ -528,6 +535,7 @@ class PlayerActivity : Activity() {
             else -> "Fit"
         }
         findViewById<TextView>(R.id.btnAspect).text = caption.uppercase(java.util.Locale.ROOT)
+        userOptions.defaultAspect = caption
         notifyGesture("Screen: $caption")
         scheduleAutoHide()
     }
@@ -654,10 +662,8 @@ class PlayerActivity : Activity() {
             },
             onPinch = { zoomIn ->
                 if (!touchLocked) {
-                    resizeMode = if (zoomIn) AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                                 else AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    playerView.resizeMode = resizeMode
-                    notifyGesture(if (zoomIn) "Fill screen" else "Fit to screen")
+                    setAspectRatio(if (zoomIn) AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                   else AspectRatioFrameLayout.RESIZE_MODE_FIT)
                 }
             },
             onHoldBoost = { pressed ->
@@ -811,20 +817,12 @@ class PlayerActivity : Activity() {
     }
 
     private fun cycleAspectRatio() {
-        resizeMode = when (resizeMode) {
+        val next = when (resizeMode) {
             AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_FILL
             else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
         }
-        playerView.resizeMode = resizeMode
-        val caption = when (resizeMode) {
-            AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> "Crop"
-            AspectRatioFrameLayout.RESIZE_MODE_FILL -> "Stretch"
-            else -> "Fit"
-        }
-        findViewById<TextView>(R.id.btnAspect).text = "▣  $caption"
-        notifyGesture("Screen: $caption")
-        scheduleAutoHide()
+        setAspectRatio(next)
     }
 
     private fun rotateVideo() {
