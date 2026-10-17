@@ -82,7 +82,9 @@ jobs:
             adb shell input keyevent 4
             adb shell content query --uri content://media/external/video/media --projection _id:_display_name > media-rows.txt
             grep -F 'orbit_smoke.mp4' media-rows.txt
-            adb shell am start -n com.orbitplayer.app/.PlayerActivity --es video_uri "content://media/external/video/media/$(grep -F 'orbit_smoke.mp4' media-rows.txt | sed -E 's/.*_id=([0-9]+).*/\1/' | head -1 | tr -d '\r')"
+            adb shell pm list packages | grep -F com.orbitplayer.app
+            adb shell cmd package resolve-activity --brief -n com.orbitplayer.app/.PlayerActivity
+            adb shell am start -W -n com.orbitplayer.app/.PlayerActivity --es video_uri "content://media/external/video/media/$(grep -F 'orbit_smoke.mp4' media-rows.txt | sed -E 's/.*_id=([0-9]+).*/\1/' | head -1 | tr -d '\r')"
             sleep 8
             adb shell dumpsys activity activities > activity-state.txt
             adb logcat -d -v time > emulator-logcat.txt
