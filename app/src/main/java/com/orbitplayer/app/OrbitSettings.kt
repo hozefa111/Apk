@@ -25,8 +25,8 @@ class OrbitSettings(context: Context) {
         get() = prefs.getInt("folder_columns", 3).coerceIn(2,4)
         set(value) = prefs.edit().putInt("folder_columns", value.coerceIn(2,4)).apply()
     var sort: Int
-        get() = prefs.getInt("sort", 0).coerceIn(0,3)
-        set(value) = prefs.edit().putInt("sort", value.coerceIn(0,3)).apply()
+        get() = prefs.getInt("sort", 0).coerceIn(0,4)
+        set(value) = prefs.edit().putInt("sort", value.coerceIn(0,4)).apply()
     var resume: Boolean
         get() = prefs.getBoolean("resume", true)
         set(value) = prefs.edit().putBoolean("resume", value).apply()

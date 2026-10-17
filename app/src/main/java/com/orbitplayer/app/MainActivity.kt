@@ -37,7 +37,7 @@ import java.util.concurrent.Executors
 class MainActivity : Activity() {
     private enum class Filter { ALL, CONTINUE, RECENT, HISTORY, FAVORITES }
     private enum class Tab { VIDEOS, FOLDERS, CONTINUE, SEARCH }
-    private enum class Sort { NEWEST, OLDEST, NAME, SIZE }
+    private enum class Sort { NEWEST, OLDEST, NAME, SIZE, DURATION }
 
     private val requestLibrary = 501
     private val requestFile = 502
@@ -60,6 +60,7 @@ class MainActivity : Activity() {
     private lateinit var grant: TextView
     private lateinit var sortButton: TextView
     private lateinit var folderChip: TextView
+    private lateinit var formatChip: TextView
     private lateinit var continueCard: View
     private lateinit var continueThumb: ImageView
     private lateinit var search: EditText
@@ -71,6 +72,7 @@ class MainActivity : Activity() {
     private var gallery = true
     private var query = ""
     private var chosenFolder = "All folders"
+    private var selectedFormat = "" // Empty means all file types.
     private var continueVideo: VideoItem? = null
     private var scanGeneration = 0
     // Android can revoke video access while the app is in the background.
@@ -99,6 +101,7 @@ class MainActivity : Activity() {
         grant = findViewById(R.id.btnGrant)
         sortButton = findViewById(R.id.btnSort)
         folderChip = findViewById(R.id.folderFilter)
+        formatChip = findViewById(R.id.formatFilter)
         continueCard = findViewById(R.id.continueCard)
         continueThumb = findViewById(R.id.continueThumb)
         search = findViewById(R.id.search)
@@ -127,6 +130,7 @@ class MainActivity : Activity() {
                 it in collections.names()
             }
             query = state.getString("orbit_query", "") ?: ""
+            selectedFormat = state.getString("orbit_format", "") ?: ""
         }
         // Let RecyclerView restore its scroll offset after asynchronous MediaStore results.
         adapter.stateRestorationPolicy =
@@ -151,6 +155,7 @@ class MainActivity : Activity() {
         grant.setOnClickListener { requestVideoPermissions() }
         sortButton.setOnClickListener { showSortDialog() }
         folderChip.setOnClickListener { showFolderDialog() }
+        formatChip.setOnClickListener { showFormatDialog() }
         findViewById<View>(R.id.filterAll).setOnClickListener { chooseFilter(Filter.ALL) }
         findViewById<View>(R.id.filterProgress).setOnClickListener { chooseFilter(Filter.CONTINUE) }
         findViewById<View>(R.id.filterRecent).setOnClickListener { chooseFilter(Filter.RECENT) }
@@ -191,6 +196,7 @@ class MainActivity : Activity() {
         outState.putBoolean("orbit_gallery", gallery)
         outState.putString("orbit_playlist", currentPlaylist)
         outState.putString("orbit_query", query)
+        outState.putString("orbit_format", selectedFormat)
         super.onSaveInstanceState(outState)
     }
 
@@ -305,13 +311,29 @@ class MainActivity : Activity() {
                 }.setNegativeButton("Cancel", null).show()
             return
         }
-        val values = arrayOf("Newest first", "Oldest first", "Name A to Z", "Largest first")
+        val values = arrayOf("Newest first", "Oldest first", "Name A to Z",
+            "Largest file first", "Longest video first")
         AlertDialog.Builder(this).setTitle("Sort videos")
             .setSingleChoiceItems(values, sort.ordinal) { dialog, selected ->
                 sort = Sort.values()[selected]
                 preferences.sort = selected
-                sortButton.text = arrayOf("Newest", "Oldest", "Name A–Z", "Largest")[selected] + "  ▾"
+                sortButton.text = arrayOf("Newest", "Oldest", "Name A–Z",
+                    "Largest", "Longest")[selected] + "  ▾"
                 filterVideos()
+                dialog.dismiss()
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun showFormatDialog() {
+        val formats = allVideos.asSequence().map { videoExtension(it.title) }
+            .filter { it.isNotBlank() }.distinct().sorted().toList()
+        val entries = listOf("All formats") + formats.map { it.uppercase(java.util.Locale.ROOT) }
+        val selection = (formats.indexOf(selectedFormat) + 1).coerceAtLeast(0)
+        AlertDialog.Builder(this).setTitle("Video file type")
+            .setSingleChoiceItems(entries.toTypedArray(), selection) { dialog, index ->
+                selectedFormat = if (index == 0) "" else formats[index - 1]
+                filterVideos()
+                videos.scrollToPosition(0)
                 dialog.dismiss()
             }.setNegativeButton("Cancel", null).show()
     }
@@ -398,6 +420,7 @@ class MainActivity : Activity() {
         val filtered = allVideos.asSequence()
             .filter { it.folder !in hiddenFolders }
             .filter { chosenFolder == "All folders" || it.folder == chosenFolder }
+            .filter { selectedFormat.isEmpty() || videoExtension(it.title) == selectedFormat }
             .filter { playlistPositions == null || it.uri.toString() in playlistPositions }
             .filter { query.isBlank() || it.title.contains(query, ignoreCase = true) ||
                 it.folder.contains(query, ignoreCase = true) }
@@ -423,6 +446,7 @@ class MainActivity : Activity() {
             sort == Sort.NEWEST -> filtered.sortedByDescending { it.modifiedSeconds }
             sort == Sort.OLDEST -> filtered.sortedBy { it.modifiedSeconds }
             sort == Sort.NAME -> filtered.sortedBy { it.title.lowercase() }
+            sort == Sort.DURATION -> filtered.sortedByDescending { it.durationMs }
             else -> filtered.sortedByDescending { it.sizeBytes }
         }.toList()
         adapter.submit(visibleVideos)
@@ -452,13 +476,16 @@ class MainActivity : Activity() {
         renderChrome()
         folderChip.text = if (chosenFolder == "All folders") "Folders  ▾"
                           else chosenFolder.substringAfterLast('/').take(18) + "  ▾"
+        formatChip.text = if (selectedFormat.isEmpty()) "Format  ▾"
+            else "${selectedFormat.uppercase(java.util.Locale.ROOT)}  ▾"
         for ((id, selected) in arrayOf(
             R.id.filterAll to (filter == Filter.ALL),
             R.id.filterProgress to (filter == Filter.CONTINUE),
             R.id.filterRecent to (filter == Filter.RECENT),
             R.id.filterHistory to (filter == Filter.HISTORY),
             R.id.filterFavorites to (filter == Filter.FAVORITES),
-            R.id.folderFilter to (chosenFolder != "All folders")
+            R.id.folderFilter to (chosenFolder != "All folders"),
+            R.id.formatFilter to selectedFormat.isNotEmpty()
         )) {
             val view = findViewById<TextView>(id)
             view.setBackgroundResource(if (selected) R.drawable.orbit_filter_active
@@ -669,6 +696,7 @@ class MainActivity : Activity() {
 
     private fun openPlaylist(name: String) {
         currentPlaylist = name
+        selectedFormat = ""
         tab = Tab.VIDEOS
         chosenFolder = "All folders"
         filter = Filter.ALL
@@ -713,6 +741,7 @@ class MainActivity : Activity() {
 
     private fun setTab(next: Tab) {
         tab = next
+        selectedFormat = ""
         preferences.lastTab = next.name
         currentPlaylist = null
         filter = if (next == Tab.CONTINUE) Filter.CONTINUE else Filter.ALL
@@ -746,6 +775,8 @@ class MainActivity : Activity() {
             if (tab == Tab.CONTINUE) View.GONE else View.VISIBLE
         findViewById<View>(R.id.folderFilter).visibility =
             if (tab == Tab.CONTINUE) View.GONE else View.VISIBLE
+        formatChip.visibility =
+            if (folders || tab == Tab.CONTINUE) View.GONE else View.VISIBLE
         findViewById<TextView>(R.id.filterProgress).text =
             if (tab == Tab.CONTINUE) "Unfinished" else "Continue"
         findViewById<View>(R.id.filterHistory).visibility =
@@ -811,6 +842,7 @@ class MainActivity : Activity() {
 
     private fun openAlbum(album: FolderAlbum) {
         tab = Tab.VIDEOS
+        selectedFormat = ""
         chosenFolder = album.path
         preferences.lastFolder = album.path
         filter = Filter.ALL

@@ -4,6 +4,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class FormatUtilsTest {
+    @Test fun extensionFilterIsCaseInsensitive() {
+        assertEquals("mkv", videoExtension("Holiday.MKV"))
+        assertEquals("mp4", videoExtension("clip.archive.Mp4"))
+    }
+    @Test fun unnamedOrInvalidExtensionsAreNotOffered() {
+        assertEquals("", videoExtension("video"))
+        assertEquals("", videoExtension("movie."))
+        assertEquals("", videoExtension("clip.a!"))
+    }
     @Test fun shortVideo() { assertEquals("01:25", formatDuration(85_000)) }
     @Test fun longVideo() { assertEquals("1:01:01", formatDuration(3_661_000)) }
     @Test fun negativeDuration() { assertEquals("00:00", formatDuration(-123)) }

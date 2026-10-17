@@ -34,3 +34,12 @@ internal fun legacyMediaFolder(absoluteFilePath: String?): String? {
     }
     return relative.trim('/').takeIf { it.isNotBlank() }
 }
+
+// Only recognized file extensions are offered in the library's Format filter.
+// Case-insensitive and independent of URI/provider display-name capitalization.
+internal fun videoExtension(filename: String): String {
+    val extension = filename.substringAfterLast('.', "").lowercase(Locale.ROOT)
+    return extension.takeIf {
+        it.length in 2..6 && it.all(Char::isLetterOrDigit)
+    } ?: ""
+}
