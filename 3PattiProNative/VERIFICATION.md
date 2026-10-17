@@ -79,9 +79,11 @@ so no successful local device run is claimed.
 1. Device instrumentation results and visual inspection of the exact final build.
    CI matrix is configured for Android 8/API 26, Android 11/API 30 and Android 15/API 35;
    a configured matrix is not a passed result.
-2. A stable private release keystore, signing variables and installed-v2.1 signing
-   certificate comparison. User confirmed no stable signing setup is available.
-   `verifyReleaseSigning` fails closed until configured.
+2. User approved a fresh install and a new stable signing identity on 2026-10-17.
+   A private RSA-3072/PKCS12 key is now created outside GitHub. The signed release
+   candidate passed 68 release JVM tests, lint and APK Signature Scheme v2 verification.
+   It cannot update the old v2.1 install; future updates must reuse this new key.
+   CI release signing still needs the private signing variables; they are not committed.
 3. Production Firebase Android registration/configuration and real-device account,
    permission and optional FCM delivery verification. User confirmed Android
    registration/config is unavailable. No production configuration is created.
@@ -144,3 +146,12 @@ its pending URI list across process recreation, rejects an empty restored reques
 and deletes partially created files after a copy failure. Missing folder handlers
 and cleanup errors report an export failure instead of crashing. These follow-up
 changes require the new exact-commit CI results before certification.
+
+## Fresh-install signing identity
+
+User explicitly approved fresh installation with a new stable key. Public certificate
+SHA-256: `DC:06:97:A0:35:26:61:2B:C5:4C:3D:9A:D0:B4:A1:0E:9E:D9:B3:B6:AD:22:E4:E5:32:69:F9:04:A7:2B:A9:B4`.
+SHA-1: `E3:71:C5:BA:75:06:0A:3E:23:2E:81:76:80:78:1E:CA:1D:BF:49:0B`.
+The encrypted keystore and its signing variables remain private and outside this
+repository. No final APK is distributed. Android Firebase registration and actual
+push-delivery verification still need the project owner's client configuration.

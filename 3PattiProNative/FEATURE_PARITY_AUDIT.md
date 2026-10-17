@@ -26,7 +26,7 @@ See [verification record and release gates](VERIFICATION.md).
 | Analytics | Date filters, bid/Hukum metrics, player score bars and cumulative trends | Device/visual review |
 | Share Studio | Palette selection, filtered rankings/rounds, paginated complete round/session selection and preview | Device/visual review |
 | Notifications | HH notification helper integration is not certified | Registered Android Firebase config and FCM device test unavailable |
-| Signing | Stable release signing hooks and fail-closed check | Stable key unavailable; v2.1 update compatibility unverified |
+| Signing | New stable signing identity, signed candidate and fail-closed check | Fresh install explicitly approved; reuse this key for future updates |
 
 Builds/tests never write production Firebase. HH repository remains unchanged.
 100% parity and a final release are explicitly withheld until remaining gates pass.
