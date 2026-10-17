@@ -16,6 +16,7 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.ArrayAdapter;
@@ -693,7 +694,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         java.util.Calendar c=java.util.Calendar.getInstance();
         long selected=isStart?customStart:customEnd;
         if(selected>0)c.setTimeInMillis(selected);
-        android.app.DatePickerDialog dialog=new android.app.DatePickerDialog(this,(picker,year,month,day)->{
+        android.app.DatePickerDialog dialog=new android.app.DatePickerDialog(this,R.style.Theme_ThreePatti_Dialog,(picker,year,month,day)->{
             java.util.Calendar picked=java.util.Calendar.getInstance();
             picked.clear();picked.set(year,month,day);
             long value=picked.getTimeInMillis();
@@ -707,7 +708,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             else customEnd=value;
             render(false);
         },c.get(java.util.Calendar.YEAR),c.get(java.util.Calendar.MONTH),c.get(java.util.Calendar.DAY_OF_MONTH));
-        motion.dialog(dialog);dialog.show();
+        motion.dialog(dialog);DialogUi.install(dialog);dialog.show();
     }
 
     private void profilePage() {
@@ -805,31 +806,46 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         content.addView(panel);gap(content,10);
     }
     private void showRoleRounds(String pid,String role,List<Map<String,Object>> source) {
-        StringBuilder out=new StringBuilder();
-        int total=0;
-        for(Map<String,Object> r:source) {
-            String actual=pid.equals(str(r,"hukumId"))?"hukum":
-                    strings(r.get("partnerIds")).contains(pid)?"partner":"nonpartner";
-            if(!role.equals(actual))continue;
-            total++;
-            out.append(when(r.get("timestamp"))).append(" · ")
-                    .append(str(r,"hukumName")).append(" · ")
-                    .append(num(map(r.get("scoreChanges")).get(pid))).append("\n");
+        List<Map<String,Object>> selected=RoleHistory.select(pid,role,source);
+        String heading="hukum".equals(role)?"Hukum":"partner".equals(role)?"Partner":"Non-partner";
+        MotionDialogBuilder builder=new MotionDialogBuilder(this,motion);
+        if(selected.isEmpty()){
+            LinearLayout body=DialogUi.body(this);DialogUi.fact(body,"Player",nameOf(pid),WHITE);
+            body.addView(DialogUi.text(this,"No rounds in this role for the selected period.",15,MUTED,false));
+            builder.setView(DialogUi.scroll(this,body));
+        }else{
+            ListView list=new DialogUi.BoundedList(this);list.setContentDescription("Role round history");list.setFastScrollEnabled(selected.size()>30);
+            LinearLayout header=DialogUi.body(this);DialogUi.fact(header,"Player",nameOf(pid),WHITE);
+            long points=0;for(Map<String,Object> round:selected)points+=num(map(round.get("scoreChanges")).get(pid));
+            header.addView(DialogUi.text(this,selected.size()+" rounds · Total points "+(points>0?"+":"")+points,13,MUTED,false));DialogUi.gap(header,8);
+            list.addHeaderView(header,null,false);list.setAdapter(new RoleHistoryAdapter(this,pid,selected,r->when(r.get("timestamp"))));
+            list.setOnItemClickListener((parent,view,position,itemId)->{Object item=parent.getItemAtPosition(position);if(item instanceof Map)roundDetails(map(item));});
+            builder.setView(list);
         }
-        new MotionDialogBuilder(this,motion).setTitle(role.toUpperCase(Locale.ROOT)+" · "+total+" rounds")
-                .setMessage(total==0?"No rounds":out.toString())
-                .setPositiveButton("Close",null).show();
+        builder.setTitle(heading+" · "+selected.size()+" rounds").setPositiveButton("Close",null).show();
+    }
+    private View roundDetailBody(Map<String,Object> round,boolean includeScores){
+        LinearLayout body=DialogUi.body(this);
+        DialogUi.fact(body,"Date",when(round.get("timestamp")),WHITE);
+        DialogUi.fact(body,"Hukum",str(round,"hukumName"),GOLD);
+        DialogUi.fact(body,"Bid",str(round,"bid"),WHITE);
+        boolean win="win".equals(str(round,"result"));
+        DialogUi.fact(body,"Result",win?"Hukum win":"Hukum loss",win?GREEN:RED);
+        DialogUi.fact(body,"Partners",android.text.TextUtils.join(", ",strings(round.get("partnerNames"))),WHITE);
+        DialogUi.fact(body,"Non-partners",android.text.TextUtils.join(", ",strings(round.get("nonPartnerNames"))),WHITE);
+        if(includeScores){
+            DialogUi.heading(body,"SCORE CHANGES");Map<String,Object> changes=map(round.get("scoreChanges"));
+            LinkedHashSet<String> order=new LinkedHashSet<>(strings(round.get("playerIds")));order.addAll(changes.keySet());
+            for(String pid:order)if(changes.containsKey(pid)){
+                String role=pid.equals(str(round,"hukumId"))?"Hukum":strings(round.get("partnerIds")).contains(pid)?"Partner":"Non-partner";
+                DialogUi.score(body,nameOf(pid),role,num(changes.get(pid)));
+            }
+        }
+        return DialogUi.scroll(this,body);
     }
     private void roundDetails(Map<String,Object> round) {
-        StringBuilder body=new StringBuilder("Hukum: "+str(round,"hukumName")+
-                "\nBid: "+str(round,"bid")+"\nResult: "+str(round,"result")+
-                "\nDate: "+when(round.get("timestamp"))+"\n\nSCORE CHANGES\n");
-        for(Map.Entry<String,Object> e:map(round.get("scoreChanges")).entrySet()) {
-            body.append(nameOf(e.getKey())).append("  ")
-                    .append(num(e.getValue())>0?"+":"").append(e.getValue()).append("\n");
-        }
-        new MotionDialogBuilder(this,motion).setTitle("Round details").setMessage(body.toString())
-                .setPositiveButton("Close",null).show();
+        new MotionDialogBuilder(this,motion).setTitle("Round details").setView(roundDetailBody(round,true))
+            .setPositiveButton("Close",null).show();
     }
 
     private void addRankCard(Map<String,Object> p,int position) {
@@ -972,11 +988,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private void roundActions(Map<String,Object> round) {
         AlertDialog.Builder dialog=new MotionDialogBuilder(this,motion)
                 .setTitle("Round · "+when(round.get("timestamp")))
-                .setMessage("Hukum: "+str(round,"hukumName")+
-                        "\nBid: "+str(round,"bid")+
-                        "\nResult: "+str(round,"result")+
-                        "\nPartners: "+android.text.TextUtils.join(", ",strings(round.get("partnerNames")))+
-                        "\nNon-partners: "+android.text.TextUtils.join(", ",strings(round.get("nonPartnerNames"))))
+                .setView(roundDetailBody(round,false))
                 .setPositiveButton("Details",(d,w)->roundDetails(round))
                 .setNeutralButton("Share Image",(d,w)->shareRound(round));
         if(loggedIn)dialog.setNegativeButton("Delete",(d,w)->confirmRemove("rounds",round,"round"));
@@ -1312,8 +1324,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     private void showSessionSummary(Map<String,Object> session) {showSessionSummary(session,false);}
     private void showSessionSummary(Map<String,Object> session,boolean celebrate) {
-        ScrollView scroller=new ScrollView(this);
-        scroller.setFillViewport(true);
+        ScrollView scroller=new DialogUi.BoundedScroll(this);
+        scroller.setFillViewport(false);
         LinearLayout display=column();pad(display,18,14,18,18);
         scroller.addView(display);
         display.addView(text("♛  "+str(session,"sessionName"),23,GOLD,true));

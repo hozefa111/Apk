@@ -276,15 +276,16 @@ public final class NativeImageShare {
         activity.runOnUiThread(()->{
             if(activity.isFinishing()||activity.isDestroyed())return;
             MotionEngine motion=activity instanceof MainActivity?((MainActivity)activity).motionEngine():null;
-            android.widget.LinearLayout body=new android.widget.LinearLayout(activity);body.setOrientation(android.widget.LinearLayout.VERTICAL);
+            android.widget.LinearLayout body=new DialogUi.PreviewBody(activity);body.setPadding(DialogUi.dp(activity,12),0,DialogUi.dp(activity,12),DialogUi.dp(activity,8));
             android.widget.ImageView preview=new android.widget.ImageView(activity);preview.setAdjustViewBounds(true);preview.setScaleType(android.widget.ImageView.ScaleType.FIT_START);
             android.widget.ScrollView previewScroll=new android.widget.ScrollView(activity);previewScroll.setContentDescription("Scroll full share image");
             previewScroll.addView(preview,new android.widget.FrameLayout.LayoutParams(-1,-2));
-            body.addView(previewScroll,new android.widget.LinearLayout.LayoutParams(-1,(int)(activity.getResources().getDisplayMetrics().heightPixels*0.5f)));
+            body.addView(previewScroll,new android.widget.LinearLayout.LayoutParams(-1,0,1));
             android.widget.LinearLayout controls=new android.widget.LinearLayout(activity);controls.setGravity(android.view.Gravity.CENTER);
             android.widget.Button previous=new android.widget.Button(activity),next=new android.widget.Button(activity);
             android.widget.TextView pageLabel=new android.widget.TextView(activity);pageLabel.setGravity(android.view.Gravity.CENTER);
-            previous.setText("Previous");next.setText("Next");controls.addView(previous);controls.addView(pageLabel,new android.widget.LinearLayout.LayoutParams(0,-2,1));controls.addView(next);body.addView(controls);
+            previous.setText("Previous");next.setText("Next");previous.setTextColor(DialogUi.GOLD);next.setTextColor(DialogUi.GOLD);pageLabel.setTextColor(DialogUi.WHITE);previous.setAllCaps(false);next.setAllCaps(false);previous.setBackground(DialogUi.background(activity,DialogUi.CARD,12));next.setBackground(DialogUi.background(activity,DialogUi.CARD,12));pageLabel.setTextSize(13);controls.addView(previous);controls.addView(pageLabel,new android.widget.LinearLayout.LayoutParams(0,-2,1));controls.addView(next);body.addView(controls);
+            if(activity.getResources().getConfiguration().fontScale>1.3f&&activity.getResources().getConfiguration().screenWidthDp<400){controls.setOrientation(android.widget.LinearLayout.VERTICAL);previous.setLayoutParams(new android.widget.LinearLayout.LayoutParams(-1,-2));pageLabel.setLayoutParams(new android.widget.LinearLayout.LayoutParams(-1,-2));next.setLayoutParams(new android.widget.LinearLayout.LayoutParams(-1,-2));}
             int[] position={0};Bitmap[] displayed={null};
             Runnable show=()->{
                 try{

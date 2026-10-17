@@ -1,9 +1,15 @@
-# 3 Patti PRO Native Android — 2.3.0
+# 3 Patti PRO Native Android — 2.3.1
 
 Native Java Android application; no WebView. Source of truth: `hozefa111/hh`
 commit `8b2189d28d7bd9d9c21f509e87bf89717816898f`.
 
 See the [verification record and operating limits](VERIFICATION.md).
+
+## Dialog readability update
+
+2.3.1 replaces dense role-history/round text dumps with wrapping cards and score
+colours. Shared dark dialogs, adaptive footers and bounded summary/share bodies
+keep long content readable. See [dialog changes and coverage](DIALOG_READABILITY.md).
 
 ## Animation update
 

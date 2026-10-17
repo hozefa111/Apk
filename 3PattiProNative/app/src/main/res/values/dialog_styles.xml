@@ -1,0 +1,17 @@
+<resources>
+    <style name="Theme.ThreePatti.Dialog" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowBackground">@drawable/dialog_surface</item>
+        <item name="android:colorBackground">#16171C</item>
+        <item name="android:colorBackgroundFloating">#16171C</item>
+        <item name="android:textColorPrimary">#FFFFFF</item>
+        <item name="android:textColorSecondary">#A5A7B0</item>
+        <item name="android:colorAccent">#F6D365</item>
+        <item name="android:colorControlNormal">#A5A7B0</item>
+        <item name="android:colorControlActivated">#F6D365</item>
+        <item name="android:windowMinWidthMajor">94%</item>
+        <item name="android:windowMinWidthMinor">94%</item>
+        <item name="android:windowSoftInputMode">adjustResize</item>
+        <item name="android:listPreferredItemHeightSmall">56dp</item>
+    </style>
+</resources>
