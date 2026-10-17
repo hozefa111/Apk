@@ -39,6 +39,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private int displayedTab=-1;
     private Map<String,MotionEngine.Before> scoreMotion;
     private String previousLeader="";
+    private long sessionStartRevealUntil;
     private Map<String,Object> deferredRoundResult,deferredSessionSummary;
 
     private AlertDialog authDialog;
@@ -174,6 +175,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(tab==2&&roundSaveView!=null&&roundHintView!=null&&roundPreviewSection!=null)updateRoundForm();
     }
     @Override public void notice(String msg) {
+        if("Session started".equals(msg))sessionStartRevealUntil=resumed?android.os.SystemClock.uptimeMillis()+10000:0;
         Toast.makeText(this,msg,Toast.LENGTH_LONG).show();
         if(motion!=null&&toolbar!=null){String lower=msg.toLowerCase(Locale.ROOT);if(lower.contains("failed")||lower.contains("error")||lower.contains("cannot")||lower.contains("not saved"))motion.error(toolbar);}
         // Toast messages must not reset the current view or move the page.
@@ -192,7 +194,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(deferredRoundResult!=null){Map<String,Object> result=deferredRoundResult;deferredRoundResult=null;showRoundSaved(result,false);}
         if(deferredSessionSummary!=null){Map<String,Object> result=deferredSessionSummary;deferredSessionSummary=null;showSessionSummary(result,false);}
     }
-    @Override protected void onPause(){resumed=false;motionEvents.invalidate();if(motion!=null)motion.pause();persistDraft();super.onPause();}
+    @Override protected void onPause(){resumed=false;sessionStartRevealUntil=0;motionEvents.invalidate();if(motion!=null)motion.pause();persistDraft();super.onPause();}
     MotionEngine motionEngine(){return motion;}
 
     private boolean persistDraft(){
@@ -507,7 +509,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                     "●  SESSION ACTIVE · "+str(session,"sessionName");
             TextView sessionStatus=text(status,13,session==null?MUTED:GREEN,true);
             sessionBar.addView(sessionStatus);
-            if(session!=null&&screenEntry)motion.pulse(sessionStatus);
+            boolean revealStart=session!=null&&android.os.SystemClock.uptimeMillis()<sessionStartRevealUntil;
+            if(session!=null&&(screenEntry||revealStart))motion.pulse(sessionStatus);
+            if(revealStart){motion.enter(sessionBar,0);sessionStartRevealUntil=0;}
             if(session!=null) {
                 gap(sessionBar,7);
                 sessionBar.addView(text("Started "+when(session.get("startTime")),12,MUTED,false));
@@ -1380,7 +1384,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 display.addView(podium,0);motion.staged(podium);
             }
             if(motion.full())display.addView(button("Skip animation",false,()->motion.cancelAll()),1);
-            motion.staged(display);motion.staged(awards);
+            motion.staged(display);motion.revealAwards(awards);
         }
         AlertDialog summaryDialog=new MotionDialogBuilder(this,motion).setTitle("SESSION SUMMARY")
                 .setView(scroller)

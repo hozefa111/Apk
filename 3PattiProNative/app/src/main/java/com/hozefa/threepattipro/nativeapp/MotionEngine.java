@@ -149,6 +149,29 @@ final class MotionEngine {
             }
         });
     }
+    void revealAwards(LinearLayout group) {
+        if(closed||!full())return;
+        final ViewTreeObserver original=group.getViewTreeObserver();
+        final ViewTreeObserver.OnPreDrawListener[] listener={null};
+        final View.OnAttachStateChangeListener[] detach={null};
+        Runnable remove=()->{
+            if(original.isAlive())original.removeOnPreDrawListener(listener[0]);
+            if(group.getViewTreeObserver().isAlive())group.getViewTreeObserver().removeOnPreDrawListener(listener[0]);
+            if(detach[0]!=null)group.removeOnAttachStateChangeListener(detach[0]);
+        };
+        Runnable complete=()->{remove.run();pending.remove(remove);pendingOwners.remove(remove);};
+        listener[0]=()->{
+            if(!enabled()||!full()){complete.run();return true;}
+            Rect area=new Rect();
+            if(group.isShown()&&group.getGlobalVisibleRect(area)&&area.height()>=Math.min(group.getHeight(),dp(120))){complete.run();staged(group);}
+            return true;
+        };
+        detach[0]=new View.OnAttachStateChangeListener(){
+            public void onViewAttachedToWindow(View v){}
+            public void onViewDetachedFromWindow(View v){complete.run();}
+        };
+        pending.add(remove);pendingOwners.put(remove,group);group.addOnAttachStateChangeListener(detach[0]);group.getViewTreeObserver().addOnPreDrawListener(listener[0]);
+    }
     void tap(View view) {
         if(!enabled()||!full())return;
         cancelFor(view);
