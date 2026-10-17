@@ -93,6 +93,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     @Override protected void onDestroy() {
         persistDraft();
+        if(authDialog!=null){authDialog.dismiss();authDialog=null;}
         clock.removeCallbacksAndMessages(null);
         if (api != null) api.stop();
         super.onDestroy();
@@ -381,7 +382,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         navigation.removeAllViews();
         if(!hasData && tab<6) {
             gap(content,80);content.addView(text("♠  Loading your table…",20,GOLD,true));
-            gap(content,16);content.addView(text("Connecting to your existing Firebase project",13,MUTED,false));
+            gap(content,16);content.addView(text("Connecting to your shared table",13,MUTED,false));
         } else {
             switch(tab) {
                 case 0:home();break;
@@ -706,7 +707,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         label(content,"BEST & WORST ROUND");
         if(best!=null) {
             final Map<String,Object> bestR=best;
-            content.addView(button("Best round: +"+max+"  ·  Tap for details",false,()->roundDetails(bestR)));
+            content.addView(button("Best round: "+(max>=0?"+":"")+max+"  ·  Tap for details",false,()->roundDetails(bestR)));
             gap(content,8);
             final Map<String,Object> worstR=worst;
             content.addView(button("Worst round: "+min+"  ·  Tap for details",false,()->roundDetails(worstR)));
@@ -1259,7 +1260,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         Map<String,Object> bestHukum=map(session.get("bestHukum"));
         Map<String,Object> top=map(session.get("biggestWin"));
         Map<String,Object> bottom=map(session.get("biggestLoss"));
-        if(!mvp.isEmpty())line(awards,"★ MVP",str(mvp,"name")+"  +"+str(mvp,"score"),GREEN);
+        if(!mvp.isEmpty())line(awards,"★ MVP",str(mvp,"name")+"  "+(num(mvp.get("score"))>=0?"+":"")+str(mvp,"score"),num(mvp.get("score"))>=0?GREEN:RED);
         if(!bestHukum.isEmpty())line(awards,"♛ Best Hukum",
                 str(bestHukum,"name")+" · "+str(bestHukum,"winRate")+"%",GOLD);
         if(!top.isEmpty()&&!"-".equals(str(top,"name")))
@@ -1314,15 +1315,17 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         EditText password=new EditText(this);password.setHint("Password");password.setSingleLine(true);
         password.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);
         form.addView(password,lp(-1,54));
-        authDialog=new AlertDialog.Builder(this).setTitle("3 Patti PRO · Admin Login")
+        final AlertDialog dialog=new AlertDialog.Builder(this).setTitle("3 Patti PRO · Admin Login")
                 .setMessage("Use the same email and password as your existing web app.")
                 .setView(form).setNegativeButton("Cancel",null).setPositiveButton("Login",null).create();
-        authDialog.setOnShowListener(v->authDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(btn->{
+        authDialog=dialog;
+        dialog.setOnDismissListener(v->{if(authDialog==dialog)authDialog=null;});
+        dialog.setOnShowListener(v->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(btn->{
             String value=email.getText().toString().trim();
             if(!android.util.Patterns.EMAIL_ADDRESS.matcher(value).matches()){email.setError("Enter a valid email");return;}
             if(password.length()==0){password.setError("Enter your password");return;}
             if(!busy)api.signIn(value,password.getText().toString());
-        }));authDialog.show();
+        }));dialog.show();
     }
     private void confirmLogout() {
         new AlertDialog.Builder(this).setTitle("Logout?")
@@ -1625,7 +1628,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         }
     }
     private void shareStudioPage(){
-        title(content,"Share Studio","Preview, save and share native image cards");
+        title(content,"Share Studio","Preview, save and share your game cards");
         label(content,"CARD STYLE");
         String selected=settings.getString("share_style","classic");
         for(String style:new String[]{"classic","emerald","midnight"}){
@@ -1661,7 +1664,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             gap(content,12);content.addView(button("Restore backup / import HH legacy JSON",false,()->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/json");startActivityForResult(intent,702);}));
             gap(content,12);content.addView(button("Clear all rounds and sessions",false,this::clearHistoryDialog));
         }
-        gap(content,20);content.addView(text("3 Patti PRO · Native Android\nOriginal HH scoring · Native images · Read-only offline cache",12,MUTED,false));
+        gap(content,20);content.addView(text("3 Patti PRO\nYour players, scores and game sessions",12,MUTED,false));
     }
     private void exportBackup(){
         api.exportBackup(bytes->{pendingExport=bytes;try{pendingExportFingerprint=BackupArchive.fingerprint(bytes,BuildConfig.USE_EMULATORS?"demo-three-patti":"patti-pro-a61d8");}catch(Exception error){notice("Backup validation failed");return;}Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/json");intent.putExtra(Intent.EXTRA_TITLE,"3patti-backup-"+java.time.LocalDate.now()+".json");startActivityForResult(intent,700);});

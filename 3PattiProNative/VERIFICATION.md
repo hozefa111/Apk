@@ -36,8 +36,12 @@ the missing stable signing configuration.
 - A separate sandbox application compiles only local `demo-three-patti` emulator
   destinations. Instrumentation writes refuse to run in production variants.
 - Device tests cover idempotent create/retry, conflicting payload rejection,
-  versioned writes/deletes, server timestamps, backup/restore, native navigation,
+  versioned writes/deletes, server timestamps, backup/restore, stale-backup clear
+  rejection, full clear/restore with players retained, native navigation,
   full round form, image preview/pagination, search and settings recreation.
+  Login restoration during the dialog onShow callback is also exercised to guard
+  against dereferencing a dismissed/null dialog. A lifecycle-owned Auth observer
+  refreshes SDK session changes and is removed when the activity gateway stops.
   Their result must be recorded below before claiming these paths device-verified.
 
 ## Initial CI device run and corrections
@@ -63,7 +67,8 @@ app-private files and `run-as` so Android 11 scoped storage does not block retri
 Visual inspection found an unsupported card-brand glyph and ambiguous zero-score
 dashes; the brand now uses supported text and score previews/cards show `0`.
 Long image previews also use a full-width scrollable viewport rather than shrinking
-the whole ranking page into an unreadable strip.
+the whole ranking page into an unreadable strip. Negative best-round and MVP
+scores also avoid an incorrect extra plus sign.
 The local software-only Android emulator could not maintain its package service,
 so no successful local device run is claimed.
 

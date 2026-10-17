@@ -51,6 +51,7 @@ public final class FirebaseGateway {
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final OkHttpClient http = new OkHttpClient.Builder().callTimeout(25, TimeUnit.SECONDS).connectTimeout(14, TimeUnit.SECONDS).readTimeout(14, TimeUnit.SECONDS).build();
     private final FirebaseAuth auth;
+    private FirebaseAuth.AuthStateListener authObserver;
     private final FirebaseFirestore firestore;
     private final List<ListenerRegistration> subscriptions=new ArrayList<>();
     private volatile Map<String,String> versions=Collections.emptyMap();
@@ -97,6 +98,13 @@ public final class FirebaseGateway {
         running = true;
         // A stored refresh token is not proof of a valid admin session.
         ui.post(() -> listener.authChanged(false));
+        authObserver=state->{
+            if(!running)return;
+            liveRevision.incrementAndGet();freshSnapshot=false;listener.syncState(false);
+            if(state.getCurrentUser()==null){idToken=null;listener.authChanged(false);}
+            ui.removeCallbacks(liveRefresh);ui.postDelayed(liveRefresh,200);
+        };
+        auth.addAuthStateListener(authObserver);
         executor.execute(() -> { readCachedSnapshot(); load(); });
         for(String collection:Arrays.asList("players","rounds","sessions")){
             subscriptions.add(firestore.collection(collection).addSnapshotListener(MetadataChanges.INCLUDE,(snapshot,error)->{
@@ -108,6 +116,7 @@ public final class FirebaseGateway {
         }
     }
     public void stop() { running=false;
+        if(authObserver!=null)auth.removeAuthStateListener(authObserver);
         for(ListenerRegistration registration:subscriptions)registration.remove();
         subscriptions.clear();ui.removeCallbacksAndMessages(null);
         http.dispatcher().cancelAll();executor.shutdownNow();fetchers.shutdownNow();

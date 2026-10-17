@@ -75,4 +75,22 @@ public class NativeNavigationTest {
             }else onView(withText("Close")).perform(click());
         }
     }
+    private android.view.View findText(android.view.View view,String label){
+        if(view instanceof android.widget.TextView&&label.contentEquals(((android.widget.TextView)view).getText()))return view;
+        if(view instanceof android.view.ViewGroup){android.view.ViewGroup group=(android.view.ViewGroup)view;for(int i=0;i<group.getChildCount();i++){android.view.View found=findText(group.getChildAt(i),label);if(found!=null)return found;}}
+        return null;
+    }
+    @Test public void restoredLoginDuringDialogShowDoesNotCrash()throws Exception{
+        Assume.assumeTrue(BuildConfig.USE_EMULATORS);
+        try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
+            scenario.onActivity(activity->{
+                activity.authChanged(false);
+                android.view.View login=findText(activity.getWindow().getDecorView(),"LOGIN");org.junit.Assert.assertNotNull(login);
+                login.performClick();
+                // Auth restoration can arrive before the dialog's queued onShow callback.
+                activity.authChanged(true);
+            });
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync();waitFor("ADMIN");
+        }
+    }
 }
