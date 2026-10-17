@@ -46,7 +46,7 @@ public class NativeNavigationTest {
             com.google.android.gms.tasks.Tasks.await(store.collection("players").document("a").update("name","Player a"),15,java.util.concurrent.TimeUnit.SECONDS);
             onView(withContentDescription("More options")).perform(click());onView(withText("Analytics")).perform(click());onView(withText("Table Analytics")).check(matches(isDisplayed()));capture("04-analytics");
             onView(withContentDescription("More options")).perform(click());onView(withText("Share Studio")).perform(click());onView(withText("CARD STYLE")).check(matches(isDisplayed()));capture("05-share-studio");
-            onView(withContentDescription("More options")).perform(click());onView(withText("Settings")).perform(click());onView(withText("Compact round history")).check(matches(isDisplayed()));capture("06-settings");
+            onView(withContentDescription("More options")).perform(click());onView(withText("Settings")).inRoot(androidx.test.espresso.matcher.RootMatchers.isDialog()).perform(click());onView(withText("Compact round history")).check(matches(isDisplayed()));capture("06-settings");
             scenario.recreate();onView(withContentDescription("More options")).check(matches(isDisplayed()));
         }
     }
@@ -147,7 +147,7 @@ public class NativeNavigationTest {
             try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
                 waitFor("Table Status");onView(withContentDescription("Players")).perform(click());
                 onView(org.hamcrest.Matchers.allOf(withText("Players"),withParent(withContentDescription("Players")))).check((view,error)->{if(error!=null)throw error;android.widget.TextView label=(android.widget.TextView)view;org.junit.Assert.assertEquals("Navigation label must not break inside its word",1,label.getLineCount());org.junit.Assert.assertEquals("Navigation label must remain complete",label.length(),label.getLayout().getLineEnd(0));});
-                onView(withContentDescription("More options")).perform(click());onView(withText("Settings")).perform(click());
+                onView(withContentDescription("More options")).perform(click());onView(withText("Settings")).inRoot(androidx.test.espresso.matcher.RootMatchers.isDialog()).perform(click());
                 onView(withText("Compact round history")).perform(scrollTo()).check(matches(isDisplayed()));capture("11-settings-large-text");
                 scenario.recreate();onView(withContentDescription("More options")).check(matches(isDisplayed()));
                 onView(withText("Export JSON backup")).perform(scrollTo()).check(matches(isDisplayed()));
