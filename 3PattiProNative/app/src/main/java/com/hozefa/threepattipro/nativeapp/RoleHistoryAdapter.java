@@ -9,10 +9,10 @@ import java.util.function.Function;
 /** Recycled, wrapping history cards; no TextView contains the full history dump. */
 final class RoleHistoryAdapter extends BaseAdapter {
     private final Context context;
-    private final String player;
     private final List<Map<String,Object>> rows;
     private final Function<Map<String,Object>,String> date;
-    RoleHistoryAdapter(Context context,String player,List<Map<String,Object>> rows,Function<Map<String,Object>,String> date){this.context=context;this.player=player;this.rows=rows;this.date=date;}
+    private final Function<Map<String,Object>,Integer> scores;
+    RoleHistoryAdapter(Context context,List<Map<String,Object>> rows,Function<Map<String,Object>,String> date,Function<Map<String,Object>,Integer> scores){this.context=context;this.rows=rows;this.date=date;this.scores=scores;}
     @Override public int getCount(){return rows.size();}
     @Override public Map<String,Object> getItem(int position){return rows.get(position);}
     @Override public long getItemId(int position){return position;}
@@ -20,8 +20,8 @@ final class RoleHistoryAdapter extends BaseAdapter {
     @Override public View getView(int position,View recycled,ViewGroup parent){
         Cell cell;
         if(recycled==null){cell=new Cell(context);recycled=cell.root;recycled.setTag(cell);}else cell=(Cell)recycled.getTag();
-        Map<String,Object> round=getItem(position);Object values=round.get("scoreChanges");Object raw=values instanceof Map?((Map<?,?>)values).get(player):null;
-        int points=raw instanceof Number?((Number)raw).intValue():0;
+        Map<String,Object> round=getItem(position);
+        int points=scores.apply(round);
         String signed=points>0?"+"+points:String.valueOf(points);
         String dateLabel=date.apply(round),hukum=text(round,"hukumName");
         cell.date.setText(dateLabel);cell.name.setText("Hukum · "+(hukum.isEmpty()?"—":hukum));

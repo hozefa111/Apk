@@ -818,7 +818,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             LinearLayout header=DialogUi.body(this);DialogUi.fact(header,"Player",nameOf(pid),WHITE);
             long points=0;for(Map<String,Object> round:selected)points+=num(map(round.get("scoreChanges")).get(pid));
             header.addView(DialogUi.text(this,selected.size()+" rounds · Total points "+(points>0?"+":"")+points,13,MUTED,false));DialogUi.gap(header,8);
-            list.addHeaderView(header,null,false);list.setAdapter(new RoleHistoryAdapter(this,pid,selected,r->when(r.get("timestamp"))));
+            list.addHeaderView(header,null,false);list.setAdapter(new RoleHistoryAdapter(this,selected,r->when(r.get("timestamp")),r->num(map(r.get("scoreChanges")).get(pid))));
             list.setOnItemClickListener((parent,view,position,itemId)->{Object item=parent.getItemAtPosition(position);if(item instanceof Map)roundDetails(map(item));});
             builder.setView(list);
         }
