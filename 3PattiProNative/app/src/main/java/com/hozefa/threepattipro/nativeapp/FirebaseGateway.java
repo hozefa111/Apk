@@ -222,7 +222,12 @@ public final class FirebaseGateway {
                     }else transaction.set(ref,edits.get(i));
                 }
                 return null;
-            }catch(Exception error){throw new FirebaseFirestoreException(error.getMessage(),FirebaseFirestoreException.Code.FAILED_PRECONDITION,error);}
+            }catch(FirebaseFirestoreException error){throw error;}
+            catch(Exception conflict){
+                // A stale dialog/payload is final; only the SDK's real concurrency/network
+                // failures should trigger its automatic transaction retries.
+                throw new IllegalStateException(conflict.getMessage(),conflict);
+            }
         }),60,TimeUnit.SECONDS);
     }
     private JSONObject readDocument(String collection,String id)throws Exception{
