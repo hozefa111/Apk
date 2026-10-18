@@ -131,7 +131,7 @@ public final class FirebaseGateway {
                 if(!running||generation!=subscriptionGeneration)return;
                 if(error!=null){onListenFailure(error);return;}
                 if(snapshot==null)return;
-                synchronized(snapshotLock){liveCollections.put(collection,snapshot);liveRevision.incrementAndGet();}
+                synchronized(snapshotLock){liveCollections.put(collection,snapshot);liveRevision.incrementAndGet();freshSnapshot=false;}
                 // Pending local writes/cache events never enable another mutation.
                 freshSnapshot=false;listener.syncState(false);
                 ui.removeCallbacks(liveRefresh);ui.postDelayed(liveRefresh,150);
@@ -141,9 +141,10 @@ public final class FirebaseGateway {
     }
     /** Shared SDK listener error path; package visibility permits emulator-only fault injection. */
     void onListenFailure(FirebaseFirestoreException error){
-        animationContinuity=false;freshSnapshot=false;listener.syncState(false);
+        synchronized(snapshotLock){animationContinuity=false;freshSnapshot=false;liveRevision.incrementAndGet();}
+        listener.syncState(false);
         if(error.getCode()==FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED){recordQuota(null);return;}
-        retry.unavailable(retryClock.getAsLong());
+        synchronized(snapshotLock){retry.unavailable(retryClock.getAsLong());}
         String message=error.getCode()==FirebaseFirestoreException.Code.PERMISSION_DENIED?
                 "Firebase access denied. Check the signed-in account and project rules.":
                 "Connection interrupted ("+error.getCode().name()+"). Saved data remains available.";
@@ -278,10 +279,12 @@ public final class FirebaseGateway {
         ui.post(()->{if(running){listener.snapshotContinuity(false);listener.syncState(false);listener.syncProblem(message,deadline,quota);}});
     }
     private void recordQuota(String retryAfter){
-        retry.rateLimited(retryClock.getAsLong(),retryAfter);
-        // Commit the small cooldown journal before an Activity/process restart can erase it.
-        retryStore.edit().putLong("quota_until",retry.deadline()).putInt("quota_failures",retry.quotaFailures()).commit();
-        freshSnapshot=false;animationContinuity=false;
+        synchronized(snapshotLock){
+            liveRevision.incrementAndGet();retry.rateLimited(retryClock.getAsLong(),retryAfter);
+            // Serialize cooldown persistence against successful snapshot publication.
+            retryStore.edit().putLong("quota_until",retry.deadline()).putInt("quota_failures",retry.quotaFailures()).commit();
+            freshSnapshot=false;animationContinuity=false;
+        }
         publishProblem(quotaMessage());
         ui.post(()->{if(running){removeSubscriptions();ui.removeCallbacks(liveRefresh);scheduleNext();}});
     }
@@ -307,12 +310,18 @@ public final class FirebaseGateway {
             CollectionSnapshot ps=decoded.get(0),rs=decoded.get(1),ss=decoded.get(2);
             Map<String,String> nextVersions=new HashMap<>();Map<String,JSONObject> nextDocuments=new HashMap<>();
             for(CollectionSnapshot collection:decoded){nextVersions.putAll(collection.versions);nextDocuments.putAll(collection.documents);}
-            boolean coherent=server&&revision==liveRevision.get();
-            versions=nextVersions;rawDocuments=nextDocuments;snapshotAt=System.currentTimeMillis();freshSnapshot=coherent;
-            boolean continuous=coherent&&animationContinuity&&snapshotAt-animationSnapshotAt<75000;
-            animationContinuity=coherent;animationSnapshotAt=snapshotAt;
-            if(coherent){retry.succeeded();retryStore.edit().clear().apply();saveCachedSnapshot(ps.rows,rs.rows,ss.rows);}
-            final boolean online=coherent;
+            final boolean continuous;
+            synchronized(snapshotLock){
+                // A listener error or newer snapshot must never be overwritten by
+                // decoding an older snapshot that was already on the worker queue.
+                if(revision!=liveRevision.get()||retry.remaining(retryClock.getAsLong())>0)return;
+                versions=nextVersions;rawDocuments=nextDocuments;snapshotAt=System.currentTimeMillis();freshSnapshot=true;
+                continuous=animationContinuity&&snapshotAt-animationSnapshotAt<75000;
+                animationContinuity=true;animationSnapshotAt=snapshotAt;
+                retry.succeeded();retryStore.edit().clear().apply();
+            }
+            saveCachedSnapshot(ps.rows,rs.rows,ss.rows);
+            final boolean online=true;
             ui.post(()->{
                 if(!running||revision!=liveRevision.get())return;
                 if(online)listener.syncProblem(null,0,false);
