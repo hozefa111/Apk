@@ -80,6 +80,22 @@ class PlayerLifecycleTest {
                 }
                 scenario.moveToState(Lifecycle.State.RESUMED)
                 waitReady(scenario)
+                // MIME lookup is asynchronous: the old video can report READY before
+                // the newly selected subtitle has been attached and selected.
+                val attachedUntil=System.currentTimeMillis()+15_000
+                var attached=false
+                while(!attached && System.currentTimeMillis()<attachedUntil) {
+                    scenario.onActivity { activity ->
+                        val exo=engine(activity)!!
+                        attached=exo.playbackState==Player.STATE_READY && exo.currentTracks.groups.any { group ->
+                            group.type==C.TRACK_TYPE_TEXT && (0 until group.length).any { index ->
+                                group.isTrackSelected(index) && group.getTrackFormat(index).label=="External subtitles"
+                            }
+                        }
+                    }
+                    if(!attached) Thread.sleep(100)
+                }
+                assertTrue("External subtitle was not selected for $name",attached)
                 scenario.onActivity { engine(it)!!.apply { pause();seekTo(5_000) } }
                 val until=System.currentTimeMillis()+15_000
                 var found=false

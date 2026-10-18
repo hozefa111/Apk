@@ -108,6 +108,7 @@ class PlayerActivity : Activity() {
     private val subtitleExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     private var subtitleRequest = 0
     private var pendingSubtitleUri: Uri? = null
+    private var selectExternalSubtitle = false
     private var toastHide: Runnable? = null
     private val progressSaver = object : Runnable {
         override fun run() {
@@ -139,6 +140,7 @@ class PlayerActivity : Activity() {
         videoUri = intent?.data?.toString()
             ?: intent?.getStringExtra(EXTRA_URI).orEmpty()
         videoTitle = intent?.getStringExtra(EXTRA_TITLE)?.takeIf { it.isNotBlank() }
+            ?: intent?.getStringExtra(Intent.EXTRA_TITLE)?.takeIf { it.isNotBlank() }
             ?: intent?.data?.lastPathSegment?.substringAfterLast('/') ?: "Video"
         if (videoUri.isBlank() || Uri.parse(videoUri).scheme !in setOf("content", "file")) {
             Toast.makeText(this, "Choose a local video file to play", Toast.LENGTH_LONG).show()
@@ -233,6 +235,7 @@ class PlayerActivity : Activity() {
             videoTitle = savedInstanceState.getString("title", videoTitle)
             subtitleUri = savedInstanceState.getString("subtitle_uri")?.let(Uri::parse)
             subtitleType = savedInstanceState.getString("subtitle_type") ?: MimeTypes.APPLICATION_SUBRIP
+            selectExternalSubtitle = savedInstanceState.getBoolean("select_external_subtitle", false)
             savedInstanceState.getString("pending_subtitle_uri")?.let { attachSubtitle(Uri.parse(it)) }
             retainedTracks = savedInstanceState.getBundle("track_parameters")?.let(TrackSelectionParameters::fromBundle)
             touchLocked = savedInstanceState.getBoolean("touch_locked", false)
@@ -243,6 +246,26 @@ class PlayerActivity : Activity() {
             playerTitle.text = videoTitle
         } else {
             lastSavedPosition = if (userOptions.resume) savedProgress(videoUri) else 0L
+        }
+        if (savedInstanceState == null && intent?.getStringExtra(EXTRA_TITLE).isNullOrBlank() &&
+            intent?.getStringExtra(Intent.EXTRA_TITLE).isNullOrBlank()) resolveVideoTitle()
+    }
+
+    private fun resolveVideoTitle() {
+        val current = videoUri
+        subtitleExecutor.execute {
+            val name = runCatching {
+                contentResolver.query(Uri.parse(current), arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(0)?.takeIf { it.isNotBlank() }?.take(240) else null
+                }
+            }.getOrNull()
+            if (name != null) handler.post {
+                if (!isDestroyed && videoUri == current) {
+                    videoTitle = name
+                    playerTitle.text = name
+                    updateSystemMetadata()
+                }
+            }
         }
     }
 
@@ -330,6 +353,24 @@ class PlayerActivity : Activity() {
             }
 
             override fun onTracksChanged(tracks: Tracks) {
+                if (selectExternalSubtitle) {
+                    val external = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }.firstNotNullOfOrNull { group ->
+                        (0 until group.length).firstOrNull { index ->
+                            group.isTrackSupported(index) && group.getTrackFormat(index).label == "External subtitles"
+                        }?.let { index -> group to index }
+                    }
+                    external?.let { (group, index) ->
+                        selectExternalSubtitle = false
+                        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                            .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, listOf(index))).build()
+                    }
+                }
+                if (BuildConfig.DEBUG) tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }.forEach { group ->
+                    (0 until group.length).forEach { index ->
+                        android.util.Log.i("OrbitPlayerQA", "TEXT_TRACK ${group.getTrackFormat(index).sampleMimeType} selected=${group.isTrackSelected(index)}")
+                    }
+                }
                 if (BuildConfig.DEBUG) tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.forEach { group ->
                     (0 until group.length).filter(group::isTrackSelected).forEach { index ->
                         android.util.Log.i("OrbitPlayerQA", "AUDIO_SELECTED ${group.getTrackFormat(index).sampleMimeType}")
@@ -471,6 +512,8 @@ class PlayerActivity : Activity() {
             item.setSubtitleConfigurations(
                 listOf(MediaItem.SubtitleConfiguration.Builder(uri)
                     .setMimeType(subtitleType)
+                    .setId("orbit_external_subtitle")
+                    .setLabel("External subtitles")
                     .setLanguage("und")
                     .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
                     .build())
@@ -517,6 +560,7 @@ class PlayerActivity : Activity() {
         updateSystemMetadata()
         ++subtitleRequest
         pendingSubtitleUri = null
+        selectExternalSubtitle = false
         subtitleUri = null
         retainedTracks = null
         updateQueueControls()
@@ -571,6 +615,9 @@ class PlayerActivity : Activity() {
         val actions = mutableListOf<() -> Unit>()
         labels.add("Subtitles off")
         actions.add {
+            ++subtitleRequest
+            pendingSubtitleUri = null
+            selectExternalSubtitle = false
             exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
                 .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
@@ -642,6 +689,7 @@ class PlayerActivity : Activity() {
                 subtitleUri = uri
                 pendingSubtitleUri = null
                 subtitleType = mime
+                selectExternalSubtitle = true
                 // A document picker can stop/release the activity's player. Retain
                 // selection for onStart even when no ExoPlayer currently exists.
                 retainedTracks = retainedTracks?.buildUpon()
@@ -1152,6 +1200,7 @@ class PlayerActivity : Activity() {
         outState.putString("subtitle_uri", subtitleUri?.toString())
         outState.putString("subtitle_type", subtitleType)
         outState.putString("pending_subtitle_uri", pendingSubtitleUri?.toString())
+        outState.putBoolean("select_external_subtitle", selectExternalSubtitle)
         outState.putBundle("track_parameters", (player?.trackSelectionParameters ?: retainedTracks)?.toBundle())
         outState.putBoolean("touch_locked", touchLocked)
         outState.putLong("sleep_deadline", sleepDeadline)

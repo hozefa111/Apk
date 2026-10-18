@@ -49,7 +49,7 @@ adb shell dumpsys activity activities > qa/settings-activity.txt
 grep -F "$PACKAGE/.SettingsActivity" qa/settings-activity.txt >/dev/null || {
   echo "Settings was not opened by tapping the Settings control"; exit 1;
 }
-adb shell input keyevent 4
+python3 scripts/tap_android_view.py "desc:Back to library"
 sleep 1
 
 # Verify the full user journey: MediaStore -> Folders -> folder videos -> tap -> READY.

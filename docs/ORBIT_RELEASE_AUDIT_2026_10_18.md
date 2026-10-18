@@ -85,3 +85,21 @@ and no stable release is published by this audit.
 - First full lint pass found 19 errors: one API 27 theme attribute in unqualified resources and 18 Media3 API opt-in uses. They are addressed with API-compatible resources and an explicit Media3 opt-in. Subsequent lint must run on frozen source to provide final evidence.
 - Metadata fixtures validate counts, hidden folders, file/folder search, combined filters, all sort modes, pinned folders, playlist/history ordering, missing URI handling and resume boundaries at 0/1/10/100/1,000/10,000 entries. Observed host computation for 1,000 entries was ~12 ms, and ~12 ms for 10,000 after warm-up. These are computation fixtures, not Android UI/device benchmarks.
 - Generated containers are independently probed with ffprobe: H.264/AAC MP4, H.264 MKV, HEVC MP4/MKV, VP9/Opus WebM, H.264/AC3 MKV, 1080p H.264, one-hour H.264, variable frame rate, no audio, multi-audio + embedded SRT. Corrupt media and external SRT/VTT/ASS/SSA fixtures are separate. Generation alone is not playback evidence.
+
+## Expanded CI findings (development commit 2a822f7)
+
+- [Build, both unit variants and both lint variants](https://github.com/hozefa111/Apk/actions/runs/39096267939): **passed**. Each unit variant ran 24 tests; lint reported zero errors, with existing warnings retained for review rather than suppressed.
+- [Expanded API 26/33/35 suite](https://github.com/hozefa111/Apk/actions/runs/39096267901): **failed**, correctly blocking promotion. Library/player smoke and denied/partial permission recovery passed. All three jobs reported a rendered external-caption assertion failure (SRT on API 35; ASS on APIs 26/33), after most other instrumentation passed. Media compatibility execution did not run after this failing step. This run must not be presented as green.
+- Follow-up work gives an explicitly selected external subtitle a labelled track override, and makes the test wait for the new subtitle track instead of accepting READY from the previous media-item generation. Current-source reruns are required before calling this resolved.
+- A short-window layout audit also identified excessive library chrome in landscape. Responsive compact folder/video rows, a focused Search presentation and a real filters dialog preserve browsing space; a new instrumentation check measures the available browser height and opens a folder.
+
+## Update identity inspection
+
+The downloaded public v0.3.0 APK matches its published SHA-256 checksum:
+`5679e15fbaaecbc52895906609b1322009dbf9b420ae95e9a0a320f767d549d1`.
+APK metadata confirms `com.orbitplayer.app`, versionCode 13 / 0.3.0.
+Its signing certificate SHA-256 is
+`27d8f4fd282016b5829348caace9ffb47dbd36f3ea1cfd7819569708274fbda2`.
+Development remains versionCode 14 / 0.3.1. This verifies the stable artifact's
+identity only; a matching signed candidate and an actual in-place update are
+still required. The existing production private key is not available locally.

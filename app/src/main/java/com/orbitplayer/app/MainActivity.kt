@@ -85,6 +85,7 @@ class MainActivity : Activity() {
     private var returningToAlbums = false
     private var albumQuery = ""
     private var openingPlayer = false
+    private fun compactLibrary() = resources.configuration.screenHeightDp < 430
     // Android can revoke video access while the app is in the background.
     private var previousLibraryAccess: Int? = null
     private var destroyed = false
@@ -158,6 +159,7 @@ class MainActivity : Activity() {
         }
         findViewById<View>(R.id.libraryBack).setOnClickListener { onBackPressed() }
         findViewById<View>(R.id.btnPick).setOnClickListener { openDocument() }
+        findViewById<View>(R.id.btnFilters).setOnClickListener { showCompactFilters() }
         findViewById<View>(R.id.btnPlaylists).setOnClickListener { showPlaylists() }
         videos.setItemViewCacheSize(8)
 
@@ -197,6 +199,7 @@ class MainActivity : Activity() {
         if (query.isNotBlank()) search.setText(query)
         updatePermissionsUi()
         applyAppearance()
+        renderChrome()
         previousLibraryAccess = libraryPermissionState()
         if (previousLibraryAccess != 0) scan() else filterVideos()
         showPreviousCrashReport()
@@ -295,7 +298,7 @@ class MainActivity : Activity() {
     private fun updatePermissionsUi() {
         grant.visibility = if (libraryPermissionState() == 2) View.GONE else View.VISIBLE
         findViewById<View>(R.id.libraryStatusRow).layoutParams = findViewById<View>(R.id.libraryStatusRow).layoutParams.apply {
-            height = ((if (libraryPermissionState() == 2) 28 else 48) * resources.displayMetrics.density).toInt()
+            height = ((if (libraryPermissionState() == 2) { if (compactLibrary()) 20 else 28 } else 48) * resources.displayMetrics.density).toInt()
         }
         grant.text = when (libraryPermissionState()) { 2 -> "ACCESS"; 1 -> "ADD VIDEOS"; else -> "ALLOW ACCESS" }
     }
@@ -354,6 +357,28 @@ class MainActivity : Activity() {
                 filterVideos()
                 dialog.dismiss()
             }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun showCompactFilters() {
+        if (tab == Tab.CONTINUE) {
+            AlertDialog.Builder(this).setTitle("Continue watching")
+                .setItems(arrayOf("Unfinished videos", "Watch history")) { _, which ->
+                    chooseFilter(if (which == 0) Filter.CONTINUE else Filter.HISTORY)
+                }.show()
+            return
+        }
+        AlertDialog.Builder(this).setTitle("Library filters")
+            .setItems(arrayOf("All videos", "Favorites", "Continue watching", "Recently added", "Watch history", "File type", "Folder")) { _, which ->
+                when (which) {
+                    0 -> chooseFilter(Filter.ALL)
+                    1 -> chooseFilter(Filter.FAVORITES)
+                    2 -> chooseFilter(Filter.CONTINUE)
+                    3 -> chooseFilter(Filter.RECENT)
+                    4 -> chooseFilter(Filter.HISTORY)
+                    5 -> showFormatDialog()
+                    6 -> showFolderDialog()
+                }
+            }.setNegativeButton("Close", null).show()
     }
 
     private fun showFormatDialog() {
@@ -480,8 +505,8 @@ class MainActivity : Activity() {
     private fun renderVideos() {
         adapter.submit(visibleVideos)
         if (videos.adapter !== adapter) videos.adapter = adapter
-        adapter.useGallery(gallery)
-        gridManager.spanCount = if (gallery) 2 else 1
+        adapter.useGallery(gallery && !compactLibrary())
+        gridManager.spanCount = if (gallery && !compactLibrary()) 2 else 1
         sortButton.text = arrayOf("Newest", "Oldest", "Name A–Z", "Largest", "Longest")[sort.ordinal] + "  ▾"
         empty.visibility = if (visibleVideos.isEmpty()) View.VISIBLE else View.GONE
         empty.text = when {
@@ -829,6 +854,7 @@ class MainActivity : Activity() {
             else "All folders"
         search.setText(if (next == Tab.FOLDERS) albumQuery else "")
         handler.removeCallbacks(searchLater)
+        renderChrome()
         filterVideos()
         if (!returningToAlbums) videos.scrollToPosition(0)
         if (next == Tab.SEARCH) {
@@ -844,8 +870,26 @@ class MainActivity : Activity() {
 
     private fun renderChrome() {
         val folders = tab == Tab.FOLDERS
+        val compact = compactLibrary()
+        val focusedSearch = tab == Tab.SEARCH || query.isNotBlank()
+        findViewById<View>(R.id.brandBar).apply {
+            visibility = if (compact && focusedSearch) View.GONE else View.VISIBLE
+            layoutParams = layoutParams.apply { height = ((if (compact) 48 else 67) * resources.displayMetrics.density).toInt() }
+        }
+        findViewById<View>(R.id.librarySearchBar).visibility = if (compact && !focusedSearch) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.librarySectionRow).layoutParams =
+            (findViewById<View>(R.id.librarySectionRow).layoutParams as android.widget.LinearLayout.LayoutParams).apply {
+                height = ((if (compact) 48 else 51) * resources.displayMetrics.density).toInt()
+                topMargin = ((if (compact) 0 else 7) * resources.displayMetrics.density).toInt()
+            }
+        findViewById<View>(R.id.libraryNavigation).layoutParams =
+            (findViewById<View>(R.id.libraryNavigation).layoutParams as android.widget.LinearLayout.LayoutParams).apply {
+                height = ((if (compact) 48 else 63) * resources.displayMetrics.density).toInt()
+                bottomMargin = ((if (compact) 0 else 10) * resources.displayMetrics.density).toInt()
+            }
         findViewById<View>(R.id.filterScroller).visibility =
-            if (folders) View.GONE else View.VISIBLE
+            if (folders || compact) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.btnFilters).visibility = if (!folders && compact) View.VISIBLE else View.GONE
         findViewById<View>(R.id.filterAll).visibility =
             if (tab == Tab.CONTINUE) View.GONE else View.VISIBLE
         findViewById<View>(R.id.filterFavorites).visibility =
@@ -860,7 +904,7 @@ class MainActivity : Activity() {
             if (tab == Tab.CONTINUE) "Unfinished" else "Continue"
         findViewById<View>(R.id.filterHistory).visibility =
             if (tab == Tab.CONTINUE) View.VISIBLE else View.GONE
-        findViewById<View>(R.id.btnView).visibility = if (folders) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.btnView).visibility = if (folders || compact) View.GONE else View.VISIBLE
         if (folders) findViewById<TextView>(R.id.sectionTitle).text = "Albums"
         val bar = mapOf(
             Tab.VIDEOS to R.id.navHome, Tab.FOLDERS to R.id.navFolders,
@@ -879,7 +923,7 @@ class MainActivity : Activity() {
         }
         findViewById<View>(R.id.libraryBack).visibility = if (tab == Tab.VIDEOS &&
             (chosenFolder != "All folders" || currentPlaylist != null)) View.VISIBLE else View.GONE
-        continueCard.visibility = if (tab == Tab.VIDEOS && currentPlaylist == null && continueVideo != null
+        continueCard.visibility = if (!compact && tab == Tab.VIDEOS && currentPlaylist == null && continueVideo != null
             && chosenFolder == "All folders") View.VISIBLE else View.GONE
     }
 
@@ -908,8 +952,10 @@ class MainActivity : Activity() {
 
     private fun renderAlbums() {
         if (videos.adapter !== albumAdapter) videos.adapter = albumAdapter
-        gridManager.spanCount = preferences.folderColumns.coerceAtMost(
-            (resources.configuration.screenWidthDp / (100 * resources.configuration.fontScale)).toInt().coerceAtLeast(2))
+        albumAdapter.useCompact(compactLibrary())
+        gridManager.spanCount = if (compactLibrary()) (resources.configuration.screenWidthDp / 260).coerceIn(1, 4)
+            else preferences.folderColumns.coerceAtMost(
+                (resources.configuration.screenWidthDp / (100 * resources.configuration.fontScale)).toInt().coerceAtLeast(2))
         albumAdapter.submit(albums) {
             if (returningToAlbums && tab == Tab.FOLDERS) {
                 albumScroll?.let(gridManager::onRestoreInstanceState)

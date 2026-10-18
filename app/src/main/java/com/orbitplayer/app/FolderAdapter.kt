@@ -27,6 +27,13 @@ class FolderAdapter(
     })
     private val items: List<FolderAlbum> get() = differ.currentList
     private var disposed = false
+    private var compact = false
+    fun useCompact(value: Boolean) {
+        if (compact == value) return
+        compact = value
+        notifyDataSetChanged() // Different layouts intentionally require new holders.
+    }
+    override fun getItemViewType(position: Int) = if (compact) 1 else 0
     init { setHasStableIds(false) }
     override fun getItemId(position: Int) = items[position].path.hashCode().toLong()
     override fun getItemCount() = items.size
@@ -34,7 +41,7 @@ class FolderAdapter(
         if (!disposed) differ.submitList(next.toList(), committed)
     }
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder =
-        Holder(LayoutInflater.from(parent.context).inflate(R.layout.row_folder, parent, false))
+        Holder(LayoutInflater.from(parent.context).inflate(if (viewType == 1) R.layout.row_folder_list else R.layout.row_folder, parent, false))
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val album = items[position]
         holder.title.text = album.displayName

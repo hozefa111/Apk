@@ -70,6 +70,7 @@ class VideoAdapter(
         holder.itemView.contentDescription = "${item.title}, ${formatDuration(item.durationMs)}, ${item.folder}"
         holder.duration.text = formatDuration(item.durationMs)
         bindProgress(holder, item)
+        (holder.thumb.parent as? View)?.clipToOutline = true
         holder.glyph.visibility = View.VISIBLE
         thumbnails.load(holder.thumb, item) { holder.glyph.visibility = View.GONE }
         holder.more.contentDescription = "Options for ${item.title}"
