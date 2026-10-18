@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      verify_signed_upgrade:
+        description: Build an internal signed candidate and verify v0.3.0 upgrade (no publication)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -72,3 +77,62 @@ jobs:
             app/build/reports/androidTests/
             app/build/outputs/androidTest-results/
           if-no-files-found: ignore
+
+  signed-upgrade:
+    name: Signed v0.3.0 upgrade / Android API 26
+    if: github.event_name == 'workflow_dispatch' && inputs.verify_signed_upgrade
+    needs: smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Build internal signed candidate
+        env:
+          ORBIT_KEYSTORE_B64: ${{ secrets.ORBIT_KEYSTORE_B64 }}
+          ORBIT_SIGN_PASSWORD: ${{ secrets.ORBIT_SIGN_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ORBIT_KEYSTORE_B64" && test -n "$ORBIT_SIGN_PASSWORD"
+          export ORBIT_SIGN_PASSWORD="$(printf '%s' "$ORBIT_SIGN_PASSWORD" | tr -d '\r\n')"
+          umask 077
+          export ORBIT_KEYSTORE_PATH="$RUNNER_TEMP/orbit-upgrade.p12"
+          trap 'rm -f "$ORBIT_KEYSTORE_PATH"' EXIT
+          printf '%s' "$ORBIT_KEYSTORE_B64" | base64 --decode > "$ORBIT_KEYSTORE_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
+          gradle --no-daemon :app:assembleRelease :app:testReleaseUnitTest :app:lintRelease
+          mkdir -p qa/upgrade
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk > qa/upgrade/candidate-certificate.txt
+          grep -Fi '27d8f4fd282016b5829348caace9ffb47dbd36f3ea1cfd7819569708274fbda2' qa/upgrade/candidate-certificate.txt
+          curl -fL https://github.com/hozefa111/Apk/releases/download/v0.3.0/OrbitPlayer-v0.3.0.apk -o qa/upgrade/stable.apk
+          echo '5679e15fbaaecbc52895906609b1322009dbf9b420ae95e9a0a320f767d549d1  qa/upgrade/stable.apk' | sha256sum -c -
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          ffmpeg -nostdin -hide_banner -loglevel error -f lavfi -i testsrc=size=320x240:rate=15 -t 40 -c:v libx264 -pix_fmt yuv420p -y qa/upgrade/upgrade.mp4
+      - name: Verify in-place update and optimized playback
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 26
+          arch: x86_64
+          target: default
+          disable-animations: true
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          script: python3 scripts/run_signed_upgrade.py
+      - name: Keep internal candidate and upgrade evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrbitPlayer-internal-signed-upgrade-verified
+          path: |
+            app/build/outputs/apk/release/app-release.apk
+            qa/upgrade/*.json
+            qa/upgrade/*.txt
+            qa/upgrade/*.png
+          retention-days: 14
