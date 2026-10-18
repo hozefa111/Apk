@@ -59,6 +59,9 @@ path=folder+'/orbit_collections_v1.xml'
 adb('shell',f'cat > {path}',stdin=ET.tostring(xml))
 adb('shell','chown',owner+':'+owner,path)
 adb('shell','chmod','660',path)
+# Preserve the app's SELinux category as well as its UID on enforcing emulators.
+label=adb('shell','ls','-Z',folder+'/playback_positions_v1.xml').split()[0]
+adb('shell','chcon',label,path)
 before={n:values(prefs(n)) for n in ('orbit_collections_v1','playback_positions_v1')}
 assert any(k.startswith('position_') and int(v)>0 for k,v in before['playback_positions_v1'].items()), 'Stable did not save actual playback position'
 assert before['playback_positions_v1'].get('recently_watched'),'Stable history missing'

@@ -103,3 +103,53 @@ Its signing certificate SHA-256 is
 Development remains versionCode 14 / 0.3.1. This verifies the stable artifact's
 identity only; a matching signed candidate and an actual in-place update are
 still required. The existing production private key is not available locally.
+
+## Repair status and verification boundaries
+
+The following updates supersede the **initial state** column above; unverified
+scenarios remain release work, rather than being implied by source presence.
+
+| Area | Implementation status | Available evidence | Still unverified |
+|---|---|---|---|
+| Library query/search/sort/counts | Immutable query engine on worker; cancellation rejects stale results | 10 engine unit tests, fixtures through 10,000 entries; source review | Physical 1,000-video scrolling, startup/memory/battery measurements |
+| Thumbnails | Shared 12 MiB cache; two workers; bounded queue of 64; recycled requests canceled | Build/lint and source review | Physical decoding latency and many corrupt thumbnails |
+| Folder/gallery/list navigation | Parent/storage paths, explicit back, scroll restore, square covers; compact landscape rows/filters | Native smoke; landscape browser-height/open/back instrumentation on API 26/33/35 | Removable SD-card insertion/removal, TalkBack, large-font visual review |
+| Favorites/playlists | Visible favorite badge; create validation; atomic rename; individual removal; ordered persistence | Three device persistence tests using isolated actual SharedPreferences/JSON, API 26/33/35 | Physical signed-update migration until signed job evidence exists |
+| Permissions | Full/denied/partial reconciliation; guarded observer; preserved collections | Denied UI on 26/33/35, partial recovery UI on 35 | Real user selection/reselection in Android permission picker |
+| Player lifecycle/transport | Pause intent, live position vs completed progress, recreated tracks/lock/timer; released-player callback ownership guard | Four player instrumentation tests + native UI smoke on 26/33/35 | Long sessions, real interruptions, PiP stress, hardware media keys |
+| External captions | Explicit labelled selection; Media3 eager SubtitleExtractor merged with video; no new parser/codec dependency | All SRT/VTT/ASS/SSA fixtures produce actual cues after stopped-picker return, on API 26/33/35 at `06cac51` | Real SAF provider grants, timing/style fidelity of complex ASS files |
+| Errors | Retry/next/close; sidecar failure can recover without subtitles; external queue isolated | Queue and lifecycle tests; codec/corrupt matrix execution tracked separately | Real unsupported hardware decoders, audio audibility |
+| Settings/updates | Real saved preferences; accessible targets/insets; exact Orbit APK asset chosen in shared repository | Persistence instrumentation, native Settings navigation, layout contracts | Every preference's real-phone behavior, update download/install user journey |
+| Original web parity | Search completed across accessible repository references; no identifiable Orbit source | Native/web provenance documented above | Original source/screenshots/URL required for verified parity |
+| Advanced optional scope | Deferred as listed in initial matrix | No new unstable services/network/codecs included | Separate design, implementation and device QA |
+
+### External-caption regression resolution
+
+The selected-track override alone did not fix every run. Media3's default lazy
+sidecar preparation could leave the explicitly chosen track without rendered cues
+after stopped-picker return and a paused seek. `LocalMediaSource` now uses Media3's
+standard eager subtitle extractor; parsing/I/O stays on the loader thread.
+[Build at `06cac51`](https://github.com/hozefa111/Apk/actions/runs/39097679724)
+passed both build, unit and lint variants.
+[Emulator run at that SHA](https://github.com/hozefa111/Apk/actions/runs/39097679773)
+passed native UI, permissions and **all eight instrumentation tests on each API**.
+The overall run remained red: Gradle uninstalled the test target before the new
+independent media suite launched. This is a harness failure, not completed codec
+verification. `c489613` makes that suite install/grant its own target and retain
+useful launch diagnostics. Fresh complete results are required.
+
+### Internal signed-upgrade procedure
+
+The emulator workflow has an opt-in `verify_signed_upgrade` dispatch input.
+It depends on all three smoke jobs, builds an optimized signed candidate using
+existing private Actions secrets, checks its certificate against v0.3.0, verifies
+the downloaded stable checksum, and performs `adb install -r` on a disposable
+API 26 emulator. Stable playback writes actual history/progress; deterministic
+legacy-format favorites/playlist fixtures supplement that state. The check
+compares data across installation and verifies optimized playback resumes and
+advances. Fixtures are identified explicitly: this does not establish real-user
+or physical-device migration. Missing signing secrets fail the job.
+
+This workflow uploads an **internal** candidate only after success. It has read-only
+repository permission and no GitHub Release publication step. It must not be
+confused with dispatching the existing publishing workflow.

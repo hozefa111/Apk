@@ -8,8 +8,9 @@ This is a **native APK**, not a website packaged in a WebView. All local video p
 
 - Latest previously published signed version: [v0.3.0](https://github.com/hozefa111/Apk/releases/tag/v0.3.0).
 - The current source targets **v0.3.1**. Do not treat it as an installable signed release until a corresponding verified GitHub Release exists.
-- The native build workflow compiles debug/release variants, checks resource/layout contracts and runs unit tests.
-- The emulator smoke workflow starts the Android library, opens Settings via a real tap, plays generated H.264/AAC media from MediaStore, checks Player readiness and accessible controls, then rotates the screen.
+- The native build workflow compiles debug/release and instrumentation APKs, checks resource/layout contracts, and runs both unit-test and lint variants.
+- The API 26/33/35 emulator suite exercises native navigation, permission recovery, persistence/lifecycle and rendered external subtitles, then records a generated codec/corrupt-media matrix. See the [current audit and evidence](docs/ORBIT_RELEASE_AUDIT_2026_10_18.md); suite availability does not imply every run passed.
+- An opt-in internal signed-upgrade workflow checks v0.3.0 certificate/update compatibility without publishing a release.
 - The signed-release workflow publishes only after the main-branch emulator test succeeds, or when an authorized maintainer explicitly dispatches a release.
 - **Important:** CI/emulator tests cannot establish hardware codec support or smooth performance on every physical phone. Real-device checks are a required release quality gate.
 
@@ -17,7 +18,7 @@ This is a **native APK**, not a website packaged in a WebView. All local video p
 
 - Video library with folder/album thumbnails, folder counts, sort, pin/hide/unhide, gallery and list modes.
 - Search by file/folder name, recent videos, watch history, continue watching.
-- Favorites, ordered playlists and multi-select list management.
+- Favorites with visible state, ordered playlists with rename/removal, and multi-select list management.
 - Play All with next-video playback, repeat-one support, stable/persisted queues and recovery from unreadable files.
 - Native full-screen playback with bottom transport/timeline, touch lock, pinch/gesture seeking, volume and brightness gestures.
 - Playback speed, audio and subtitle tracks, external subtitle picker (SRT/ASS/SSA/VTT depending on Media3/device support), fit/crop/stretch and orientation.
