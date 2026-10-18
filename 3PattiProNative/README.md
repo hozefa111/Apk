@@ -86,3 +86,7 @@ uploaded as final releases by the native build workflow.
 ## Direct SDK sync (2.3.3)
 
 See [QUOTA_SYNC.md](QUOTA_SYNC.md) for direct realtime SDK snapshots, transaction conflict checks, legacy cooldown migration and offline/recovery behavior. An HTTP 429 alone does not identify the exhausted quota.
+
+## Advanced analytics (2.4.0)
+
+See [ANALYTICS.md](ANALYTICS.md) for all analytics views, interactive charts, filters, counting definitions and data boundaries. These views compute on-device from existing snapshots and never write scores or fetch extra Firebase collections.

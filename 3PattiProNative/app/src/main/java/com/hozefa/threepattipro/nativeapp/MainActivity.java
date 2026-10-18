@@ -45,6 +45,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
 
     private AlertDialog authDialog;
     private android.content.SharedPreferences settings;
+    private final AdvancedAnalyticsPage.State analyticsState=new AdvancedAnalyticsPage.State();
     private String rosterFilter="all",searchQuery="";
     private Runnable refreshSearch;
     private String pendingRoundTimestamp=null,pendingRoundJson=null;
@@ -100,6 +101,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         restoreDraft();
         if(state!=null){tab=state.getInt("tab",0);historyTab=state.getInt("historyTab",0);rankFilter=state.getString("rankFilter","all");profileId=state.getString("profileId");customStart=state.getLong("customStart");customEnd=state.getLong("customEnd");searchQuery=state.getString("searchQuery","");}
+        if(state!=null)analyticsState.restore(state);
         buildShell();
         clock.post(tick);
         api=new FirebaseGateway(this,this,getString(R.string.firebase_web_api_key));
@@ -196,7 +198,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(tab==2&&roundSaveView!=null&&roundPreviewSection!=null&&roundHintView!=null)
             updateRoundForm();
     }
-    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);persistDraft();state.putInt("tab",tab);state.putInt("historyTab",historyTab);state.putString("rankFilter",rankFilter);state.putString("profileId",profileId);state.putLong("customStart",customStart);state.putLong("customEnd",customEnd);state.putString("searchQuery",searchQuery);}
+    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);analyticsState.save(state);persistDraft();state.putInt("tab",tab);state.putInt("historyTab",historyTab);state.putString("rankFilter",rankFilter);state.putString("profileId",profileId);state.putLong("customStart",customStart);state.putLong("customEnd",customEnd);state.putString("searchQuery",searchQuery);}
     @Override protected void onResume(){
         super.onResume();resumed=true;motion.resume();motionEvents.invalidate();if(api!=null)api.setForeground(true);
         if(launchReveal){launchReveal=false;motion.enter(root,0);}
@@ -1619,45 +1621,33 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         find.run();
     }
     private void analyticsPage(){
-        title(content,"Table Analytics","Scores, roles and trends from saved game rounds");dateFilterBar(content);
-        List<Map<String,Object>> games=filteredRounds();
-        if(games.isEmpty()){empty("No rounds in this date range.");return;}
-        int hukumWins=0,bids=0,highest=0;
-        for(Map<String,Object> round:games){if("win".equals(str(round,"result")))hukumWins++;int value=num(round.get("bid"));bids+=value;highest=Math.max(highest,value);}
-        LinearLayout overview=panel();line(overview,"Rounds",String.valueOf(games.size()),WHITE);
-        line(overview,"Average Bid",String.format(Locale.ROOT,"%.1f",(double)bids/games.size()),GOLD);
-        line(overview,"Highest Bid",String.valueOf(highest),GOLD);
-        line(overview,"Hukum Win Rate",Math.round(100.0*hukumWins/games.size())+"%",GREEN);
-        content.addView(overview);gap(content,18);label(content,"PLAYER PERFORMANCE");
-        List<Map<String,Object>> ranked=rankedFor(games);int maxScore=1;
-        for(Map<String,Object> p:ranked)maxScore=Math.max(maxScore,Math.abs(scoreOf(id(p),games)));
-        for(Map<String,Object> p:ranked){String pid=id(p);int score=scoreOf(pid,games),played=played(pid,games),won=wins(pid,games);
-            LinearLayout card=panel();line(card,str(p,"name"),(score>0?"+":"")+score,score>=0?GREEN:RED).setTag(new MotionEngine.Anchor("analytics-score:"+pid+":"+rankFilter+":"+customStart+":"+customEnd,score,score>0));
-            android.widget.ProgressBar bar=new android.widget.ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
-            bar.setMax(maxScore);motion.progress(bar,Math.abs(score),screenEntry);bar.setProgressTintList(android.content.res.ColorStateList.valueOf(score>=0?GREEN:RED));
-            card.addView(bar,lp(-1,12));gap(card,8);
-            line(card,"Won / Played",won+" / "+played+" · "+(played==0?0:Math.round(100.0*won/played))+"%",MUTED);
-            card.addView(text("Current streak "+winningStreak(pid,games)+" · Best positive streak "+RoundAnalytics.longestPositiveStreak(pid,games),12,MUTED,false));
-            card.addView(new ScoreTrendView(this,pid,games),lp(-1,100));
-            card.setOnClickListener(v->{profileId=pid;tab=5;render(true);});content.addView(card);gap(content,12);
-        }
-        content.addView(button("Share this leaderboard",true,this::shareLeaderboard));
+        title(content,"Table Analytics","Explore player form, partnerships, bids and session records");
+        dateFilterBar(content);
+        List<Map<String,Object>> scope=AdvancedAnalytics.scope(AdvancedAnalytics.dates(gameRounds(),rankFilter,Instant.now(),ZoneId.systemDefault(),customStart,customEnd),sessions,analyticsState.scope);
+        AdvancedAnalytics.Report report=new AdvancedAnalytics.Report(players,scope,sessions);
+        new AdvancedAnalyticsPage(this,content,analyticsState,report,sessions,PANEL,GOLD,GREEN,RED,BLUE,new AdvancedAnalyticsPage.Host(){
+            public void choose(String title,String[] labels,java.util.function.IntConsumer action){
+                if(labels.length==0){Toast.makeText(MainActivity.this,"No other options in this scope",Toast.LENGTH_SHORT).show();return;}
+                new MotionDialogBuilder(MainActivity.this,motion).setTitle(title).setItems(labels,(d,index)->action.accept(index)).setNegativeButton("Cancel",null).show();
+            }
+            public void changed(){render(true);}
+            public void profile(String id){profileId=id;tab=5;render(true);}
+            public void round(Map<String,Object> round){roundDetails(round);}
+            public void share(){shareAnalyticsLeaderboard(report);}
+            public void draw(View view,java.util.function.Consumer<Float> frame){motion.draw(view,screenEntry,frame);}
+            public void tap(View view){motion.tap(view);}
+        }).render();
     }
-    private final class ScoreTrendView extends View{
-        private float reveal=1f;
-        final List<Integer> values=new ArrayList<>();final android.graphics.Paint paint=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
-        ScoreTrendView(android.content.Context c,String pid,List<Map<String,Object>> games){super(c);int total=0;values.add(total);
-            for(int i=games.size()-1;i>=0;i--){Map<String,Object> round=games.get(i);if(!RoundAnalytics.played(round,pid))continue;total+=num(map(round.get("scoreChanges")).get(pid));values.add(total);}
-            setContentDescription("Cumulative score trend, "+(values.size()-1)+" rounds, ending at "+total);
-            motion.draw(this,screenEntry,value->{reveal=value;invalidate();});
-        }
-        @Override protected void onDraw(android.graphics.Canvas canvas){super.onDraw(canvas);int low=Collections.min(values),high=Collections.max(values);double range=Math.max(1,high-low);float left=dp(8),top=dp(12),w=getWidth()-dp(16),h=getHeight()-dp(30);
-            paint.setColor(BORDER);paint.setStrokeWidth(dp(1));float zero=top+(float)(high/range)*h;canvas.drawLine(left,zero,left+w,zero,paint);
-            paint.setColor(GOLD);paint.setStrokeWidth(dp(2));
-            canvas.save();canvas.clipRect(left,top,left+w*reveal,top+h+dp(3));
-            for(int i=1;i<values.size();i++){float x1=left+w*(i-1)/Math.max(1,values.size()-1),x2=left+w*i/Math.max(1,values.size()-1);float y1=top+(float)((high-values.get(i-1))/range)*h,y2=top+(float)((high-values.get(i))/range)*h;canvas.drawLine(x1,y1,x2,y2,paint);}
-            canvas.restore();paint.setColor(MUTED);paint.setTextSize(dp(10));canvas.drawText("Cumulative score • oldest → newest",left,getHeight()-dp(2),paint);
-        }
+    private void shareAnalyticsLeaderboard(AdvancedAnalytics.Report report){
+        List<String> ids=new ArrayList<>(report.names.keySet());ids.removeIf(id->report.players.get(id).played==0);
+        ids.sort((a,b)->{int score=Long.compare(report.players.get(b).points,report.players.get(a).points);return score==0?a.compareTo(b):score;});
+        List<NativeImageShare.RankRow> rows=new ArrayList<>();
+        for(String id:ids){AdvancedAnalytics.Stats stats=report.players.get(id);int hukum=report.roleStats(id,"Hukum").played,partners=report.roleStats(id,"Partner").played;
+            rows.add(new NativeImageShare.RankRow(report.names.get(id),stats.points,stats.played,stats.wins,stats.losses,hukum,partners));}
+        if(rows.isEmpty()){Toast.makeText(this,"No analytics rounds in this scope",Toast.LENGTH_SHORT).show();return;}
+        String scope="all".equals(analyticsState.scope)?"All sessions":"current".equals(analyticsState.scope)?"Current session":"previous".equals(analyticsState.scope)?"Previous session":"unassigned".equals(analyticsState.scope)?"Unassigned rounds":"Selected session";
+        String dates="custom".equals(rankFilter)?(customStart==0?"Any start":dateOnly(customStart))+" – "+(customEnd==0?"Any end":dateOnly(customEnd)):"all".equals(rankFilter)?"All Time":rankFilter;
+        NativeImageShare.leaderboard(this,"Analytics · "+dates+" · "+scope,rows);
     }
     private int studioRoundVisible=20,studioSessionVisible=20;
     private void shareStudioPage(){

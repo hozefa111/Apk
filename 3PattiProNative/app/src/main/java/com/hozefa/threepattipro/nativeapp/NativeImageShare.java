@@ -43,8 +43,9 @@ public final class NativeImageShare {
     }
     public static final class RankRow {
         public final String name;
-        public final int score,rounds,wins,losses,hukum,partners;
-        public RankRow(String name,int score,int rounds,int wins,int losses,int hukum,int partners){
+        public final long score;
+        public final int rounds,wins,losses,hukum,partners;
+        public RankRow(String name,long score,int rounds,int wins,int losses,int hukum,int partners){
             this.name=name;this.score=score;this.rounds=rounds;this.wins=wins;
             this.losses=losses;this.hukum=hukum;this.partners=partners;
         }
@@ -122,7 +123,7 @@ public final class NativeImageShare {
         }
     }
 
-    private static String score(int n){return n==0?"0":n>0?"+"+n:String.valueOf(n);}
+    private static String score(long n){return n==0?"0":n>0?"+"+n:String.valueOf(n);}
     public static void round(Activity activity,String date,String hukum,String result,int bid,List<ScoreRow> rows){
         final List<ScoreRow> snapshot=rows==null?Collections.emptyList():new ArrayList<>(rows);
         RENDERER.execute(()->renderRound(activity,date,hukum,result,bid,snapshot));

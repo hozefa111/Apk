@@ -10,8 +10,8 @@ android {
         minSdk = 26
         targetSdk = 34
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 15
-        versionName = "2.3.3"
+        versionCode = 16
+        versionName = "2.4.0"
     }
     testBuildType = "sandbox"
     buildFeatures { buildConfig = true }
