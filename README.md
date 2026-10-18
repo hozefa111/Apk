@@ -20,6 +20,8 @@ This is a **native APK**, not a website packaged in a WebView. All local video p
 - Search by file/folder name, recent videos, watch history, continue watching.
 - Favorites with visible state, ordered playlists with rename/removal, and multi-select list management.
 - Play All with next-video playback, repeat-one support, stable/persisted queues and recovery from unreadable files.
+- Editable playing queue with current-item context, Play now, move/remove upcoming entries and automatic-next control; saved playlists remain unchanged.
+- Searchable Settings with category navigation, saved search/scroll state and working playback/library/privacy preferences.
 - Native full-screen playback with bottom transport/timeline, touch lock, pinch/gesture seeking, volume and brightness gestures.
 - Playback speed, audio and subtitle tracks, external subtitle picker (SRT/ASS/SSA/VTT depending on Media3/device support), fit/crop/stretch and orientation.
 - Picture-in-picture, foreground Android MediaSession support for wired/Bluetooth headset play/pause/next/previous controls, configurable settings, sleep timer and saved playback progress.

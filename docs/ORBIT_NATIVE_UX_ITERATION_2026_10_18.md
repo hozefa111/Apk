@@ -69,3 +69,26 @@ at 16:27/16:28 UTC, before Orbit's first process startup at 16:30 UTC. The stale
 system dialog blocked manual UI taps; diagnostics were retained before choosing
 Wait. Clean Settings screenshots were then captured. This is recorded as an
 environment limitation, not evidence of phone responsiveness or an ANR-free OS.
+
+## Second regression run
+
+At `12c2048`, [build/unit/lint](https://github.com/hozefa111/Apk/actions/runs/39146399387)
+passed. Local API 26 passed both Settings tests and the corrected queue test.
+The [full emulator run](https://github.com/hozefa111/Apk/actions/runs/39146399403)
+passed API 26 and API 33. API 35 failed during fixture setup: `adb push` returned
+`Operation not permitted` immediately after boot, so the smoke video was absent
+and dependent playback tests could not run successfully. This run is not green.
+The smoke script now retries the actual fixture write for up to 30 attempts,
+then fails with diagnostics if storage never becomes ready. MediaStore indexing
+is still required before navigation/playback assertions; no assertion was removed.
+
+Actual local API 26 screenshots confirmed compact Settings search in portrait
+and landscape with the keyboard open. In landscape the IME occupies most of the
+short window; its Search action hides the keyboard to expose results. These
+screenshots do not establish behavior for all keyboards or device sizes.
+
+The 150% font screenshot exposed clipped wordmark text in the narrow library
+toolbar. At enlarged fonts on narrow windows, the accessible Orbit icon now
+provides branding while the text area remains an action spacer. All three
+toolbar actions stay available. Gallery toggling also uses the same font-aware
+column calculation as library rendering instead of resetting to two columns.

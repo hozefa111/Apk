@@ -327,14 +327,18 @@ class MainActivity : Activity() {
         if (gallery == newValue) return
         gallery = newValue
         preferences.gallery = gallery
-        adapter.useGallery(gallery)
-        gridManager.spanCount = if (gallery) 2 else 1
+        adapter.useGallery(gallery && !compactLibrary())
+        gridManager.spanCount = videoSpanCount()
         findViewById<ImageView>(R.id.btnView).setImageResource(
             if (gallery) R.drawable.orbit_nav_list else R.drawable.orbit_nav_grid
         )
         findViewById<ImageView>(R.id.btnView).contentDescription =
-            if (gallery) "Switch to compact video list" else "Switch to two-column gallery"
+            if (gallery) "Switch to compact video list" else "Switch to video gallery"
     }
+
+    private fun videoSpanCount() = if (gallery && !compactLibrary())
+        (resources.configuration.screenWidthDp / (144 * resources.configuration.fontScale)).toInt().coerceIn(1, 2)
+        else 1
 
     private fun showSortDialog() {
         if (tab == Tab.FOLDERS) {
@@ -522,9 +526,7 @@ class MainActivity : Activity() {
         adapter.submit(visibleVideos)
         if (videos.adapter !== adapter) videos.adapter = adapter
         adapter.useGallery(gallery && !compactLibrary())
-        gridManager.spanCount = if (gallery && !compactLibrary())
-            (resources.configuration.screenWidthDp / (144 * resources.configuration.fontScale)).toInt().coerceIn(1, 2)
-            else 1
+        gridManager.spanCount = videoSpanCount()
         sortButton.text = arrayOf("Newest", "Oldest", "Name A–Z", "Largest", "Longest")[sort.ordinal] + "  ▾"
         empty.visibility = if (visibleVideos.isEmpty()) View.VISIBLE else View.GONE
         empty.text = when {
@@ -890,6 +892,11 @@ class MainActivity : Activity() {
         val folders = tab == Tab.FOLDERS
         val compact = compactChrome()
         val focusedSearch = tab == Tab.SEARCH || query.isNotBlank()
+        // Retain the accessible Orbit icon and all actions when enlarged branding
+        // would clip in the fixed toolbar. This space remains the action spacer.
+        findViewById<View>(R.id.brandText).visibility =
+            if (resources.configuration.fontScale > 1.25f && resources.configuration.screenWidthDp < 480)
+                View.INVISIBLE else View.VISIBLE
         findViewById<View>(R.id.brandBar).apply {
             visibility = if (compact && focusedSearch) View.GONE else View.VISIBLE
             layoutParams = layoutParams.apply { height = ((if (compact) 48 else 67) * resources.displayMetrics.density).toInt() }
