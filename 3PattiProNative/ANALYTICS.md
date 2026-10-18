@@ -64,6 +64,7 @@ Removed players retain historical names when available.
 Explicit session IDs take priority. Legacy rounds without IDs use start-inclusive,
 end-exclusive boundaries; overlapping matches choose the latest start. Unknown
 IDs and undated/unmatched rounds are retained as separate or Unassigned groups.
+A table that has not loaded is shown as unavailable, not as an empty history.
 Date filters use the device timezone and calendar boundaries, including DST and
 inclusive custom end dates. Analytics supports end-only custom ranges; it does
 not inherit the legacy web's unbounded end-only behavior. Undated rounds appear

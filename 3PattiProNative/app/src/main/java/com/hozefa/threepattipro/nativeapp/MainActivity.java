@@ -703,9 +703,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             LinearLayout dates=row();
             TextView first=button(customStart==0?"Start Date":dateOnly(customStart),false,()->selectDate(true));
             TextView last=button(customEnd==0?"End Date":dateOnly(customEnd),false,()->selectDate(false));
-            LinearLayout.LayoutParams part=new LinearLayout.LayoutParams(0,dp(48),1);
+            LinearLayout.LayoutParams part=new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1);
             part.rightMargin=dp(8);dates.addView(first,part);
-            dates.addView(last,new LinearLayout.LayoutParams(0,dp(48),1));
+            dates.addView(last,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1));
             target.addView(dates);gap(target,14);
         }
     }
@@ -1623,6 +1623,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private void analyticsPage(){
         title(content,"Table Analytics","Explore player form, partnerships, bids and session records");
         dateFilterBar(content);
+        if(!hasData){empty("Analytics needs a loaded or saved table.");content.addView(text("Connect to your shared table once to build analytics. Your last saved table works offline.",14,MUTED,false));return;}
         List<Map<String,Object>> scope=AdvancedAnalytics.scope(AdvancedAnalytics.dates(gameRounds(),rankFilter,Instant.now(),ZoneId.systemDefault(),customStart,customEnd),sessions,analyticsState.scope);
         AdvancedAnalytics.Report report=new AdvancedAnalytics.Report(players,scope,sessions);
         new AdvancedAnalyticsPage(this,content,analyticsState,report,sessions,PANEL,GOLD,GREEN,RED,BLUE,new AdvancedAnalyticsPage.Host(){

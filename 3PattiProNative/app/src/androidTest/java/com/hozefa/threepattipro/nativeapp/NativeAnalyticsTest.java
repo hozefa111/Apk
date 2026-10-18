@@ -32,7 +32,7 @@ public class NativeAnalyticsTest {
         field(a,"tab",7);field(a,"rankFilter","all");a.snapshotContinuity(false);a.syncProblem(null,0,false);a.syncState(true);a.dataUpdated(roster(),empty?new ArrayList<>():rounds(),sessions());
     }
     private void view(int index){onView(withText(startsWith("View · "))).perform(scrollTo(),click());onData(equalTo(AdvancedAnalyticsPage.SECTIONS[index])).inRoot(isDialog()).perform(click());onView(withText("View · "+AdvancedAnalyticsPage.SECTIONS[index])).check(matches(isDisplayed()));}
-    private void capture(String name)throws Exception{Thread.sleep(500);InstrumentationRegistry.getInstrumentation().waitForIdleSync();android.graphics.Bitmap b=InstrumentationRegistry.getInstrumentation().getUiAutomation().takeScreenshot();assertNotNull(b);java.io.File d=new java.io.File(context().getFilesDir(),"verification");assertTrue(d.isDirectory()||d.mkdirs());try(java.io.OutputStream out=new java.io.FileOutputStream(new java.io.File(d,name+".png"))){assertTrue(b.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out));}finally{b.recycle();}}
+    private void capture(String name)throws Exception{Thread.sleep(700);InstrumentationRegistry.getInstrumentation().waitForIdleSync();android.graphics.Bitmap b=InstrumentationRegistry.getInstrumentation().getUiAutomation().takeScreenshot();assertNotNull(b);java.io.File d=new java.io.File(context().getFilesDir(),"verification");assertTrue(d.isDirectory()||d.mkdirs());try(java.io.OutputStream out=new java.io.FileOutputStream(new java.io.File(d,name+".png"))){assertTrue(b.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out));}finally{b.recycle();}}
     @Test public void everyAdvancedViewRendersAndKeepsFiltersReachable()throws Exception{
         Assume.assumeTrue(BuildConfig.USE_EMULATORS);
         try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
@@ -74,6 +74,7 @@ public class NativeAnalyticsTest {
             onView(withText("Round scope · Previous completed session")).check(matches(isDisplayed()));onView(withText("15")).perform(scrollTo()).check(matches(isDisplayed()));
             scenario.onActivity(a->seed(a,true));awaitText("No rounds in this scope");capture("35-analytics-empty");
             onView(withText(startsWith("View · "))).perform(scrollTo(),click());onData(equalTo("Auto insights")).inRoot(isDialog()).perform(click());onView(withText("No rounds in this scope")).perform(scrollTo()).check(matches(isDisplayed()));
+            scenario.onActivity(a->{field(a,"hasData",false);a.syncProblem("Synthetic offline connection",0,false);});awaitText("Analytics needs a loaded or saved table.");capture("40-analytics-no-cache");
         }
     }
     private String shell(String command)throws Exception{android.os.ParcelFileDescriptor f=InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand(command);try(java.io.InputStream in=new android.os.ParcelFileDescriptor.AutoCloseInputStream(f);java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream()){byte[] data=new byte[1024];int n;while((n=in.read(data))!=-1)out.write(data,0,n);return out.toString("UTF-8").trim();}}
