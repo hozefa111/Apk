@@ -78,16 +78,24 @@ public class NativeAnalyticsTest {
         }
     }
     private String shell(String command)throws Exception{android.os.ParcelFileDescriptor f=InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand(command);try(java.io.InputStream in=new android.os.ParcelFileDescriptor.AutoCloseInputStream(f);java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream()){byte[] data=new byte[1024];int n;while((n=in.read(data))!=-1)out.write(data,0,n);return out.toString("UTF-8").trim();}}
+    private void orientation(ActivityScenario<MainActivity> scenario,int requested,int expected)throws Exception{
+        scenario.onActivity(a->a.setRequestedOrientation(requested));AtomicBoolean ready=new AtomicBoolean();long end=System.currentTimeMillis()+15000;
+        while(System.currentTimeMillis()<end){scenario.onActivity(a->ready.set(a.getResources().getConfiguration().orientation==expected));if(ready.get())break;Thread.sleep(100);}assertTrue(ready.get());InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+    }
     @Test public void analyticsControlsAndLongNamesRemainUsableAtLargeFontLandscape()throws Exception{
         Assume.assumeTrue(BuildConfig.USE_EMULATORS);String old=shell("settings get system font_scale");
-        try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
-            awaitText("Table Status");
-            try{
-                shell("settings put system font_scale 2.0");long end=System.currentTimeMillis()+10000;while(Math.abs(context().getResources().getConfiguration().fontScale-2f)>.01f&&System.currentTimeMillis()<end)Thread.sleep(100);
-                assertEquals(2f,context().getResources().getConfiguration().fontScale,.01f);scenario.onActivity(a->a.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));AtomicBoolean rotated=new AtomicBoolean();end=System.currentTimeMillis()+15000;while(System.currentTimeMillis()<end){scenario.onActivity(a->rotated.set(a.getResources().getConfiguration().orientation==android.content.res.Configuration.ORIENTATION_LANDSCAPE));if(rotated.get())break;Thread.sleep(100);}assertTrue(rotated.get());
-                scenario.onActivity(a->seed(a,false));view(1);onView(withText(startsWith("Compare with · "))).perform(scrollTo()).check(matches(isCompletelyDisplayed()));capture("36-analytics-large-comparison");
-                view(5);onView(withText("Last 20")).perform(scrollTo(),click());onView(withText("Recent form · Last 20 played rounds")).perform(scrollTo()).check(matches(isDisplayed()));capture("37-analytics-large-form");
-            }finally{shell("settings put system font_scale "+(old.matches("[0-9.]+")?old:"1.0"));scenario.onActivity(a->a.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED));}
+        try{
+            try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
+                awaitText("Table Status");shell("settings put system font_scale 2.0");long end=System.currentTimeMillis()+10000;while(Math.abs(context().getResources().getConfiguration().fontScale-2f)>.01f&&System.currentTimeMillis()<end)Thread.sleep(100);assertEquals(2f,context().getResources().getConfiguration().fontScale,.01f);
+                try{
+                    orientation(scenario,ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,android.content.res.Configuration.ORIENTATION_LANDSCAPE);
+                    scenario.onActivity(a->seed(a,false));view(1);onView(withText(startsWith("Compare with · "))).perform(scrollTo()).check(matches(isCompletelyDisplayed()));capture("36-analytics-large-comparison");
+                    view(5);onView(withText("Last 20")).perform(scrollTo(),click());onView(withText("Recent form · Last 20 played rounds")).perform(scrollTo()).check(matches(isDisplayed()));capture("37-analytics-large-form");
+                }finally{orientation(scenario,ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,android.content.res.Configuration.ORIENTATION_PORTRAIT);}
+            }
+        }finally{
+            shell("null".equals(old)?"settings delete system font_scale":"settings put system font_scale "+old);
+            float expected=old.matches("[0-9.]+")?Float.parseFloat(old):1f;long end=System.currentTimeMillis()+10000;while(Math.abs(context().getResources().getConfiguration().fontScale-expected)>.01f&&System.currentTimeMillis()<end)Thread.sleep(100);assertEquals(expected,context().getResources().getConfiguration().fontScale,.01f);InstrumentationRegistry.getInstrumentation().waitForIdleSync();
         }
     }
 }

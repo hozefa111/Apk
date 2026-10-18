@@ -372,18 +372,19 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         r.addView(value,new LinearLayout.LayoutParams(0,-2,1));
         c.addView(r);return value;
     }
+    private boolean compactShell(){return getResources().getConfiguration().orientation==android.content.res.Configuration.ORIENTATION_LANDSCAPE||getResources().getConfiguration().screenHeightDp<450;}
     private void buildShell() {
         motion.cancelAll();
         root=column();root.setBackgroundColor(BG);
-        toolbar=row();pad(toolbar,18,15,18,15);toolbar.setBackgroundColor(BG);
+        toolbar=row();pad(toolbar,18,compactShell()?7:15,18,compactShell()?7:15);toolbar.setBackgroundColor(BG);
         toolbar.setMinimumHeight(dp(66));root.addView(toolbar,lp(-1,-2));updateToolbar();
         View bar=new View(this);bar.setBackgroundColor(BORDER);root.addView(bar,lp(-1,1));
         scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setVerticalScrollBarEnabled(false);
         scroll.setSmoothScrollingEnabled(false);
         content=column();pad(content,18,20,18,35);scroll.addView(content);
         root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
-        navigation=row();pad(navigation,7,7,7,7);
-        navigation.setMinimumHeight(dp(64));
+        navigation=row();pad(navigation,7,compactShell()?4:7,7,compactShell()?4:7);
+        navigation.setMinimumHeight(dp(compactShell()?48:64));
         navigation.setBackgroundColor(0xFF121215);
         root.addView(navigation,lp(-1,-2));
         setContentView(root);
@@ -392,12 +393,12 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private void updateToolbar() {
         if(toolbar==null)return;
         toolbar.removeAllViews();
-        boolean largeText=getResources().getConfiguration().fontScale>1.3f;
+        boolean largeText=getResources().getConfiguration().fontScale>1.3f&&!compactShell();
         toolbar.setOrientation(largeText?LinearLayout.VERTICAL:LinearLayout.HORIZONTAL);
         toolbar.setGravity(largeText?Gravity.START:Gravity.CENTER_VERTICAL);
         LinearLayout heading=column();
         TextView appName=text("♠  3 PATTI PRO",21,GOLD,true);
-        if(largeText){appName.setMaxLines(1);appName.setAutoSizeTextTypeUniformWithConfiguration(16,21,1,android.util.TypedValue.COMPLEX_UNIT_SP);}
+        if(largeText||compactShell()){appName.setMaxLines(1);appName.setAutoSizeTextTypeUniformWithConfiguration(16,21,1,android.util.TypedValue.COMPLEX_UNIT_SP);}
         heading.addView(appName);
         gap(heading,5);
         heading.addView(text(liveConnected?"●  LIVE SYNC":quotaPaused?"○  SYNC PAUSED · LIMIT REACHED":hasData?"○  OFFLINE · SAVED TABLE":"○  OFFLINE / CONNECTING",9,
@@ -406,14 +407,14 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         LinearLayout actions=largeText?row():toolbar;
         if(largeText){gap(toolbar,8);toolbar.addView(actions,lp(-1,-2));}
         TextView status=text(busy?"SAVING…":loggedIn?"ADMIN":"LOGIN",11,loggedIn?GREEN:GOLD,true);
-        status.setGravity(Gravity.CENTER);pad(status,12,10,12,10);
+        status.setGravity(Gravity.CENTER);status.setMinHeight(dp(48));pad(status,12,10,12,10);
         status.setBackground(shape(PANEL2,12,BORDER));
         status.setOnClickListener(v->{if(busy)return;if(loggedIn)confirmLogout();else loginDialog();});
         actions.addView(status);
         if(busy&&motion.full()){android.widget.ProgressBar saving=new android.widget.ProgressBar(this);saving.setContentDescription("Saving progress");actions.addView(saving,lp(22,22));}
         if(largeText)actions.addView(new View(this),new LinearLayout.LayoutParams(0,1,1));
         TextView refresh=text("↻",23,GOLD,true);
-        refresh.setGravity(Gravity.CENTER);
+        refresh.setGravity(Gravity.CENTER);refresh.setContentDescription("Refresh table");refresh.setMaxLines(1);refresh.setAutoSizeTextTypeUniformWithConfiguration(16,23,1,android.util.TypedValue.COMPLEX_UNIT_SP);
         refresh.setBackground(shape(PANEL2,12,BORDER));
         refresh.setMinWidth(dp(48));refresh.setMinHeight(dp(48));
         refresh.setOnClickListener(v->{
@@ -425,7 +426,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         LinearLayout.LayoutParams rp=lp(48,48);rp.leftMargin=dp(8);
         actions.addView(refresh,rp);
         TextView more=text("⋮",24,GOLD,true);more.setGravity(Gravity.CENTER);more.setContentDescription("More options");
-        more.setMinWidth(dp(40));more.setMinHeight(dp(48));
+        more.setMinWidth(dp(40));more.setMinHeight(dp(48));more.setMaxLines(1);more.setAutoSizeTextTypeUniformWithConfiguration(16,24,1,android.util.TypedValue.COMPLEX_UNIT_SP);
         more.setOnClickListener(v->new MotionDialogBuilder(this,motion).setTitle("Your table")
             .setItems(new String[]{"Search","Analytics","Share Studio","Settings"},(d,which)->{tab=6+which;render(true);})
             .setNegativeButton("Close",null).show());actions.addView(more);
@@ -476,13 +477,13 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         String[] symbols={"⌂","♣","＋","★","◷"};
         for(int i=0;i<navNames.length;i++){
             final int destination=i;
-            LinearLayout item=column();item.setGravity(Gravity.CENTER);
-            TextView sym=text(symbols[i],24,tab==i?GOLD:MUTED,true);sym.setGravity(Gravity.CENTER);
+            LinearLayout item=column();item.setGravity(Gravity.CENTER);if(compactShell())item.setOrientation(LinearLayout.HORIZONTAL);
+            TextView sym=text(symbols[i],compactShell()?18:24,tab==i?GOLD:MUTED,true);sym.setGravity(Gravity.CENTER);
             TextView text=text(navNames[i],10,tab==i?GOLD:MUTED,tab==i);text.setGravity(Gravity.CENTER);
             text.setMaxLines(1);text.setAutoSizeTextTypeUniformWithConfiguration(8,10,1,android.util.TypedValue.COMPLEX_UNIT_SP);
-            item.addView(sym);gap(item,2);item.addView(text);
+            item.addView(sym);if(compactShell()){View spacer=new View(this);item.addView(spacer,lp(5,1));item.addView(text,new LinearLayout.LayoutParams(0,-2,1));}else{gap(item,2);item.addView(text);}
             if(tab==i)item.setBackground(shape(PANEL2,12,0));
-            item.setMinimumHeight(dp(52));item.setSelected(tab==i);item.setContentDescription(navNames[i]);
+            item.setMinimumHeight(dp(compactShell()?48:52));item.setSelected(tab==i);item.setContentDescription(navNames[i]);
             navigation.addView(item,new LinearLayout.LayoutParams(0,-2,1));
             item.setOnClickListener(v->{
                 if(destination==2&&!loggedIn){loginDialog();return;}
