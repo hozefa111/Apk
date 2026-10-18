@@ -688,12 +688,13 @@ public final class FirebaseGateway {
             if(legacy)for(String path:rawDocuments.keySet())if(path.startsWith("players/"))throw new IOException("Legacy import requires an empty player collection");
             for(JSONObject doc:documents){
                 String path=BackupArchive.path(doc,project);
+                JSONObject normalized=SdkDocuments.fields(SdkDocuments.decode(doc.getJSONObject("fields"),firestore));
                 if(rawDocuments.containsKey(path)){
-                    if(!equivalent(decodeFields(rawDocuments.get(path).getJSONObject("fields")),decodeFields(doc.getJSONObject("fields"))))
+                    if(!BulkWritePlan.sameJson(rawDocuments.get(path).getJSONObject("fields"),normalized))
                         throw new IOException("Backup conflicts with existing "+path+". No records changed.");
                     continue;
                 }
-                writes.put(new JSONObject().put("update",new JSONObject().put("name",documentRoot+"/"+path).put("fields",doc.getJSONObject("fields")))
+                writes.put(new JSONObject().put("update",new JSONObject().put("name",documentRoot+"/"+path).put("fields",normalized))
                     .put("currentDocument",new JSONObject().put("exists",false)));
             }
             startBulk("restore",writes,token);

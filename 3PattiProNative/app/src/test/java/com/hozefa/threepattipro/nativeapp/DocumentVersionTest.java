@@ -13,6 +13,10 @@ public class DocumentVersionTest {
         assertNotEquals(DocumentVersion.of(new JSONObject("{\"x\":[1,2]}")),DocumentVersion.of(new JSONObject("{\"x\":[2,1]}")));
         assertNotEquals(DocumentVersion.of(new JSONObject("{\"x\":1}")),DocumentVersion.of(new JSONObject("{\"x\":\"1\"}")));
     }
+    @Test public void oldArchiveTimestampFormattingRemainsCompatible()throws Exception {
+        assertTrue(BulkWritePlan.sameJson(new JSONObject("{\"timestampValue\":\"2026-10-18T00:00:00.123000000Z\"}"),new JSONObject("{\"timestampValue\":\"2026-10-18T00:00:00.123Z\"}")));
+        assertFalse(BulkWritePlan.sameJson(new JSONObject("{\"timestampValue\":\"2026-10-18T00:00:00.123000001Z\"}"),new JSONObject("{\"timestampValue\":\"2026-10-18T00:00:00.123Z\"}")));
+    }
     @Test public void timestampPrecisionAndUnknownFieldsAreProtected()throws Exception {
         JSONObject first=new JSONObject("{\"t\":{\"timestampValue\":\"2026-10-18T00:00:00.000000001Z\"}}");
         JSONObject other=new JSONObject("{\"t\":{\"timestampValue\":\"2026-10-18T00:00:00.000000002Z\"}}");

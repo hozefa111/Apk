@@ -73,6 +73,19 @@ public class FirebaseGatewayEmulatorTest {
         CountDownLatch retried=new CountDownLatch(1);ready(()->gateway.addRoundWithId(id,body,retried::countDown,()->{}));completed(retried,"retry");gateway.refresh();await(()->live.get()&&!busy.get());
         assertEquals(1,rounds.get().stream().filter(r->id.equals(r.get("id"))).count());
         CountDownLatch backup=new CountDownLatch(1);AtomicReference<byte[]> archive=new AtomicReference<>();gateway.exportBackup(bytes->{archive.set(bytes);backup.countDown();});assertTrue(backup.await(45,TimeUnit.SECONDS));assertTrue(BackupArchive.validate(archive.get(),"demo-three-patti").size()>=4);
+        // An older REST archive can spell the same timestamp with different fractional digits.
+        JSONObject oldArchive=new JSONObject(new String(archive.get(),java.nio.charset.StandardCharsets.UTF_8));
+        JSONArray docs=oldArchive.getJSONArray("documents");
+        for(int i=0;i<docs.length();i++){
+            JSONObject oldFields=docs.getJSONObject(i).getJSONObject("fields");
+            if(oldFields.has("timestamp")){
+                JSONObject t=oldFields.getJSONObject("timestamp");
+                if(t.has("timestampValue"))t.put("timestampValue",new java.time.format.DateTimeFormatterBuilder().appendInstant(9).toFormatter().format(java.time.Instant.parse(t.getString("timestampValue"))));
+            }
+        }
+        notice.set("");ready(()->gateway.restoreBackup(oldArchive.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        await(()->notice.get().startsWith("Backup restored")&&live.get()&&!busy.get());
+        assertFalse(gateway.hasPendingBulkOperation());
         Map<String,Object> changed=new HashMap<>(body);changed.put("result","loss");CountDownLatch rejected=new CountDownLatch(1);AtomicBoolean incorrectlySaved=new AtomicBoolean();ready(()->gateway.addRoundWithId(id,changed,()->incorrectlySaved.set(true),rejected::countDown));completed(rejected,"reject changed payload");assertFalse(incorrectlySaved.get());
         gateway.refresh();await(()->live.get()&&!busy.get());ready(()->gateway.deleteDocument("rounds",id,"Deleted test round"));await(()->rounds.get().stream().noneMatch(r->id.equals(r.get("id")))&&live.get()&&!busy.get());
         ready(()->gateway.restoreBackup(archive.get()));await(()->rounds.get().stream().anyMatch(r->id.equals(r.get("id")))&&live.get());

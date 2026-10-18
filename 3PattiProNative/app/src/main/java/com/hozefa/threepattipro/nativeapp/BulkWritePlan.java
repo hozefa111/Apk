@@ -4,6 +4,7 @@ import org.json.*;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.time.Instant;
 
 /** Durable, replayable create/delete/rename batches. Every remote write has a precondition. */
 final class BulkWritePlan {
@@ -102,6 +103,8 @@ final class BulkWritePlan {
     static boolean sameJson(Object left,Object right)throws Exception{
         if(left instanceof JSONObject&&right instanceof JSONObject){
             JSONObject a=(JSONObject)left,b=(JSONObject)right;if(a.length()!=b.length())return false;
+            if(a.length()==1&&a.has("timestampValue")&&b.has("timestampValue"))
+                return Instant.parse(a.getString("timestampValue")).equals(Instant.parse(b.getString("timestampValue")));
             Iterator<String> keys=a.keys();while(keys.hasNext()){String key=keys.next();if(!b.has(key)||!sameJson(a.get(key),b.get(key)))return false;}return true;
         }
         if(left instanceof JSONArray&&right instanceof JSONArray){
