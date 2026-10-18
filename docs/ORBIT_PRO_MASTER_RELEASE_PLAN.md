@@ -1,6 +1,6 @@
 # Orbit Player Pro — Quality-first master release plan
 
-Owner: Orbit Player Pro `com.orbitplayer.app` | Baseline: signed v0.2.1
+Owner: Orbit Player Pro `com.orbitplayer.app` | Stable baseline: signed v0.3.0
 Do NOT repackage as a web app. Preserve signed Android package and saved data.
 
 ## Non-negotiable release gates
@@ -49,5 +49,12 @@ Do NOT repackage as a web app. Preserve signed Android package and saved data.
 - Explicit error states and recovery buttons; avoid silent failures and fake/non-functional controls.
 - Run tests on the *exact* release artifact and real devices before promoting to a stable label.
 
-## Scope and acceptance for this code change
-Deliver **milestone A1** (natural queue auto-next), **milestone B2 and B3** (favorites + local playlists/multi-add), repair emulator smoke boot and add deterministic pure-unit-tests. Remaining items stay tracked as *unverified or pending* until implemented and tested.
+## Current scope and evidence
+
+The milestone list above is a roadmap, not a statement that every feature is
+missing or complete. The [18 October feature audit](ORBIT_RELEASE_AUDIT_2026_10_18.md)
+records implementation status, actual run evidence and outstanding verification.
+Use the [physical-device acceptance procedure](qa/DEVICE_ACCEPTANCE.md) for checks
+that emulators cannot establish. Advanced optional features remain deferred where
+necessary for reliability; foreground MediaSession support is not background
+service playback.

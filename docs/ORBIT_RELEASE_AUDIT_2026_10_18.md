@@ -95,6 +95,8 @@ and no stable release is published by this audit.
 
 ## Update identity inspection
 
+Initial inspection before internal signed QA (final outcome below):
+
 The downloaded public v0.3.0 APK matches its published SHA-256 checksum:
 `5679e15fbaaecbc52895906609b1322009dbf9b420ae95e9a0a320f767d549d1`.
 APK metadata confirms `com.orbitplayer.app`, versionCode 13 / 0.3.0.
@@ -171,3 +173,115 @@ fixtures. Common formats still require MediaStore indexing. This documents a
 library discovery limitation; it does not silently equate scanner visibility with
 codec support. Each sample result is saved immediately, including before a later
 failure. Final-source reruns remain required after the short-window refinement.
+
+## Frozen-source automated results — `3515424`
+
+[Build/unit/lint run](https://github.com/hozefa111/Apk/actions/runs/39113956703):
+**passed**. Debug and optimized release compile; instrumentation APK compiles;
+24 unit tests per variant (48 total), zero failures/skips. Both lint variants
+have **zero errors and 181 warnings**, mainly hardcoded text/internationalization,
+small text, unused resources and platform recommendations. Warnings are retained,
+not hidden. Local frozen-source build also passed (2m31s).
+
+[Emulator and internal upgrade run](https://github.com/hozefa111/Apk/actions/runs/39113956324):
+all **three API smoke jobs passed**, with each suite summary recording exit 0 for
+native UI, permission recovery, instrumentation and media matrix. Each API ran
+eight instrumentation tests with zero failures/errors/skips. The signed upgrade
+job is tracked separately below; three green smoke jobs alone do not mean that
+job or physical acceptance passed.
+
+The same source additionally passed the native UI smoke locally on an API 26
+software emulator at 320dp width, using the compact menu's real File type and Sort
+videos actions. Captured folder/video/Settings/landscape-player screens were
+visually inspected. These are emulator inspections, not frame-time benchmarks.
+
+### Generated media compatibility evidence
+
+`R` = first video frame rendered, app remained alive and no fatal exception was
+observed. `E` = informative player error, app remained alive. This is limited
+startup/format evidence from these emulator decoders.
+
+| Fixture | API 26 | API 33 | API 35 | Interpretation |
+|---|---|---|---|---|
+| H.264/AAC MP4 | R | R | R | AAC track selected; audibility unverified |
+| HEVC/AAC MP4 | R | R | R | Emulator decoder result, not every phone |
+| H.264/AAC MKV | R | R | R | AAC selected |
+| HEVC/AAC MKV | R | R | R | API 26 omitted MediaStore indexing; direct file open rendered |
+| VP9/Opus WebM | R | R | R | Opus selected; audibility unverified |
+| H.264 without audio | R | R | R | No selected audio expected |
+| H.264/AC3 MKV | R | R | R | **No AC3 audio track selected**; video success does not promise sound |
+| 1080p H.264 | R | R | R | Startup only; sustained smoothness unmeasured |
+| One-hour H.264 container | R | R | R | Long-duration metadata/startup only; not a one-hour session |
+| Variable-frame-rate H.264 | R | R | R | Startup only; full sync/seek acceptance remains |
+| Two-audio + embedded-SRT MKV | R | R | R | Default AAC selected; actual switching/embedded timing still needs acceptance |
+| Corrupt MP4 | E | E | E | Handled error; no crash |
+
+Actual external SRT/VTT/ASS/SSA cue assertions passed after stopped-picker return
+and paused seek on all three APIs. Complex styling, long captions and actual
+provider grant behavior still require device checks. No universal codec support,
+AC3 fallback, audible output or sustained playback performance is inferred.
+
+### Remaining release gates
+
+- Physical low/mid-range phone performance, real 1,000-video libraries, long
+  sessions, removable storage, audible tracks, interruptions, real Documents
+  grants, large fonts and TalkBack: use [device acceptance](qa/DEVICE_ACCEPTANCE.md).
+- Original Orbit web reference and verified parity: still unavailable. Additional
+  accessible `Excel`, `gym`, `loan`, `loan1` references are unrelated savings,
+  fitness and loan projects; no Orbit source was identified. `myapp` is empty.
+
+The application source is frozen at `3515424`; the `52fc70d` upgrade-harness
+correction does not alter that app tree. Verification-document updates also do
+not alter the tested APK implementation. Keep
+PR #10 unmerged and the stable release unchanged while release gates remain open.
+
+### Additional local Android behavior evidence
+
+[API 26 manual evidence](qa/API26_MANUAL_EVIDENCE.md) records actual DocumentsUI
+selection with broad storage access revoked, a persisted media-documents read
+grant, and successful rendering again after force-stop/reopen without broad
+access. It also records platform media Play replaying an ended clip, PiP entry,
+fullscreen return with restored controls, and dismissal releasing the platform
+media session without player/fatal errors. These close specific emulator gaps;
+other providers, phone hardware and stress cases remain unverified.
+
+### Signed-check harness correction
+
+At `3515424`, the internal signing job built with the production certificate,
+installed over stable v0.3.0 and compared preserved collections/progress/history,
+then failed on the emulator's rejected `logcat -c` command before optimized
+playback verification. This was not counted as a passing upgrade job.
+`52fc70d` changes only upgrade diagnostics and CI acceleration: log clearing is
+best-effort and candidate diagnostics use its fresh process ID. Application code
+remains identical to `3515424`. The corrected run is
+[39114910814](https://github.com/hozefa111/Apk/actions/runs/39114910814), which
+subsequently passed in full, including its signed-upgrade job.
+
+
+## Final internal candidate verification — `52fc70d`
+
+[Build, both unit variants and lint](https://github.com/hozefa111/Apk/actions/runs/39114913781): **passed**.
+[PR API 26/33/35 suite](https://github.com/hozefa111/Apk/actions/runs/39114913871): **passed**.
+[Dispatched full suite and signed upgrade](https://github.com/hozefa111/Apk/actions/runs/39114910814): **passed**, all four jobs.
+
+The signed v0.3.1 / code 14 candidate installed over signed stable v0.3.0 / code 13
+without uninstalling. Legacy-format favorites/playlist fixtures and real stable
+playback history/progress were unchanged across installation; the optimized
+candidate resumed playback and advanced beyond that saved position. The actual
+release screenshot was inspected and shows rendered video. The
+[stored result](qa/signed-upgrade-result.json) explicitly identifies physical
+verification as false.
+
+The downloaded internal artifact was independently verified with `apksigner`:
+certificate SHA-256 matches stable
+`27d8f4fd282016b5829348caace9ffb47dbd36f3ea1cfd7819569708274fbda2`.
+Candidate APK size: **1,141,085 bytes**. Candidate APK SHA-256:
+`1a7cdf822642330d64abd692a460ae76cb62fda564820264d991120bd28e7806`.
+This identifies an internal QA artifact, not a published production release.
+The private key was never downloaded, generated, changed or committed.
+
+Application tree `e3f630540848fc0a207612fc54db5df684317000` is identical at
+`3515424` and `52fc70d`. Remaining changes in this handover are documentation only.
+No main-branch merge, GitHub Release publication or interim APK delivery was made.
+Physical-device acceptance and the missing original web reference remain open;
+advanced deferred scope remains as described in the feature matrix.
