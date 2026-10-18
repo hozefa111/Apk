@@ -32,7 +32,7 @@ public class NativeQuotaTest {
         public void syncProblem(String message,long retryAt,boolean limit){quota.set(limit);}
     };}
     private void start(AtomicLong clock)throws Exception{
-        live.set(false);quota.set(false);
+        live.set(false);quota.set(false);players.set(Collections.emptyList());
         InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{gateway=new FirebaseGateway(context,listener(),"demo-key",clock::get);gateway.start();});
     }
     private void stop(){if(gateway!=null){InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.stop());gateway=null;}}
@@ -62,6 +62,22 @@ public class NativeQuotaTest {
         start(new AtomicLong(System.currentTimeMillis()));await(live::get);
         assertEquals(0,context.getSharedPreferences("firebase_sync_retry",0).getAll().size());
         Thread.sleep(63000);assertTrue(live.get());assertFalse(quota.get());
+    }
+    @Test public void sdkOfflineRestartKeepsSavedTableReadOnlyAndReconnects()throws Exception{
+        start(new AtomicLong(System.currentTimeMillis()));await(live::get);
+        gateway.signIn("tester@example.test","test-password-123");await(()->gateway.loggedIn()&&live.get());
+        int savedCount=players.get().size();assertTrue(savedCount>0);
+        FirebaseFirestore db=FirebaseFirestore.getInstance(com.google.firebase.FirebaseApp.getInstance("three-patti-native"));
+        try{
+            com.google.android.gms.tasks.Tasks.await(db.disableNetwork(),10,TimeUnit.SECONDS);await(()->!live.get());
+            stop();start(new AtomicLong(System.currentTimeMillis()));
+            await(()->players.get().size()==savedCount);assertFalse(live.get());await(gateway::loggedIn);
+            AtomicBoolean ran=new AtomicBoolean();CountDownLatch rejected=new CountDownLatch(1);
+            gateway.write("Must not queue",token->ran.set(true),()->{},rejected::countDown);
+            assertTrue(rejected.await(5,TimeUnit.SECONDS));assertFalse(ran.get());
+            com.google.android.gms.tasks.Tasks.await(db.enableNetwork(),10,TimeUnit.SECONDS);await(live::get);
+            assertEquals(savedCount,players.get().size());assertFalse(ran.get());
+        }finally{com.google.android.gms.tasks.Tasks.await(db.enableNetwork(),10,TimeUnit.SECONDS);}
     }
     @Test public void quotaScreenReplacesEndlessLoadingAndKeepsCachedTableReadable()throws Exception{
         try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
