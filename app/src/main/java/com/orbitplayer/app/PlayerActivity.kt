@@ -313,6 +313,7 @@ class PlayerActivity : Activity() {
         exo.repeatMode = if (repeatOne) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         exo.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
+                if (player !== exo) return // Ignore late decoder callbacks from a released session.
                 if (BuildConfig.DEBUG) android.util.Log.e("OrbitPlayerQA", "PLAYER_ERROR ${error.errorCodeName}", error)
                 if (isFinishing || isDestroyed) return
                 val failedUri = videoUri
@@ -322,7 +323,7 @@ class PlayerActivity : Activity() {
                         "Unable to play ${videoTitle.take(50)}. Trying next video.",
                         Toast.LENGTH_LONG).show()
                     handler.post {
-                        if (!isFinishing && !isDestroyed && videoUri == failedUri) switchQueue(1)
+                        if (player === exo && !isFinishing && !isDestroyed && videoUri == failedUri) switchQueue(1)
                     }
                     return
                 }
@@ -342,6 +343,7 @@ class PlayerActivity : Activity() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (player !== exo) return
                 updateSystemPlaybackState()
                 updatePlayPauseButton()
                 if (isPlaying) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -353,6 +355,7 @@ class PlayerActivity : Activity() {
             }
 
             override fun onTracksChanged(tracks: Tracks) {
+                if (player !== exo) return
                 if (selectExternalSubtitle) {
                     val external = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }.firstNotNullOfOrNull { group ->
                         (0 until group.length).firstOrNull { index ->
@@ -382,6 +385,7 @@ class PlayerActivity : Activity() {
             }
 
             override fun onRenderedFirstFrame() {
+                if (player !== exo) return
                 if (BuildConfig.DEBUG) android.util.Log.i("OrbitPlayerQA", "FIRST_FRAME")
             }
 
@@ -394,6 +398,7 @@ class PlayerActivity : Activity() {
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                if (player !== exo) return
                 if (BuildConfig.DEBUG && playbackState == Player.STATE_READY) {
                     android.util.Log.i("OrbitPlayerQA", "STATE_READY")
                 }
@@ -410,7 +415,7 @@ class PlayerActivity : Activity() {
                     if (QueueNavigation.shouldAutoAdvance(repeatOne, PlaybackQueue.autoAdvance, canAdvance)) {
                         // Media3 listener callbacks may run during transitions; avoid re-entrant setMediaItem.
                         handler.post {
-                            if (!isFinishing && !isDestroyed && videoUri == finishedUri) switchQueue(1)
+                            if (player === exo && !isFinishing && !isDestroyed && videoUri == finishedUri) switchQueue(1)
                         }
                     }
                 }
@@ -465,7 +470,19 @@ class PlayerActivity : Activity() {
                     player?.seekTo(pos.coerceAtLeast(0L))
                     updateSystemPlaybackState()
                 }
-                override fun onStop() {
+                private fun releasePlayer() {
+        val closing = player
+        // Invalidate the owner before release(), which can synchronously dispatch
+        // timeout/state callbacks and must not reopen UI or advance a stopped queue.
+        player = null
+        playerView.player = null
+        mediaSession?.release()
+        mediaSession = null
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        closing?.release()
+    }
+
+    override fun onStop() {
                     player?.pause()
                     updateSystemPlaybackState()
                 }
@@ -1220,22 +1237,14 @@ class PlayerActivity : Activity() {
         savePosition()
         holdSpeedRestore?.let { player?.setPlaybackSpeed(it) }
         holdSpeedRestore = null
-        mediaSession?.release()
-        mediaSession = null
-        playerView.player = null
-        player?.release()
-        player = null
+        releasePlayer()
         super.onStop()
     }
 
     override fun onDestroy() {
         // PiP may bypass onStop; preserve watch progress before releasing its player.
         savePosition()
-        mediaSession?.release()
-        mediaSession = null
-        playerView.player = null
-        player?.release()
-        player = null
+        releasePlayer()
         subtitleExecutor.shutdownNow()
         sleepTimerRunnable?.let { handler.removeCallbacks(it) }
         handler.removeCallbacksAndMessages(null)
