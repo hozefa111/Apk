@@ -11,7 +11,17 @@ source=Path(sys.argv[1] if len(sys.argv)>1 else 'qa/media')
 report=Path('qa/media-results');report.mkdir(parents=True,exist_ok=True)
 package='com.orbitplayer.app'
 def adb(*args,check=True):
-    return subprocess.run(['adb',*args],capture_output=True,text=True,timeout=120,check=check).stdout
+    result=subprocess.run(['adb',*args],capture_output=True,text=True,timeout=120)
+    if check and result.returncode:
+        raise RuntimeError(f'adb {args!r} failed ({result.returncode}): {result.stdout}\n{result.stderr}')
+    return result.stdout
+
+# connectedAndroidTest uninstalls its target APK on completion. Each independent
+# suite owns its installation and grants instead of relying on a previous suite.
+adb('install','-r','app/build/outputs/apk/debug/app-debug.apk')
+api=int(adb('shell','getprop','ro.build.version.sdk').strip())
+permission='android.permission.READ_MEDIA_VIDEO' if api>=33 else 'android.permission.READ_EXTERNAL_STORAGE'
+adb('shell','pm','grant',package,permission)
 
 samples=sorted(source.glob('*.mp4'))+sorted(source.glob('*.mkv'))+sorted(source.glob('*.webm'))
 adb('shell','mkdir','-p','/sdcard/Movies/OrbitQA')
@@ -34,7 +44,12 @@ for sample in samples:
     uri=f'content://media/external/video/media/{rows[sample.name]}' if sample.name in rows else f'file:///sdcard/Movies/OrbitQA/{sample.name}'
     adb('shell','am','force-stop',package)
     launch=adb('shell','am','start','-W','-a','android.intent.action.VIEW','-d',uri,'-t','video/*','-n',f'{package}/.PlayerActivity')
-    pid=adb('shell','pidof',package).strip().split()[0]
+    process_ids=adb('shell','pidof',package,check=False).strip().split()
+    if not process_ids:
+        log=adb('logcat','-d','-v','brief',check=False)
+        (report/f'{sample.name}.log').write_text(launch+'\n'+log)
+        raise RuntimeError(f'Player did not stay running for {sample.name}; see qa/media-results/{sample.name}.log')
+    pid=process_ids[0]
     log=''
     for _ in range(30):
         log=adb('logcat','-d','-v','brief',f'--pid={pid}',check=False)
