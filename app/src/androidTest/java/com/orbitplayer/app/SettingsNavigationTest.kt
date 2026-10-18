@@ -38,6 +38,7 @@ class SettingsNavigationTest {
                 scenario.recreate()
                 scenario.onActivity { activity ->
                     assertEquals("zz_no_setting_matches", activity.findViewById<EditText>(R.id.settingsSearch).text.toString())
+                    assertTrue("Restored search cannot be edited", activity.findViewById<EditText>(R.id.settingsSearch).isShown)
                     assertTrue(title(activity, activity.getString(R.string.no_settings_match)).isShown)
                     activity.findViewById<EditText>(R.id.settingsSearch).setText("resume")
                     val toggle = views(activity).filterIsInstance<Switch>().first { it.contentDescription.toString().startsWith("Resume playback,") }
@@ -49,6 +50,9 @@ class SettingsNavigationTest {
                     val toggle = views(activity).filterIsInstance<Switch>().first { it.contentDescription.toString().startsWith("Resume playback,") }
                     assertEquals(!original, toggle.isChecked)
                     assertEquals("resume", activity.findViewById<EditText>(R.id.settingsSearch).text.toString())
+                    views(activity).first { it.contentDescription == activity.getString(R.string.close_settings_search) }.performClick()
+                    assertFalse(activity.findViewById<EditText>(R.id.settingsSearch).isShown)
+                    assertTrue(activity.findViewById<View>(R.id.btnSettingsSearch).isShown)
                 }
             }
         } finally { settings.resume = original }

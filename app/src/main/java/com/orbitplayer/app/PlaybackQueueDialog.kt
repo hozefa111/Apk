@@ -141,10 +141,10 @@ internal class PlaybackQueueDialog(
             holder.number.text = if (row.current) "▶" else row.number.toString()
             holder.details.text = listOfNotNull(
                 owner.getString(R.string.queue_playing).takeIf { row.current },
-                formatDuration(row.video.durationMs), row.video.folder.substringAfterLast('/').takeIf(String::isNotBlank)
+                formatDuration(row.video.durationMs), row.video.folder.takeIf(String::isNotBlank)
             ).joinToString(" · ")
             holder.itemView.contentDescription = if (row.current) owner.getString(R.string.queue_item_current, row.video.title)
-                else "${row.video.title}, ${formatDuration(row.video.durationMs)}"
+                else "${row.video.title}, ${formatDuration(row.video.durationMs)}, ${row.video.folder}"
             holder.itemView.setOnClickListener {
                 val item = currentList.getOrNull(holder.bindingAdapterPosition) ?: return@setOnClickListener
                 dismiss()

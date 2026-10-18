@@ -46,3 +46,26 @@ queue entries never deletes files or changes a saved playlist.
 Phone performance/audio/SD-card/long-session acceptance remains outstanding.
 Advanced subtitle delay/appearance, chapter support and service/network features
 remain later plan items; they are not represented by decorative controls.
+
+## First regression findings
+
+At `ca02783`, [build/unit/lint](https://github.com/hozefa111/Apk/actions/runs/39145506143)
+passed, and the local API 26 emulator passed all 12 instrumentation tests.
+[Expanded CI](https://github.com/hozefa111/Apk/actions/runs/39145506122) passed
+API 26, but API 33/35 failed the new queue-recreation assertion. Native UI,
+permissions and media matrices still completed with exit 0. The queue dialog
+was missing after recreation: modern Android can call state saving after
+onStop has dismissed it. The fix caches the open/scroll state before dismissal
+and uses it when saving. This run is not represented as fully passing.
+
+Actual keyboard screenshots also showed excessive chrome above Settings search
+results on a narrow window. Search now replaces the toolbar/categories, keeps its
+query across recreation and offers an IME Search action to hide the keyboard.
+Closing search restores category navigation. Fresh cross-version results are
+required for these fixes.
+
+The local software emulator logged System UI and media-process ANRs during boot
+at 16:27/16:28 UTC, before Orbit's first process startup at 16:30 UTC. The stale
+system dialog blocked manual UI taps; diagnostics were retained before choosing
+Wait. Clean Settings screenshots were then captured. This is recorded as an
+environment limitation, not evidence of phone responsiveness or an ANR-free OS.

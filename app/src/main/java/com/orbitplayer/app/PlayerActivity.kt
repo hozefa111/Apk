@@ -108,6 +108,9 @@ class PlayerActivity : Activity() {
     private var queueDialog: PlaybackQueueDialog? = null
     private var reopenQueue = false
     private var restoredQueueScroll: android.os.Parcelable? = null
+    // API 28+ can save state after onStop has already dismissed the modal.
+    private var queueOpenAtStop = false
+    private var queueScrollAtStop: android.os.Parcelable? = null
     private val subtitleExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     private var subtitleRequest = 0
     private var pendingSubtitleUri: Uri? = null
@@ -276,6 +279,8 @@ class PlayerActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
+        queueOpenAtStop = false
+        queueScrollAtStop = null
         if (videoUri.isNotBlank()) {
             try {
                 preparePlayer()
@@ -1251,8 +1256,8 @@ class PlayerActivity : Activity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         savePosition()
-        outState.putBoolean("queue_open", queueDialog?.isShowing == true)
-        outState.putParcelable("queue_scroll", queueDialog?.scrollState())
+        outState.putBoolean("queue_open", queueDialog?.isShowing == true || queueOpenAtStop)
+        outState.putParcelable("queue_scroll", queueDialog?.scrollState() ?: queueScrollAtStop)
         outState.putLong("position", lastSavedPosition)
         outState.putBoolean("play_when_ready",
             player?.playWhenReady ?: savedPlayWhenReady ?: userOptions.autoplay)
@@ -1282,6 +1287,8 @@ class PlayerActivity : Activity() {
     }
 
     override fun onStop() {
+        queueOpenAtStop = queueDialog?.isShowing == true
+        queueScrollAtStop = queueDialog?.scrollState()
         queueDialog?.dismiss()
         optionsDialog?.dismiss()
         // Visible PiP is paused, not stopped. Once stopped (dismissed/hidden),

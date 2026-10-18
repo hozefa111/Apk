@@ -27,6 +27,7 @@ class SettingsActivity : Activity() {
     private lateinit var settings: OrbitSettings
     private lateinit var scroll: ScrollView
     private lateinit var content: LinearLayout
+    private lateinit var toolbar: LinearLayout
     private lateinit var root: LinearLayout
     private lateinit var search: EditText
     private lateinit var categoryScroller: HorizontalScrollView
@@ -53,7 +54,7 @@ class SettingsActivity : Activity() {
         settings = OrbitSettings(this)
         selectedCategory = savedInstanceState?.getString("settings_category")
         root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; isFocusableInTouchMode = true }
-        val toolbar = LinearLayout(this).apply {
+        toolbar = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8), dp(4), dp(8), dp(4))
         }
@@ -72,7 +73,7 @@ class SettingsActivity : Activity() {
             contentDescription = getString(R.string.search_settings)
             background = getDrawable(R.drawable.orbit_touch_feedback)
             setOnClickListener {
-                searchBar.visibility = View.VISIBLE
+                setSearchVisible(true)
                 search.requestFocus()
                 (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
                     .showSoftInput(search, InputMethodManager.SHOW_IMPLICIT)
@@ -90,6 +91,14 @@ class SettingsActivity : Activity() {
             hint = getString(R.string.search_settings)
             textSize = 15f
             isSingleLine = true
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH or android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            setOnEditorActionListener { _, action, _ ->
+                if (action == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
+                    clearFocus()
+                    (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(windowToken, 0)
+                    true
+                } else false
+            }
             setTextColor(white)
             setText(savedInstanceState?.getString("settings_query", "") ?: "")
         }
@@ -103,7 +112,8 @@ class SettingsActivity : Activity() {
                 search.clearFocus()
                 (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
                     .hideSoftInputFromWindow(search.windowToken, 0)
-                searchBar.visibility = View.GONE
+                setSearchVisible(false)
+                categoryScroller.scrollTo(0, 0)
             }
         }, LinearLayout.LayoutParams(dp(48), dp(48)))
         root.addView(searchBar)
@@ -134,6 +144,7 @@ class SettingsActivity : Activity() {
             addView(categories)
         }
         root.addView(categoryScroller)
+        setSearchVisible(savedInstanceState?.getBoolean("settings_search_open") == true)
         categoryScroller.post { categoryScroller.scrollTo(savedInstanceState?.getInt("settings_categories_scroll", 0) ?: 0, 0) }
         scroll = ScrollView(this).apply { id = R.id.settingsScroll; isFillViewport = true }
         content = LinearLayout(this).apply {
@@ -164,6 +175,12 @@ class SettingsActivity : Activity() {
         outState.putInt("settings_scroll", scroll.scrollY)
         outState.putInt("settings_categories_scroll", categoryScroller.scrollX)
         super.onSaveInstanceState(outState)
+    }
+
+    private fun setSearchVisible(visible: Boolean) {
+        searchBar.visibility = if (visible) View.VISIBLE else View.GONE
+        toolbar.visibility = if (visible) View.GONE else View.VISIBLE
+        categoryScroller.visibility = if (visible) View.GONE else View.VISIBLE
     }
 
     private fun applyAppearance() {
