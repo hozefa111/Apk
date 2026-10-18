@@ -25,8 +25,20 @@ else
   adb shell pm grant "$PACKAGE" android.permission.READ_EXTERNAL_STORAGE
 fi
 
-adb shell mkdir -p /sdcard/Movies
-adb push smoke.mp4 /sdcard/Movies/orbit_smoke.mp4
+# sys.boot_completed can precede emulated shared-storage availability (API 35).
+# Retry the actual fixture write, not just mkdir/test -w, which may succeed before
+# the FUSE mount is ready. Exhaustion remains a hard setup failure with diagnostics.
+orbit_fixture_ready=false
+for attempt in $(seq 1 30); do
+  if adb shell mkdir -p /sdcard/Movies &&
+      adb push smoke.mp4 /sdcard/Movies/orbit_smoke.mp4; then
+    orbit_fixture_ready=true
+    break
+  fi
+  echo "Shared storage not ready for smoke fixture (attempt $attempt/30)"
+  sleep 2
+done
+$orbit_fixture_ready || { echo "Could not seed smoke video in shared storage"; exit 1; }
 adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE \
   -d file:///sdcard/Movies/orbit_smoke.mp4 >/dev/null || true
 ID=""
