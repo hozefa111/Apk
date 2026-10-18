@@ -49,6 +49,7 @@ adb shell dumpsys activity activities > qa/settings-activity.txt
 grep -F "$PACKAGE/.SettingsActivity" qa/settings-activity.txt >/dev/null || {
   echo "Settings was not opened by tapping the Settings control"; exit 1;
 }
+adb exec-out screencap -p > qa/settings-portrait.png
 python3 scripts/tap_android_view.py "desc:Back to library"
 sleep 1
 
@@ -67,6 +68,7 @@ wait_for_ui() {
 }
 wait_for_ui "$PACKAGE:id/folderTitle"
 wait_for_ui "$PACKAGE:id/folderMore"
+adb exec-out screencap -p > qa/folders-portrait.png
 python3 scripts/tap_android_view.py "$PACKAGE:id/folderMore"
 adb shell uiautomator dump /sdcard/orbit-folder-options.xml >/dev/null
 adb exec-out cat /sdcard/orbit-folder-options.xml > qa/folder-options.xml
@@ -77,6 +79,7 @@ adb shell input keyevent 4
 python3 scripts/tap_android_view.py "$PACKAGE:id/folderTitle"
 wait_for_ui "$PACKAGE:id/title"
 wait_for_ui "$PACKAGE:id/moreOptions"
+adb exec-out screencap -p > qa/videos-portrait.png
 python3 scripts/tap_android_view.py "$PACKAGE:id/moreOptions"
 adb shell uiautomator dump /sdcard/orbit-video-options.xml >/dev/null
 adb exec-out cat /sdcard/orbit-video-options.xml > qa/video-options.xml
@@ -85,15 +88,28 @@ grep -F 'text="Add to playlist"' qa/video-options.xml >/dev/null || {
 }
 adb shell input keyevent 4
 # Exercise the real file type and video duration sort selectors.
-wait_for_ui "$PACKAGE:id/formatFilter"
-python3 scripts/tap_android_view.py "$PACKAGE:id/formatFilter"
+adb shell uiautomator dump /sdcard/orbit-controls.xml >/dev/null
+adb exec-out cat /sdcard/orbit-controls.xml > qa/library-controls.xml
+ORBIT_COMPACT=false
+if grep -F "resource-id=\"$PACKAGE:id/formatFilter\"" qa/library-controls.xml >/dev/null; then
+  python3 scripts/tap_android_view.py "$PACKAGE:id/formatFilter"
+else
+  ORBIT_COMPACT=true
+  python3 scripts/tap_android_view.py "$PACKAGE:id/btnFilters"
+  python3 scripts/tap_android_view.py "text:File type"
+fi
 adb shell uiautomator dump /sdcard/orbit-formats.xml >/dev/null
 adb exec-out cat /sdcard/orbit-formats.xml > qa/format-choices.xml
 grep -F 'text="MP4"' qa/format-choices.xml >/dev/null || {
   echo "Library format filter did not discover the actual MP4 video"; exit 1;
 }
 adb shell input keyevent 4
-python3 scripts/tap_android_view.py "$PACKAGE:id/btnSort"
+if $ORBIT_COMPACT; then
+  python3 scripts/tap_android_view.py "$PACKAGE:id/btnFilters"
+  python3 scripts/tap_android_view.py "text:Sort videos"
+else
+  python3 scripts/tap_android_view.py "$PACKAGE:id/btnSort"
+fi
 adb shell uiautomator dump /sdcard/orbit-sorts.xml >/dev/null
 adb exec-out cat /sdcard/orbit-sorts.xml > qa/sort-choices.xml
 grep -F 'text="Longest video first"' qa/sort-choices.xml >/dev/null || {

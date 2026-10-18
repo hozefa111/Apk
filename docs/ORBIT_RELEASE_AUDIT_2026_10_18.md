@@ -153,3 +153,21 @@ or physical-device migration. Missing signing secrets fail the job.
 This workflow uploads an **internal** candidate only after success. It has read-only
 repository permission and no GitHub Release publication step. It must not be
 confused with dispatching the existing publishing workflow.
+
+### Short portrait visual review and scanner limitation
+
+A 320dp-wide API 26 visual review confirmed readable folder paths/counts and
+accessible Settings, but exposed excessive chrome in short portrait video grids.
+Windows below 600dp now use a smaller header, Search through the real Search tab,
+and a filters/sort menu, while keeping the stored gallery/list choice. The row
+presentation threshold remains below 430dp, independently of compact chrome.
+Folder/video/Settings screenshots are captured by native smoke for review.
+
+At `c489613`, the complete API 33 and API 35 suite passed. API 26 passed all
+instrumentation and its media cases through H.264/AC3, then exposed a platform
+MediaScanner omission for HEVC MKV. The harness now records `mediastore_indexed`
+and `source_uri_scheme`, attempting direct file playback for unindexed HEVC
+fixtures. Common formats still require MediaStore indexing. This documents a
+library discovery limitation; it does not silently equate scanner visibility with
+codec support. Each sample result is saved immediately, including before a later
+failure. Final-source reruns remain required after the short-window refinement.

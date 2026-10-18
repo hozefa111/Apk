@@ -86,6 +86,7 @@ class MainActivity : Activity() {
     private var albumQuery = ""
     private var openingPlayer = false
     private fun compactLibrary() = resources.configuration.screenHeightDp < 430
+    private fun compactChrome() = resources.configuration.screenHeightDp < 600
     // Android can revoke video access while the app is in the background.
     private var previousLibraryAccess: Int? = null
     private var destroyed = false
@@ -298,7 +299,7 @@ class MainActivity : Activity() {
     private fun updatePermissionsUi() {
         grant.visibility = if (libraryPermissionState() == 2) View.GONE else View.VISIBLE
         findViewById<View>(R.id.libraryStatusRow).layoutParams = findViewById<View>(R.id.libraryStatusRow).layoutParams.apply {
-            height = ((if (libraryPermissionState() == 2) { if (compactLibrary()) 20 else 28 } else 48) * resources.displayMetrics.density).toInt()
+            height = ((if (libraryPermissionState() == 2) { if (compactChrome()) 20 else 28 } else 48) * resources.displayMetrics.density).toInt()
         }
         grant.text = when (libraryPermissionState()) { 2 -> "ACCESS"; 1 -> "ADD VIDEOS"; else -> "ALLOW ACCESS" }
     }
@@ -360,23 +361,38 @@ class MainActivity : Activity() {
     }
 
     private fun showCompactFilters() {
+        if (tab == Tab.FOLDERS) {
+            AlertDialog.Builder(this).setTitle("Folder options")
+                .setItems(arrayOf("Sort folders", "Refresh library")) { _, which ->
+                    if (which == 0) showSortDialog()
+                    else if (hasLibraryPermission()) scan() else requestVideoPermissions()
+                }.show()
+            return
+        }
         if (tab == Tab.CONTINUE) {
             AlertDialog.Builder(this).setTitle("Continue watching")
-                .setItems(arrayOf("Unfinished videos", "Watch history")) { _, which ->
-                    chooseFilter(if (which == 0) Filter.CONTINUE else Filter.HISTORY)
+                .setItems(arrayOf("Unfinished videos", "Watch history", "Sort videos", "Refresh library")) { _, which ->
+                    when (which) {
+                        0 -> chooseFilter(Filter.CONTINUE)
+                        1 -> chooseFilter(Filter.HISTORY)
+                        2 -> showSortDialog()
+                        3 -> if (hasLibraryPermission()) scan() else requestVideoPermissions()
+                    }
                 }.show()
             return
         }
         AlertDialog.Builder(this).setTitle("Library filters")
-            .setItems(arrayOf("All videos", "Favorites", "Continue watching", "Recently added", "Watch history", "File type", "Folder")) { _, which ->
+            .setItems(arrayOf("Sort videos", "File type", "Folder", "All videos", "Favorites", "Continue watching", "Recently added", "Watch history", "Refresh library")) { _, which ->
                 when (which) {
-                    0 -> chooseFilter(Filter.ALL)
-                    1 -> chooseFilter(Filter.FAVORITES)
-                    2 -> chooseFilter(Filter.CONTINUE)
-                    3 -> chooseFilter(Filter.RECENT)
-                    4 -> chooseFilter(Filter.HISTORY)
-                    5 -> showFormatDialog()
-                    6 -> showFolderDialog()
+                    0 -> showSortDialog()
+                    1 -> showFormatDialog()
+                    2 -> showFolderDialog()
+                    3 -> chooseFilter(Filter.ALL)
+                    4 -> chooseFilter(Filter.FAVORITES)
+                    5 -> chooseFilter(Filter.CONTINUE)
+                    6 -> chooseFilter(Filter.RECENT)
+                    7 -> chooseFilter(Filter.HISTORY)
+                    8 -> if (hasLibraryPermission()) scan() else requestVideoPermissions()
                 }
             }.setNegativeButton("Close", null).show()
     }
@@ -870,7 +886,7 @@ class MainActivity : Activity() {
 
     private fun renderChrome() {
         val folders = tab == Tab.FOLDERS
-        val compact = compactLibrary()
+        val compact = compactChrome()
         val focusedSearch = tab == Tab.SEARCH || query.isNotBlank()
         findViewById<View>(R.id.brandBar).apply {
             visibility = if (compact && focusedSearch) View.GONE else View.VISIBLE
@@ -889,7 +905,10 @@ class MainActivity : Activity() {
             }
         findViewById<View>(R.id.filterScroller).visibility =
             if (folders || compact) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.btnFilters).visibility = if (!folders && compact) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.btnFilters).visibility = if (compact) View.VISIBLE else View.GONE
+        sortButton.visibility = if (compact) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.btnRefresh).visibility = if (compact) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.btnFilters).contentDescription = if (folders) "Folder options" else "Library filters and sort"
         findViewById<View>(R.id.filterAll).visibility =
             if (tab == Tab.CONTINUE) View.GONE else View.VISIBLE
         findViewById<View>(R.id.filterFavorites).visibility =
@@ -904,7 +923,7 @@ class MainActivity : Activity() {
             if (tab == Tab.CONTINUE) "Unfinished" else "Continue"
         findViewById<View>(R.id.filterHistory).visibility =
             if (tab == Tab.CONTINUE) View.VISIBLE else View.GONE
-        findViewById<View>(R.id.btnView).visibility = if (folders || compact) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.btnView).visibility = if (folders || compactLibrary()) View.GONE else View.VISIBLE
         if (folders) findViewById<TextView>(R.id.sectionTitle).text = "Albums"
         val bar = mapOf(
             Tab.VIDEOS to R.id.navHome, Tab.FOLDERS to R.id.navFolders,
