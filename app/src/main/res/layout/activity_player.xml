@@ -40,8 +40,10 @@
             android:src="@drawable/orbit_ic_back"
             android:contentDescription="Back to videos" />
         <LinearLayout
+            android:id="@+id/playerHeading"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
+            android:gravity="center_vertical"
             android:layout_weight="1"
             android:paddingStart="9dp"
             android:orientation="vertical">
@@ -56,13 +58,14 @@
                 android:textColor="#F7F8FF"
                 android:textSize="15sp" />
             <TextView
+                android:id="@+id/playerContext"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="3dp"
-                android:letterSpacing="0.20"
-                android:text="O R B I T   P R O"
+                android:maxLines="1" android:ellipsize="end"
+                android:text="@string/local_video"
                 android:textColor="#76D7E9"
-                android:textSize="9sp" />
+                android:textSize="12sp" />
         </LinearLayout>
         <ImageView
             android:id="@+id/btnPip"

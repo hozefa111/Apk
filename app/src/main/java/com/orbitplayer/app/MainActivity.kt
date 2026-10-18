@@ -522,7 +522,9 @@ class MainActivity : Activity() {
         adapter.submit(visibleVideos)
         if (videos.adapter !== adapter) videos.adapter = adapter
         adapter.useGallery(gallery && !compactLibrary())
-        gridManager.spanCount = if (gallery && !compactLibrary()) 2 else 1
+        gridManager.spanCount = if (gallery && !compactLibrary())
+            (resources.configuration.screenWidthDp / (144 * resources.configuration.fontScale)).toInt().coerceIn(1, 2)
+            else 1
         sortButton.text = arrayOf("Newest", "Oldest", "Name A–Z", "Largest", "Longest")[sort.ordinal] + "  ▾"
         empty.visibility = if (visibleVideos.isEmpty()) View.VISIBLE else View.GONE
         empty.text = when {
@@ -533,7 +535,7 @@ class MainActivity : Activity() {
             filter == Filter.FAVORITES -> "No favorites yet. Use a video’s ⋮ menu to add one."
             else -> "Nothing matches this folder or search."
         }
-        status.text = "${visibleVideos.size} videos  ·  ${allVideos.size} total"
+        status.text = resources.getQuantityString(R.plurals.library_video_count, visibleVideos.size, visibleVideos.size, allVideos.size)
         findViewById<TextView>(R.id.sectionTitle).text = when {
             currentPlaylist != null -> "Playlist: $currentPlaylist"
             filter == Filter.FAVORITES -> "Favorite Videos"
@@ -974,7 +976,7 @@ class MainActivity : Activity() {
         albumAdapter.useCompact(compactLibrary())
         gridManager.spanCount = if (compactLibrary()) (resources.configuration.screenWidthDp / 260).coerceIn(1, 4)
             else preferences.folderColumns.coerceAtMost(
-                (resources.configuration.screenWidthDp / (100 * resources.configuration.fontScale)).toInt().coerceAtLeast(2))
+                (resources.configuration.screenWidthDp / (100 * resources.configuration.fontScale)).toInt().coerceAtLeast(1))
         albumAdapter.submit(albums) {
             if (returningToAlbums && tab == Tab.FOLDERS) {
                 albumScroll?.let(gridManager::onRestoreInstanceState)

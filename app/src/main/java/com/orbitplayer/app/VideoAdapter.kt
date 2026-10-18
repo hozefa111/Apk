@@ -63,7 +63,7 @@ class VideoAdapter(
     override fun onBindViewHolder(holder: VideoHolder, position: Int) {
         val item = items[position]
         holder.title.text = item.title
-        val metadata = listOfNotNull(videoExtension(item.title).uppercase().takeIf { it.isNotBlank() },
+        val metadata = listOfNotNull(videoExtension(item.title).uppercase(java.util.Locale.ROOT).takeIf { it.isNotBlank() },
             if (item.width > 0 && item.height > 0) "${item.width} × ${item.height}" else null,
             formatSize(item.sizeBytes))
         holder.details.text = metadata.joinToString("  ·  ")

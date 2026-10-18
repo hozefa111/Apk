@@ -34,7 +34,7 @@ class PlayerGestureZone(
 
         override fun onSingleTapConfirmed(event: MotionEvent): Boolean {
             if (boosting) return true
-            onTap()
+            performClick()
             return true
         }
 
@@ -92,6 +92,12 @@ class PlayerGestureZone(
             return true
         }
     })
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        onTap()
+        return true
+    }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {

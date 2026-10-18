@@ -77,7 +77,7 @@ class PlayerActivity : Activity() {
     private var gestureSeeking = false
     private var gestureSeekAnchor = 0L
     private val hideControlsTask = Runnable {
-        if (!userSeeking && !touchLocked) hideControls()
+        if (!userSeeking && !touchLocked && optionsDialog?.isShowing != true && queueDialog?.isShowing != true) hideControls()
     }
     private val progressUpdater = object : Runnable {
         override fun run() {
@@ -105,6 +105,9 @@ class PlayerActivity : Activity() {
     private var subtitleType = MimeTypes.APPLICATION_SUBRIP
     private var sleepDeadline = 0L
     private var optionsDialog: Dialog? = null
+    private var queueDialog: PlaybackQueueDialog? = null
+    private var reopenQueue = false
+    private var restoredQueueScroll: android.os.Parcelable? = null
     private val subtitleExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     private var subtitleRequest = 0
     private var pendingSubtitleUri: Uri? = null
@@ -167,6 +170,8 @@ class PlayerActivity : Activity() {
             PlaybackQueue.persist(this)
         }
         PlaybackQueue.ensureRestored(this)
+        reopenQueue = savedInstanceState?.getBoolean("queue_open", false) ?: false
+        restoredQueueScroll = savedInstanceState?.getParcelable("queue_scroll")
         runCatching {
             playerView.subtitleView?.setFractionalTextSize(0.0533f * userOptions.subtitleScale)
         }
@@ -274,6 +279,11 @@ class PlayerActivity : Activity() {
         if (videoUri.isNotBlank()) {
             try {
                 preparePlayer()
+                if (reopenQueue) {
+                    reopenQueue = false
+                    showPlayingQueue(restoredQueueScroll)
+                    restoredQueueScroll = null
+                }
             } catch (error: Exception) {
                 android.util.Log.e("OrbitPlayer", "Player startup failed", error)
                 AlertDialog.Builder(this)
@@ -457,12 +467,32 @@ class PlayerActivity : Activity() {
     }
 
     private fun updateQueueControls() {
+        val queue = PlaybackQueue.snapshot()
+        val index = queue.indexOfFirst { it.uri.toString() == videoUri }
+        val heading = findViewById<View>(R.id.playerHeading)
+        findViewById<TextView>(R.id.playerContext).text = if (index >= 0)
+            getString(R.string.queue_position, index + 1, queue.size) else getString(R.string.local_video)
+        heading.setOnClickListener(if (index >= 0) View.OnClickListener { showPlayingQueue() } else null)
+        heading.background = if (index >= 0) getDrawable(R.drawable.orbit_touch_feedback) else null
+        heading.isClickable = index >= 0
+        queueDialog?.refresh()
         listOf(R.id.btnPrevious to -1, R.id.btnNext to 1).forEach { (id, delta) ->
             findViewById<View>(id).apply {
                 isEnabled = PlaybackQueue.adjacent(videoUri, delta) != null
                 alpha = if (isEnabled) 1f else 0.3f
             }
         }
+    }
+
+    private fun showPlayingQueue(scroll: android.os.Parcelable? = null) {
+        if (touchLocked || PlaybackQueue.snapshot().none { it.uri.toString() == videoUri }) return
+        handler.removeCallbacks(hideControlsTask)
+        queueDialog?.dismiss()
+        val dialog = PlaybackQueueDialog(this, { videoUri }, { repeatOne },
+            { playQueueItem(it) }, { updateQueueControls() }, scroll)
+        queueDialog = dialog
+        dialog.setOnDismissListener { queueDialog = null; scheduleAutoHide() }
+        dialog.show()
     }
 
     /** Platform MediaSession works on Android 8+ without an extra coroutine dependency. */
@@ -563,11 +593,20 @@ class PlayerActivity : Activity() {
             Toast.makeText(this, "No ${if (direction > 0) "next" else "previous"} video in this list", Toast.LENGTH_SHORT).show()
             return
         }
+        playQueueItem(adjacent)
+    }
+
+    private fun playQueueItem(item: VideoItem) {
+        if (PlaybackQueue.snapshot().none { it.uri == item.uri }) return
+        if (item.uri.toString() == videoUri) {
+            player?.let { if (it.playbackState == Player.STATE_ENDED) it.seekTo(0); it.play() }
+            return
+        }
         savePosition()
-        videoUri = adjacent.uri.toString()
+        videoUri = item.uri.toString()
         prefs.edit().putString("last_played_uri", videoUri).apply()
         recordWatchHistory(videoUri)
-        videoTitle = adjacent.title
+        videoTitle = item.title
         playerTitle.text = videoTitle
         updateSystemMetadata()
         ++subtitleRequest
@@ -743,6 +782,9 @@ class PlayerActivity : Activity() {
         }
         dialog.findViewById<TextView>(R.id.gestureHelp).text =
             "Swipe to seek  •  Double tap ±${userOptions.seekSeconds}s  •  Hold for 2×"
+        dialog.findViewById<View>(R.id.actionQueue).visibility =
+            if (PlaybackQueue.snapshot().any { it.uri.toString() == videoUri }) View.VISIBLE else View.GONE
+        action(R.id.actionQueue) { showPlayingQueue() }
         action(R.id.actionSpeed) { showSpeedChooser() }
         action(R.id.actionLock) { setTouchLocked(true) }
         action(R.id.actionTracks) { showTrackChooser() }
@@ -1071,6 +1113,7 @@ class PlayerActivity : Activity() {
 
     private fun scheduleAutoHide() {
         handler.removeCallbacks(hideControlsTask)
+        if (optionsDialog?.isShowing == true || queueDialog?.isShowing == true) return
         if ((getSystemService(ACCESSIBILITY_SERVICE) as android.view.accessibility.AccessibilityManager).isTouchExplorationEnabled) return
         if (controlsVisible && !touchLocked && !userSeeking)
             handler.postDelayed(hideControlsTask,
@@ -1115,7 +1158,10 @@ class PlayerActivity : Activity() {
     private fun adjustForScreenSize() {
         val compact = resources.configuration.screenHeightDp < 510
         findViewById<View>(R.id.btnPip).visibility = if (supportsPip()) View.VISIBLE else View.GONE
-        findViewById<View>(R.id.quickActions).visibility = if (compact) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.quickActions).visibility =
+            if (compact || resources.configuration.fontScale > 1.4f) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.playerContext).visibility =
+            if (compact && resources.configuration.fontScale > 1.4f) View.GONE else View.VISIBLE
         topBar.layoutParams = topBar.layoutParams.apply {
             height = ((if (compact) 54 else 76) * resources.displayMetrics.density).toInt()
         }
@@ -1133,6 +1179,7 @@ class PlayerActivity : Activity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         adjustForScreenSize()
+        queueDialog?.resize()
         findViewById<View>(R.id.playerRoot).requestApplyInsets()
         if (!touchLocked) showControls()
     }
@@ -1204,6 +1251,8 @@ class PlayerActivity : Activity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         savePosition()
+        outState.putBoolean("queue_open", queueDialog?.isShowing == true)
+        outState.putParcelable("queue_scroll", queueDialog?.scrollState())
         outState.putLong("position", lastSavedPosition)
         outState.putBoolean("play_when_ready",
             player?.playWhenReady ?: savedPlayWhenReady ?: userOptions.autoplay)
@@ -1233,6 +1282,7 @@ class PlayerActivity : Activity() {
     }
 
     override fun onStop() {
+        queueDialog?.dismiss()
         optionsDialog?.dismiss()
         // Visible PiP is paused, not stopped. Once stopped (dismissed/hidden),
         // release ownership even if Android still reports the old PiP mode.
@@ -1249,6 +1299,8 @@ class PlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        queueDialog?.dismiss()
+        optionsDialog?.dismiss()
         // PiP may bypass onStop; preserve watch progress before releasing its player.
         savePosition()
         releasePlayer()

@@ -49,6 +49,32 @@ class CollectionsPersistenceTest {
         assertEquals(4,restored.folderColumns)
         assertEquals(5,restored.seekSeconds)
     }
+    @Test fun queueEditsProtectCurrentAndPersistWithoutChangingPlaylist() {
+        val a=VideoItem(Uri.parse("content://media/external/video/media/1"),"a",60_000,100,"Movies",1)
+        val b=a.copy(uri=Uri.parse("content://media/external/video/media/2"),title="b")
+        val c=a.copy(uri=Uri.parse("content://media/external/video/media/3"),title="c")
+        val collections=OrbitCollections(context)
+        collections.add("Trip",listOf(a,b,c).map { it.uri.toString() })
+        try {
+            PlaybackQueue.replace(listOf(a,b,c),true)
+            assertFalse(PlaybackQueue.move(a.uri.toString(),-1))
+            assertFalse(PlaybackQueue.move("content://missing",1))
+            assertTrue(PlaybackQueue.move(c.uri.toString(),-1))
+            assertEquals(listOf(a,c,b),PlaybackQueue.snapshot())
+            assertFalse(PlaybackQueue.remove(b.uri.toString(),b.uri.toString()))
+            assertTrue(PlaybackQueue.remove(a.uri.toString(),b.uri.toString()))
+            PlaybackQueue.enableAutoAdvance(false)
+            PlaybackQueue.persist(context)
+            PlaybackQueue.awaitPersistenceForTest()
+            PlaybackQueue::class.java.getDeclaredField("restored").apply { isAccessible=true }.setBoolean(PlaybackQueue,false)
+            PlaybackQueue.ensureRestored(context)
+            assertEquals(listOf(c,b),PlaybackQueue.snapshot())
+            assertEquals(c,PlaybackQueue.adjacent(b.uri.toString(),-1))
+            assertFalse(PlaybackQueue.autoAdvance)
+            assertEquals(listOf(a,b,c).map { it.uri.toString() },collections.items("Trip"))
+        } finally { PlaybackQueue.replace(emptyList()) }
+    }
+
     @Test fun queueIsolationAndStoredOrder() {
         val a=VideoItem(Uri.parse("content://media/external/video/media/1"),"a",60_000,100,"Movies",1)
         val b=a.copy(uri=Uri.parse("content://media/external/video/media/2"),title="b")

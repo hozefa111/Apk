@@ -14,7 +14,7 @@
         <ImageView android:id="@+id/folderMore"
             android:layout_width="48dp" android:layout_height="48dp"
             android:layout_gravity="top|end" android:layout_margin="5dp"
-            android:padding="8dp" android:background="@drawable/orbit_duration_bg"
+            android:padding="14dp" android:background="@drawable/orbit_thumbnail_action_bg"
             android:src="@drawable/orbit_ic_more"
             android:contentDescription="Folder options" />
         <TextView android:id="@+id/folderPinned" android:layout_width="wrap_content"
@@ -31,9 +31,9 @@
         android:textSize="13sp" android:fontFamily="sans-serif-medium"/>
     <TextView android:id="@+id/folderPath" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:maxLines="1" android:ellipsize="middle"
-        android:layout_marginTop="3dp" android:textSize="10sp" android:textColor="#A7B4CE" />
+        android:layout_marginTop="3dp" android:textSize="12sp" android:textColor="#A7B4CE" />
     <TextView android:id="@+id/folderCount"
         android:layout_width="match_parent" android:layout_height="wrap_content"
         android:layout_marginTop="3dp" android:textColor="#8998B2"
-        android:textSize="11sp"/>
+        android:textSize="12sp"/>
 </LinearLayout>

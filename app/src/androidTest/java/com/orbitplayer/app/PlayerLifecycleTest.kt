@@ -115,6 +115,123 @@ class PlayerLifecycleTest {
         }
     }
 
+    @Test fun queueSheetReordersRemovesRestoresAndPlaysSelectedVideo() {
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        val base=context.contentResolver.query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Video.Media._ID),"${MediaStore.Video.Media.DISPLAY_NAME} = ?",arrayOf("orbit_smoke.mp4"),null)?.use {
+            if(it.moveToFirst()) android.content.ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,it.getLong(0)) else null
+        }!!
+        val copies=listOf("queue-b.mp4","queue-c.mp4").map { name ->
+            java.io.File(context.cacheDir,name).apply {
+                context.contentResolver.openInputStream(base)!!.use { input -> outputStream().use(input::copyTo) }
+            }
+        }
+        val a=VideoItem(base,"Queue A",28_000,1,"Movies",1)
+        val b=a.copy(uri=android.net.Uri.fromFile(copies[0]),title="Queue B")
+        val c=a.copy(uri=android.net.Uri.fromFile(copies[1]),title="Queue C")
+        val previous=PlaybackQueue.snapshot()
+        val autoAdvance=PlaybackQueue.autoAdvance
+        val settings=OrbitSettings(context)
+        val previousRepeat=settings.repeat
+        fun sheet(activity: PlayerActivity)=PlayerActivity::class.java.getDeclaredField("queueDialog")
+            .apply { isAccessible=true }.get(activity) as PlaybackQueueDialog
+        fun menu(dialog: PlaybackQueueDialog)=PlaybackQueueDialog::class.java.getDeclaredField("menu")
+            .apply { isAccessible=true }.get(dialog) as android.app.AlertDialog
+        fun choose(dialog: android.app.AlertDialog, label: String) {
+            val list=dialog.listView
+            val index=(0 until list.adapter.count).first { list.adapter.getItem(it).toString()==label }
+            list.performItemClick(list.getChildAt(index-list.firstVisiblePosition),index,list.adapter.getItemId(index))
+        }
+        fun waitRows(scenario: ActivityScenario<PlayerActivity>, titles: List<String>) {
+            val until=System.currentTimeMillis()+15_000
+            var loaded=false
+            while(!loaded && System.currentTimeMillis()<until) {
+                scenario.onActivity { activity ->
+                    val list=sheet(activity).findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.queueItems)
+                    loaded=list.adapter?.itemCount==titles.size && titles.withIndex().all { (index,title) ->
+                        list.findViewHolderForAdapterPosition(index)?.itemView
+                            ?.findViewById<android.widget.TextView>(R.id.queueTitle)?.text?.toString()==title
+                    }
+                }
+                if(!loaded) Thread.sleep(100)
+            }
+            assertTrue("Queue rows did not show $titles",loaded)
+        }
+        fun waitSelected(scenario: ActivityScenario<PlayerActivity>, expected: android.net.Uri) {
+            val until=System.currentTimeMillis()+30_000
+            var selected=false
+            while(!selected && System.currentTimeMillis()<until) {
+                scenario.onActivity { activity ->
+                    selected=engine(activity)?.let { it.playbackState==Player.STATE_READY && it.currentMediaItem?.localConfiguration?.uri==expected && it.playWhenReady } == true
+                }
+                if(!selected) Thread.sleep(100)
+            }
+            assertTrue("Queue did not play $expected",selected)
+        }
+        try {
+            settings.repeat=false
+            PlaybackQueue.replace(listOf(a,b,c),true)
+            ActivityScenario.launch<PlayerActivity>(Intent(context,PlayerActivity::class.java).apply {
+                putExtra(PlayerActivity.EXTRA_URI,a.uri.toString());putExtra(PlayerActivity.EXTRA_TITLE,a.title)
+            }).use { scenario ->
+                waitReady(scenario)
+                scenario.onActivity { activity ->
+                    activity.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    engine(activity)!!.apply { pause();seekTo(0) }
+                    activity.findViewById<View>(R.id.playerHeading).performClick()
+                }
+                scenario.recreate()
+                waitReady(scenario)
+                scenario.onActivity { it.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
+                waitRows(scenario,listOf("Queue A","Queue B","Queue C"))
+                scenario.onActivity { activity ->
+                    val dialog=sheet(activity)
+                    val list=dialog.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.queueItems)
+                    list.findViewHolderForAdapterPosition(1)!!.itemView.findViewById<View>(R.id.queueMore).performClick()
+                    choose(menu(dialog),activity.getString(R.string.queue_move_down))
+                    assertEquals(listOf(a,c,b),PlaybackQueue.snapshot())
+                }
+                waitRows(scenario,listOf("Queue A","Queue C","Queue B"))
+                scenario.onActivity { activity ->
+                    val dialog=sheet(activity)
+                    val list=dialog.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.queueItems)
+                    list.findViewHolderForAdapterPosition(2)!!.itemView.findViewById<View>(R.id.queueMore).performClick()
+                    choose(menu(dialog),activity.getString(R.string.queue_remove))
+                    assertEquals(listOf(a,c),PlaybackQueue.snapshot())
+                }
+                waitRows(scenario,listOf("Queue A","Queue C"))
+                scenario.onActivity { activity ->
+                    val toggle=sheet(activity).findViewById<android.widget.Switch>(R.id.queueAutoplay)
+                    toggle.performClick()
+                    assertFalse(PlaybackQueue.autoAdvance)
+                    toggle.performClick()
+                    assertTrue(PlaybackQueue.autoAdvance)
+                    engine(activity)!!.apply { seekTo((duration-500).coerceAtLeast(0));play() }
+                }
+                waitSelected(scenario,c.uri)
+                waitRows(scenario,listOf("Queue A","Queue C"))
+                scenario.onActivity { activity ->
+                    val dialog=sheet(activity)
+                    val list=dialog.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.queueItems)
+                    assertEquals("▶",list.findViewHolderForAdapterPosition(1)!!.itemView.findViewById<android.widget.TextView>(R.id.queueNumber).text.toString())
+                    list.findViewHolderForAdapterPosition(0)!!.itemView.performClick()
+                }
+                waitSelected(scenario,a.uri)
+                scenario.onActivity { activity ->
+                    assertEquals("Queue A",activity.findViewById<android.widget.TextView>(R.id.playerTitle).text.toString())
+                    assertFalse(activity.findViewById<View>(R.id.btnPrevious).isEnabled)
+                    assertTrue(activity.findViewById<View>(R.id.btnNext).isEnabled)
+                }
+            }
+        } finally {
+            settings.repeat=previousRepeat
+            PlaybackQueue.replace(previous,autoAdvance)
+            PlaybackQueue.persist(context)
+            PlaybackQueue.awaitPersistenceForTest()
+            copies.forEach { it.delete() }
+        }
+    }
+
     @Test fun transportRemainsAtBottomAndLandscapeHasSecondaryActions() {
         launch().use { scenario ->
             waitReady(scenario)

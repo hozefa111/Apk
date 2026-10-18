@@ -23,6 +23,28 @@ object PlaybackQueue {
         autoAdvance = playAll
     }
 
+    fun snapshot(): List<VideoItem> = items.toList()
+
+    fun enableAutoAdvance(enabled: Boolean) { autoAdvance = enabled }
+
+    /** Reordering the queue never changes the original playlist or active URI. */
+    fun move(uri: String, delta: Int): Boolean {
+        val index = items.indexOfFirst { it.uri.toString() == uri }
+        val destination = QueueNavigation.adjacentIndex(index, items.size, delta)
+        if (destination < 0 || destination == index) return false
+        items = items.toMutableList().apply { add(destination, removeAt(index)) }
+        return true
+    }
+
+    /** Keep the playing item anchored so previous/next and natural completion remain valid. */
+    fun remove(uri: String, currentUri: String): Boolean {
+        if (uri == currentUri) return false
+        val remaining = items.filterNot { it.uri.toString() == uri }
+        if (remaining.size == items.size) return false
+        items = remaining
+        return true
+    }
+
     fun persist(context: Context) {
         val snapshot = items
         val advance = autoAdvance

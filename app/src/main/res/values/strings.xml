@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="search_settings">Search settings</string>
+    <string name="close_settings_search">Close search</string>
+    <string name="no_settings_match">No settings match your search.</string>
+    <plurals name="library_video_count">
+        <item quantity="one">%1$d video · %2$d total</item>
+        <item quantity="other">%1$d videos · %2$d total</item>
+    </plurals>
+    <plurals name="video_count">
+        <item quantity="one">%d video</item>
+        <item quantity="other">%d videos</item>
+    </plurals>
+    <string name="playing_queue">Playing queue</string>
+    <string name="close_queue">Close queue</string>
+    <string name="queue_automatic_next">Play next automatically</string>
+    <string name="queue_repeat_priority">Repeat one takes priority while enabled.</string>
+    <string name="queue_scope">Changes apply to this queue. Playing video stays in the queue.</string>
+    <string name="queue_play_now">Play now</string>
+    <string name="queue_move_up">Move up</string>
+    <string name="queue_move_down">Move down</string>
+    <string name="queue_remove">Remove from queue</string>
+    <string name="queue_item_options">Queue options for %s</string>
+    <string name="queue_item_current">%1$s, now playing</string>
+    <string name="queue_playing">Playing</string>
+    <string name="queue_position">%1$d of %2$d · Play queue</string>
+    <string name="local_video">On device</string>
+</resources>
