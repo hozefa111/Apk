@@ -32,7 +32,15 @@ public class NativeAnalyticsTest {
         field(a,"tab",7);field(a,"rankFilter","all");a.snapshotContinuity(false);a.syncProblem(null,0,false);a.syncState(true);a.dataUpdated(roster(),empty?new ArrayList<>():rounds(),sessions());
     }
     private void settle(){try{Thread.sleep(800);InstrumentationRegistry.getInstrumentation().waitForIdleSync();}catch(InterruptedException e){Thread.currentThread().interrupt();throw new AssertionError(e);}}
-    private void view(int index){onView(withText(startsWith("View · "))).perform(scrollTo(),click());onData(equalTo(AdvancedAnalyticsPage.SECTIONS[index])).inRoot(isDialog()).perform(click());settle();onView(withText("View · "+AdvancedAnalyticsPage.SECTIONS[index])).perform(scrollTo()).check(matches(isDisplayed()));}
+    private void view(int index)throws Exception{
+        // Rotation/font changes can queue one more layout after RESUMED. Verify the
+        // selector is fully reachable before clicking; keep real animations enabled.
+        long deadline=System.currentTimeMillis()+10000;Throwable last=null;boolean ready=false;
+        while(System.currentTimeMillis()<deadline){try{onView(withText(startsWith("View · "))).perform(scrollTo()).check(matches(isCompletelyDisplayed()));ready=true;break;}catch(RuntimeException|AssertionError e){last=e;Thread.sleep(150);}}
+        if(!ready)throw new AssertionError("Analytics selector did not become reachable",last);
+        onView(withText(startsWith("View · "))).perform(click());
+        onData(equalTo(AdvancedAnalyticsPage.SECTIONS[index])).inRoot(isDialog()).perform(click());settle();awaitText("View · "+AdvancedAnalyticsPage.SECTIONS[index]);
+    }
     private void capture(String name)throws Exception{Thread.sleep(700);InstrumentationRegistry.getInstrumentation().waitForIdleSync();android.graphics.Bitmap b=InstrumentationRegistry.getInstrumentation().getUiAutomation().takeScreenshot();assertNotNull(b);java.io.File d=new java.io.File(context().getFilesDir(),"verification");assertTrue(d.isDirectory()||d.mkdirs());try(java.io.OutputStream out=new java.io.FileOutputStream(new java.io.File(d,name+".png"))){assertTrue(b.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out));}finally{b.recycle();}}
     @Test public void everyAdvancedViewRendersAndKeepsFiltersReachable()throws Exception{
         Assume.assumeTrue(BuildConfig.USE_EMULATORS);
