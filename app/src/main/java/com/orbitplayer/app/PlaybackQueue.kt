@@ -12,40 +12,53 @@ import org.json.JSONObject
  */
 object PlaybackQueue {
     private var items: List<VideoItem> = emptyList()
+    private var restored = false
+    private val writer = java.util.concurrent.Executors.newSingleThreadExecutor()
     var autoAdvance = false
         private set
 
     fun replace(newItems: List<VideoItem>, playAll: Boolean = false) {
+        restored = true
         items = newItems.toList()
         autoAdvance = playAll
     }
 
     fun persist(context: Context) {
-        val array = JSONArray()
-        items.take(2000).forEach { item ->
-            array.put(JSONObject().apply {
-                put("uri", item.uri.toString())
-                put("title", item.title)
-                put("duration", item.durationMs)
-                put("size", item.sizeBytes)
-                put("folder", item.folder)
-                put("date", item.modifiedSeconds)
-            })
+        val snapshot = items
+        val advance = autoAdvance
+        val prefs = context.getSharedPreferences("orbit_queue_v1", Context.MODE_PRIVATE)
+        writer.execute {
+            val array = JSONArray()
+            snapshot.forEach { item ->
+                array.put(JSONObject().apply {
+                    put("uri", item.uri.toString())
+                    put("title", item.title)
+                    put("duration", item.durationMs)
+                    put("size", item.sizeBytes)
+                    put("folder", item.folder)
+                    put("date", item.modifiedSeconds)
+                    put("width", item.width)
+                    put("height", item.height)
+                })
+            }
+            prefs.edit().putString("items", array.toString())
+                .putBoolean("auto_advance", advance).apply()
         }
-        context.getSharedPreferences("orbit_queue_v1", Context.MODE_PRIVATE)
-            .edit().putString("items", array.toString())
-            .putBoolean("auto_advance", autoAdvance).apply()
     }
+
+    /** Only tests wait; production playback never blocks on queue serialization. */
+    internal fun awaitPersistenceForTest() { writer.submit {}.get() }
 
     /** Called only after process recreation when the in-memory queue was lost. */
     fun ensureRestored(context: Context) {
-        if (items.isNotEmpty()) return
+        if (restored) return
+        restored = true
         val prefs = context.getSharedPreferences("orbit_queue_v1", Context.MODE_PRIVATE)
         val json = prefs.getString("items", "[]") ?: "[]"
         try {
             val array = JSONArray(json)
-            val loaded = ArrayList<VideoItem>(array.length().coerceAtMost(2000))
-            for (i in 0 until array.length().coerceAtMost(2000)) {
+            val loaded = ArrayList<VideoItem>(array.length())
+            for (i in 0 until array.length()) {
                 val o = array.optJSONObject(i) ?: continue
                 val raw = o.optString("uri")
                 if (!raw.startsWith("content://") && !raw.startsWith("file://")) continue
@@ -55,7 +68,7 @@ object PlaybackQueue {
                     o.optLong("duration", 0),
                     o.optLong("size", 0),
                     o.optString("folder", "Other"),
-                    o.optLong("date", 0)
+                    o.optLong("date", 0), o.optInt("width", 0), o.optInt("height", 0)
                 ))
             }
             items = loaded

@@ -11,13 +11,13 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
+import android.os.Parcelable
 import android.os.Looper
 import android.database.ContentObserver
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.text.Editable
 import android.text.TextWatcher
-import android.util.Size
 import android.view.View
 import android.widget.EditText
 import android.widget.ImageView
@@ -29,6 +29,7 @@ import android.graphics.Color
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 
 /**
  * A genuine offline video library. No fake navigation, static media cards or forced downloads.
@@ -45,6 +46,7 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private val progress by lazy { getSharedPreferences("playback_positions_v1", MODE_PRIVATE) }
     private val preferences by lazy { OrbitSettings(this) }
+    private val thumbnails by lazy { ThumbnailLoader(applicationContext) }
     private val collections by lazy { OrbitCollections(this) }
     private var currentPlaylist: String? = null
     private lateinit var albumAdapter: FolderAdapter
@@ -75,8 +77,16 @@ class MainActivity : Activity() {
     private var selectedFormat = "" // Empty means all file types.
     private var continueVideo: VideoItem? = null
     private var scanGeneration = 0
+    private var scanInFlight = false
+    private val filterExecutor = Executors.newSingleThreadExecutor()
+    private var filterTask: Future<*>? = null
+    private var filterGeneration = 0
+    private var albumScroll: Parcelable? = null
+    private var returningToAlbums = false
+    private var albumQuery = ""
+    private var openingPlayer = false
     // Android can revoke video access while the app is in the background.
-    private var previousLibraryAccess: Boolean? = null
+    private var previousLibraryAccess: Int? = null
     private var destroyed = false
     private var observerActive = false
     private var needsBackgroundScan = false
@@ -96,6 +106,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        applyContentInsets(findViewById(R.id.mainRoot))
         status = findViewById(R.id.count)
         empty = findViewById(R.id.empty)
         grant = findViewById(R.id.btnGrant)
@@ -106,9 +117,10 @@ class MainActivity : Activity() {
         continueThumb = findViewById(R.id.continueThumb)
         search = findViewById(R.id.search)
         videos = findViewById(R.id.videos)
-        adapter = VideoAdapter(this, { open(it) }, { showVideoOptions(it) })
-        albumAdapter = FolderAdapter(this, { openAlbum(it) }, { folderOptions(it) })
+        adapter = VideoAdapter(this, { open(it) }, { showVideoOptions(it) }, thumbnails)
+        albumAdapter = FolderAdapter(this, { openAlbum(it) }, thumbnails, { folderOptions(it) })
         gallery = preferences.gallery
+        adapter.useGallery(gallery)
         sort = Sort.values()[preferences.sort]
         tab = when (preferences.defaultTab) {
             "Videos" -> Tab.VIDEOS
@@ -144,6 +156,7 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.btnSettings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
+        findViewById<View>(R.id.libraryBack).setOnClickListener { onBackPressed() }
         findViewById<View>(R.id.btnPick).setOnClickListener { openDocument() }
         findViewById<View>(R.id.btnPlaylists).setOnClickListener { showPlaylists() }
         videos.setItemViewCacheSize(8)
@@ -179,15 +192,20 @@ class MainActivity : Activity() {
             override fun afterTextChanged(s: Editable?) = Unit
         })
 
+        albumScroll = savedInstanceState?.getParcelable("orbit_album_scroll")
+        albumQuery = savedInstanceState?.getString("orbit_album_query", "") ?: ""
         if (query.isNotBlank()) search.setText(query)
         updatePermissionsUi()
         applyAppearance()
-        previousLibraryAccess = hasLibraryPermission()
-        if (previousLibraryAccess == true) scan() else filterVideos()
+        previousLibraryAccess = libraryPermissionState()
+        if (previousLibraryAccess != 0) scan() else filterVideos()
         showPreviousCrashReport()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("orbit_album_query", if (tab == Tab.FOLDERS) query else albumQuery)
+        outState.putParcelable("orbit_album_scroll", if (tab == Tab.FOLDERS)
+            gridManager.onSaveInstanceState() else albumScroll)
         outState.putString("orbit_tab", tab.name)
         outState.putString("orbit_filter", filter.name)
         outState.putInt("orbit_sort", sort.ordinal)
@@ -202,11 +220,15 @@ class MainActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
-        if (!observerActive) {
-            contentResolver.registerContentObserver(
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, mediaObserver)
+        observeMedia()
+    }
+
+    private fun observeMedia() {
+        if (observerActive || !hasLibraryPermission()) return
+        try {
+            contentResolver.registerContentObserver(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, mediaObserver)
             observerActive = true
-        }
+        } catch (_: SecurityException) { /* Access changed while registering; onResume reconciles. */ }
     }
 
     override fun onStop() {
@@ -223,10 +245,14 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        openingPlayer = false
         val hasAccess = hasLibraryPermission()
-        val accessChanged = previousLibraryAccess != null && previousLibraryAccess != hasAccess
-        previousLibraryAccess = hasAccess
+        val permissionState = libraryPermissionState()
+        val accessChanged = previousLibraryAccess != null && previousLibraryAccess != permissionState
+        previousLibraryAccess = permissionState
+        if (accessChanged) ++scanGeneration
         updatePermissionsUi()
+        observeMedia()
         if (::adapter.isInitialized) {
             applyAppearance()
             adapter.refreshProgress()
@@ -240,8 +266,8 @@ class MainActivity : Activity() {
                 continueVideo = null
                 rebuildFolders()
                 filterVideos()
-            } else if (accessChanged || allVideos.isEmpty() || rescan ||
-                (preferences.autoRefresh && needsBackgroundScan)) {
+            } else if (accessChanged || (allVideos.isEmpty() && !scanInFlight) || rescan ||
+                ((preferences.autoRefresh || permissionState == 1) && needsBackgroundScan)) {
                 needsBackgroundScan = false
                 scan()
             } else {
@@ -251,21 +277,27 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun hasLibraryPermission(): Boolean {
+    private fun hasLibraryPermission() = libraryPermissionState() != 0
+
+    private fun libraryPermissionState(): Int {
         if (Build.VERSION.SDK_INT < 33) {
-            return checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) ==
-                PackageManager.PERMISSION_GRANTED
+            return if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) ==
+                PackageManager.PERMISSION_GRANTED) 2 else 0
         }
         val full = checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) ==
             PackageManager.PERMISSION_GRANTED
         val partial = Build.VERSION.SDK_INT >= 34 &&
             checkSelfPermission(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) ==
                 PackageManager.PERMISSION_GRANTED
-        return full || partial
+        return if (full) 2 else if (partial) 1 else 0
     }
 
     private fun updatePermissionsUi() {
-        grant.text = if (hasLibraryPermission()) "ACCESS" else "ALLOW ACCESS"
+        grant.visibility = if (libraryPermissionState() == 2) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.libraryStatusRow).layoutParams = findViewById<View>(R.id.libraryStatusRow).layoutParams.apply {
+            height = ((if (libraryPermissionState() == 2) 28 else 48) * resources.displayMetrics.density).toInt()
+        }
+        grant.text = when (libraryPermissionState()) { 2 -> "ACCESS"; 1 -> "ADD VIDEOS"; else -> "ALLOW ACCESS" }
     }
 
     private fun requestVideoPermissions() {
@@ -364,12 +396,22 @@ class MainActivity : Activity() {
             filterVideos()
             return
         }
+        if (scanInFlight) return
+        scanInFlight = true
+        findViewById<View>(R.id.libraryLoading).visibility = if (allVideos.isEmpty()) View.VISIBLE else View.GONE
+        if (allVideos.isEmpty()) empty.visibility = View.GONE
         val token = ++scanGeneration
         status.text = "Scanning accessible videos…"
         executor.execute {
             val result = runCatching { VideoRepository(applicationContext).load() }
             handler.post {
-                if (destroyed || token != scanGeneration) return@post
+                if (destroyed) return@post
+                scanInFlight = false
+                findViewById<View>(R.id.libraryLoading).visibility = View.GONE
+                if (token != scanGeneration) {
+                    if (hasLibraryPermission()) scan()
+                    return@post
+                }
                 if (result.isSuccess) {
                     allVideos = result.getOrDefault(emptyList())
                     rebuildFolders()
@@ -408,57 +450,46 @@ class MainActivity : Activity() {
             updateAlbums()
             return
         }
-        val nowSeconds = System.currentTimeMillis() / 1000
+        val source = allVideos
         val history = progress.getString("recently_watched", "")?.split("|")
-            ?.filter { it.isNotBlank() } ?: emptyList()
-        val historyOrder = history.withIndex().associate { it.value to it.index }
-        val cutoff = nowSeconds - 30L * 24L * 60L * 60L
-        val playlistOrder = currentPlaylist?.let { collections.items(it) }
-        val playlistPositions = playlistOrder?.withIndex()?.associate { it.value to it.index }
-        val hiddenFolders = preferences.folders("hidden")
-        val favorites = if (filter == Filter.FAVORITES) collections.favorites() else emptySet()
-        val filtered = allVideos.asSequence()
-            .filter { it.folder !in hiddenFolders }
-            .filter { chosenFolder == "All folders" || it.folder == chosenFolder }
-            .filter { selectedFormat.isEmpty() || videoExtension(it.title) == selectedFormat }
-            .filter { playlistPositions == null || it.uri.toString() in playlistPositions }
-            .filter { query.isBlank() || it.title.contains(query, ignoreCase = true) ||
-                it.folder.contains(query, ignoreCase = true) }
-            .filter {
-                when {
-                    filter == Filter.FAVORITES -> it.uri.toString() in favorites
-                    tab == Tab.CONTINUE ->
-                        if (filter == Filter.HISTORY) it.uri.toString() in history
-                        else hasProgress(it)
-                    filter == Filter.HISTORY -> it.uri.toString() in history
-                    filter == Filter.ALL -> true
-                    filter == Filter.CONTINUE -> hasProgress(it)
-                    else -> it.modifiedSeconds >= cutoff
-                }
+            ?.filter { it.isNotBlank() }.orEmpty()
+        val stored = progress.all
+        val request = LibraryQuery(
+            text = query, folder = chosenFolder, format = selectedFormat,
+            filter = if (tab == Tab.CONTINUE && filter != Filter.HISTORY) "CONTINUE" else filter.name,
+            sort = sort.name, hidden = preferences.folders("hidden"),
+            favorites = collections.favorites(), history = history,
+            playlist = currentPlaylist?.let(collections::items))
+        val token = ++filterGeneration
+        filterTask?.cancel(true)
+        filterTask = filterExecutor.submit {
+            val byKey = source.associateBy { it.uri.toString() }
+            val snapshot = request.copy(positions = source.associate { it.uri.toString() to
+                (stored["position_${it.uri.toString().hashCode()}"] as? Long ?: 0L) })
+            val result = LibraryEngine.videos(source.map { it.entry() }, snapshot).mapNotNull { byKey[it.key] }
+            handler.post {
+                if (destroyed || token != filterGeneration) return@post
+                visibleVideos = result
+                renderVideos()
             }
-        visibleVideos = when {
-            playlistPositions != null -> filtered.sortedBy {
-                playlistPositions[it.uri.toString()] ?: Int.MAX_VALUE
-            }
-            filter == Filter.HISTORY -> filtered.sortedBy {
-                historyOrder[it.uri.toString()] ?: Int.MAX_VALUE
-            }
-            sort == Sort.NEWEST -> filtered.sortedByDescending { it.modifiedSeconds }
-            sort == Sort.OLDEST -> filtered.sortedBy { it.modifiedSeconds }
-            sort == Sort.NAME -> filtered.sortedBy { it.title.lowercase() }
-            sort == Sort.DURATION -> filtered.sortedByDescending { it.durationMs }
-            else -> filtered.sortedByDescending { it.sizeBytes }
-        }.toList()
+        }
+    }
+
+    private fun VideoItem.entry() = LibraryEntry(uri.toString(), title, folder, durationMs, sizeBytes, modifiedSeconds)
+
+    private fun renderVideos() {
         adapter.submit(visibleVideos)
-        videos.adapter = adapter
+        if (videos.adapter !== adapter) videos.adapter = adapter
+        adapter.useGallery(gallery)
         gridManager.spanCount = if (gallery) 2 else 1
+        sortButton.text = arrayOf("Newest", "Oldest", "Name A–Z", "Largest", "Longest")[sort.ordinal] + "  ▾"
         empty.visibility = if (visibleVideos.isEmpty()) View.VISIBLE else View.GONE
         empty.text = when {
             !hasLibraryPermission() -> "Enable library access or tap Open to choose a video."
             allVideos.isEmpty() -> "No videos found.\nTap Open to choose a video."
             filter == Filter.CONTINUE -> "No unfinished videos.\nVideos you start watching will appear here."
             filter == Filter.RECENT -> "No videos added in the last 30 days."
-            filter == Filter.FAVORITES -> "No favorite videos yet. Long press any video to add one."
+            filter == Filter.FAVORITES -> "No favorites yet. Use a video’s ⋮ menu to add one."
             else -> "Nothing matches this folder or search."
         }
         status.text = "${visibleVideos.size} videos  ·  ${allVideos.size} total"
@@ -496,8 +527,10 @@ class MainActivity : Activity() {
 
     private fun refreshContinueCard() {
         val preferred = progress.getString("last_played_uri", null)
-        continueVideo = allVideos.firstOrNull { it.uri.toString() == preferred && hasProgress(it) }
-            ?: allVideos.filter(::hasProgress).maxByOrNull { it.modifiedSeconds }
+        val hidden = preferences.folders("hidden")
+        val accessible = allVideos.filterNot { it.folder in hidden }
+        continueVideo = accessible.firstOrNull { it.uri.toString() == preferred && hasProgress(it) }
+            ?: accessible.filter(::hasProgress).maxByOrNull { it.modifiedSeconds }
         val item = continueVideo
         continueCard.visibility =
             if (item == null || tab != Tab.VIDEOS || chosenFolder != "All folders") View.GONE
@@ -506,25 +539,16 @@ class MainActivity : Activity() {
         findViewById<TextView>(R.id.continueTitle).text = item.title
         findViewById<TextView>(R.id.continueDetails).text =
             "${formatDuration(savedPosition(item))} watched  ·  ${formatDuration(item.durationMs)} total"
-        val key = item.uri.toString()
-        continueThumb.tag = key
-        continueThumb.setImageDrawable(null)
-        executor.execute {
-            val bmp = try {
-                if (Build.VERSION.SDK_INT >= 29)
-                    contentResolver.loadThumbnail(item.uri, Size(210, 130), null)
-                else null
-            } catch (_: Exception) { null }
-            if (bmp != null) handler.post {
-                if (!destroyed && continueThumb.tag == key) continueThumb.setImageBitmap(bmp)
-            }
-        }
+        thumbnails.load(continueThumb, item)
     }
 
     private fun open(item: VideoItem, playAll: Boolean = false) {
+        if (openingPlayer) return
+        openingPlayer = true
         progress.edit().putString("last_played_uri", item.uri.toString()).apply()
         recordWatchHistory(item.uri.toString())
-        PlaybackQueue.replace(visibleVideos, playAll)
+        val queue = visibleVideos.takeIf { list -> list.any { it.uri == item.uri } } ?: listOf(item)
+        PlaybackQueue.replace(queue, playAll)
         PlaybackQueue.persist(this)
         startActivity(Intent(this, PlayerActivity::class.java).apply {
             putExtra(PlayerActivity.EXTRA_URI, item.uri.toString())
@@ -542,17 +566,22 @@ class MainActivity : Activity() {
             }
             PlaybackQueue.replace(emptyList())
             PlaybackQueue.persist(this)
-            val display = runCatching {
-                contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-                    if (c.moveToFirst()) c.getString(0) else null
+            executor.execute {
+                val display = runCatching {
+                    contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) cursor.getString(0) else null
+                    }
+                }.getOrNull()
+                handler.post {
+                    if (destroyed) return@post
+                    progress.edit().putString("last_played_uri", uri.toString()).apply()
+                    recordWatchHistory(uri.toString())
+                    startActivity(Intent(this, PlayerActivity::class.java).apply {
+                        putExtra(PlayerActivity.EXTRA_URI, uri.toString())
+                        putExtra(PlayerActivity.EXTRA_TITLE, display ?: uri.lastPathSegment ?: "Selected video")
+                    })
                 }
-            }.getOrNull()
-            progress.edit().putString("last_played_uri", uri.toString()).apply()
-            recordWatchHistory(uri.toString())
-            startActivity(Intent(this, PlayerActivity::class.java).apply {
-                putExtra(PlayerActivity.EXTRA_URI, uri.toString())
-                putExtra(PlayerActivity.EXTRA_TITLE, display ?: uri.lastPathSegment ?: "Selected video")
-            })
+            }
         }
     }
 
@@ -562,6 +591,7 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == requestLibrary) {
             updatePermissionsUi()
+            observeMedia()
             scan()
         }
     }
@@ -572,18 +602,20 @@ class MainActivity : Activity() {
         val options = arrayOf(
             if (favorite) "★ Remove from favorites" else "☆ Add to favorites",
             "Add to playlist", "Select multiple videos", "Play from here"
-        )
+        ) + if (currentPlaylist != null) arrayOf("Remove from playlist") else emptyArray()
         AlertDialog.Builder(this).setTitle(item.title)
             .setItems(options) { _, choice ->
                 when (choice) {
                     0 -> {
                         collections.toggleFavorite(uri)
-                        if (filter == Filter.FAVORITES) filterVideos()
+                        filterVideos()
+                        adapter.refreshProgress()
                         Toast.makeText(this, if (favorite) "Removed from favorites" else "Added to favorites", Toast.LENGTH_SHORT).show()
                     }
                     1 -> choosePlaylist(listOf(uri))
                     2 -> showMultiSelect()
                     3 -> open(item, true)
+                    4 -> currentPlaylist?.let { name -> collections.remove(name, uri); filterVideos() }
                 }
             }.show()
     }
@@ -594,27 +626,36 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this).setTitle("Add ${uris.size} video(s) to playlist")
             .setItems(choices) { _, position ->
                 if (position == 0) {
-                    val field = EditText(this).apply {
-                        hint = "Playlist name"
-                        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-                        isSingleLine = true
-                    }
-                    AlertDialog.Builder(this).setTitle("New playlist").setView(field)
-                        .setPositiveButton("Create") { _, _ ->
-                            val title = field.text.toString().trim()
-                            if (title.isBlank()) {
-                                Toast.makeText(this, "Please enter a playlist name", Toast.LENGTH_SHORT).show()
-                            } else {
-                                val count = collections.add(title, uris)
-                                Toast.makeText(this, "Added $count video(s) to $title", Toast.LENGTH_SHORT).show()
-                            }
-                        }.setNegativeButton("Cancel", null).show()
+                    createPlaylist(uris)
                 } else {
                     val count = collections.add(names[position - 1], uris)
                     Toast.makeText(this, "Added $count video(s)", Toast.LENGTH_SHORT).show()
                     if (currentPlaylist == names[position - 1]) filterVideos()
                 }
             }.show()
+    }
+
+    private fun createPlaylist(uris: List<String>) {
+        val field = EditText(this).apply {
+            hint = "Playlist name"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            isSingleLine = true
+            filters = arrayOf(android.text.InputFilter.LengthFilter(50))
+        }
+        val dialog = AlertDialog.Builder(this).setTitle("New playlist").setView(field)
+            .setPositiveButton("Create", null).setNegativeButton("Cancel", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val title = field.text.toString().trim()
+                if (title.isBlank() || title in collections.names()) field.error = "Enter a unique playlist name"
+                else {
+                    val count = collections.add(title, uris)
+                    Toast.makeText(this, "Created $title · $count video(s)", Toast.LENGTH_SHORT).show()
+                    dialog.dismiss()
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun showMultiSelect() {
@@ -649,21 +690,21 @@ class MainActivity : Activity() {
         }).toTypedArray()
         AlertDialog.Builder(this).setTitle("My playlists")
             .setItems(choices) { _, which ->
-                if (which == 0) choosePlaylist(emptyList())
+                if (which == 0) createPlaylist(emptyList())
                 else {
                     val title = names[which - 1]
-                    val actions = arrayOf("Open playlist", "Play all", "Add videos", "Delete playlist")
+                    val actions = arrayOf("Open playlist", "Play all", "Add videos", "Delete playlist", "Rename playlist")
                     AlertDialog.Builder(this).setTitle(title).setItems(actions) { _, action ->
                         when (action) {
                             0 -> openPlaylist(title)
                             1 -> {
-                                openPlaylist(title)
-                                visibleVideos.firstOrNull()?.let { open(it, true) }
+                                playPlaylist(title)
                             }
                             2 -> {
                                 openPlaylist(title)
                                 showMultiSelectFromLibrary(title)
                             }
+                            4 -> renamePlaylist(title)
                             3 -> AlertDialog.Builder(this).setTitle("Delete $title?")
                                 .setMessage("Only the playlist is removed. Video files stay untouched.")
                                 .setNegativeButton("Cancel", null)
@@ -681,7 +722,8 @@ class MainActivity : Activity() {
     }
 
     private fun showMultiSelectFromLibrary(title: String) {
-        val choices = allVideos.filterNot { preferences.hasFolder("hidden", it.folder) }
+        val hidden = preferences.folders("hidden")
+        val choices = allVideos.filterNot { it.folder in hidden }
         val selected = BooleanArray(choices.size)
         AlertDialog.Builder(this).setTitle("Add videos to $title")
             .setMultiChoiceItems(choices.map { it.title }.toTypedArray(), selected) { _, index, checked ->
@@ -692,6 +734,38 @@ class MainActivity : Activity() {
                 collections.add(title, picked)
                 openPlaylist(title)
             }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun playPlaylist(name: String) {
+        val hidden = preferences.folders("hidden")
+        val byUri = allVideos.filterNot { it.folder in hidden }
+            .associateBy { it.uri.toString() }
+        val ordered = collections.items(name).mapNotNull(byUri::get)
+        if (ordered.isEmpty()) {
+            Toast.makeText(this, "No accessible videos in this playlist", Toast.LENGTH_SHORT).show()
+        } else {
+            visibleVideos = ordered
+            open(ordered.first(), true)
+        }
+    }
+
+    private fun renamePlaylist(name: String) {
+        val field = EditText(this).apply {
+            setText(name); isSingleLine = true; selectAll()
+            filters = arrayOf(android.text.InputFilter.LengthFilter(50))
+        }
+        val dialog = AlertDialog.Builder(this).setTitle("Rename playlist").setView(field)
+            .setPositiveButton("Save", null).setNegativeButton("Cancel", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                if (collections.rename(name, field.text.toString())) {
+                    if (currentPlaylist == name) currentPlaylist = field.text.toString().trim().take(50)
+                    filterVideos()
+                    dialog.dismiss()
+                } else field.error = "Enter a unique playlist name"
+            }
+        }
+        dialog.show()
     }
 
     private fun openPlaylist(name: String) {
@@ -740,6 +814,11 @@ class MainActivity : Activity() {
     }
 
     private fun setTab(next: Tab) {
+        if (tab == Tab.FOLDERS) {
+            albumScroll = gridManager.onSaveInstanceState()
+            albumQuery = query
+        }
+        returningToAlbums = next == Tab.FOLDERS && albumScroll != null
         tab = next
         selectedFormat = ""
         preferences.lastTab = next.name
@@ -748,10 +827,10 @@ class MainActivity : Activity() {
         chosenFolder = if (next == Tab.VIDEOS) preferences.lastFolder
             .takeIf { it in folderOptions } ?: "All folders"
             else "All folders"
-        search.setText("")
+        search.setText(if (next == Tab.FOLDERS) albumQuery else "")
         handler.removeCallbacks(searchLater)
         filterVideos()
-        videos.scrollToPosition(0)
+        if (!returningToAlbums) videos.scrollToPosition(0)
         if (next == Tab.SEARCH) {
             search.requestFocus()
             val input = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
@@ -798,49 +877,58 @@ class MainActivity : Activity() {
                 if (child is TextView) child.setTextColor(color)
             }
         }
-        continueCard.visibility = if (tab == Tab.VIDEOS && continueVideo != null
+        findViewById<View>(R.id.libraryBack).visibility = if (tab == Tab.VIDEOS &&
+            (chosenFolder != "All folders" || currentPlaylist != null)) View.VISIBLE else View.GONE
+        continueCard.visibility = if (tab == Tab.VIDEOS && currentPlaylist == null && continueVideo != null
             && chosenFolder == "All folders") View.VISIBLE else View.GONE
     }
 
     private fun updateAlbums() {
         val hiddenFolders = preferences.folders("hidden")
         val pinnedFolders = preferences.folders("pinned")
-        albums = allVideos.asSequence()
-            .filter { it.folder !in hiddenFolders }
-            .groupBy { it.folder }
-            // Search also works in Albums: match the folder path OR any video inside.
-            // Keep each album's real file count rather than reporting a partial count.
-            .filter { (path, items) ->
-                query.isBlank() || path.contains(query, ignoreCase = true) ||
-                    items.any { it.title.contains(query, ignoreCase = true) }
-            }
-            .map { (path, items) ->
-                val recent = items.maxByOrNull { it.modifiedSeconds } ?: items.first()
-                FolderAlbum(path, items.size, recent, items,
-                    path in pinnedFolders)
-            }.let { a ->
-                when (albumSort) {
-                    1 -> a.sortedWith(compareByDescending<FolderAlbum> { it.pinned }
-                        .thenByDescending { it.count }.thenBy { it.displayName.lowercase() })
-                    2 -> a.sortedWith(compareByDescending<FolderAlbum> { it.pinned }
-                        .thenByDescending { it.cover.modifiedSeconds })
-                    else -> a.sortedWith(compareByDescending<FolderAlbum> { it.pinned }
-                        .thenBy { it.displayName.lowercase() })
+        val source = allVideos
+        val text = query
+        val sorting = albumSort
+        val token = ++filterGeneration
+        filterTask?.cancel(true)
+        filterTask = filterExecutor.submit {
+            val byKey = source.associateBy { it.uri.toString() }
+            val result = LibraryEngine.albums(source.map { it.entry() }, text, hiddenFolders, pinnedFolders, sorting)
+                .map { album ->
+                    val items = album.items.mapNotNull { byKey[it.key] }
+                    FolderAlbum(album.path, items.size, byKey.getValue(album.cover.key), items, album.pinned)
                 }
+            handler.post {
+                if (destroyed || token != filterGeneration) return@post
+                albums = result
+                renderAlbums()
             }
-        videos.adapter = albumAdapter
-        gridManager.spanCount = preferences.folderColumns
-        albumAdapter.submit(albums)
+        }
+    }
+
+    private fun renderAlbums() {
+        if (videos.adapter !== albumAdapter) videos.adapter = albumAdapter
+        gridManager.spanCount = preferences.folderColumns.coerceAtMost(
+            (resources.configuration.screenWidthDp / (100 * resources.configuration.fontScale)).toInt().coerceAtLeast(2))
+        albumAdapter.submit(albums) {
+            if (returningToAlbums && tab == Tab.FOLDERS) {
+                albumScroll?.let(gridManager::onRestoreInstanceState)
+                returningToAlbums = false
+            }
+        }
         empty.visibility = if (albums.isEmpty()) View.VISIBLE else View.GONE
         empty.text = if (hasLibraryPermission())
-            "No visible video folders.\\nUnhide folders in Settings if needed."
+            "No visible video folders.\nTry another search or manage hidden folders in Settings."
             else "Allow video access to see your folders."
-        status.text = "${albums.size} folders  ·  ${albums.sumOf { it.count }} videos"
+        val count = albums.sumOf { it.count }
+        status.text = "${albums.size} ${if (albums.size == 1) "folder" else "folders"}  ·  $count ${if (count == 1) "video" else "videos"}"
         sortButton.text = arrayOf("A–Z  ▾", "Most  ▾", "Recent  ▾")[albumSort]
         renderChrome()
     }
 
     private fun openAlbum(album: FolderAlbum) {
+        albumQuery = query
+        albumScroll = gridManager.onSaveInstanceState()
         tab = Tab.VIDEOS
         selectedFormat = ""
         chosenFolder = album.path
@@ -893,9 +981,13 @@ class MainActivity : Activity() {
         handler.removeCallbacks(refreshLater)
         handler.removeCallbacks(searchLater)
         ++scanGeneration
+        ++filterGeneration
+        filterTask?.cancel(true)
+        filterExecutor.shutdownNow()
         executor.shutdownNow()
         adapter.dispose()
         albumAdapter.dispose()
+        thumbnails.dispose()
         super.onDestroy()
     }
 }

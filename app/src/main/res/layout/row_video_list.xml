@@ -31,6 +31,9 @@
         android:layout_height="wrap_content" android:layout_marginTop="5dp"
         android:textSize="10sp" android:maxLines="1" android:ellipsize="end"
         android:textColor="#9EAEC8"/>
+ <TextView android:id="@+id/favoriteBadge" android:layout_width="wrap_content"
+    android:layout_height="wrap_content" android:text="★ Favorite" android:visibility="gone"
+    android:textColor="#C4A6FF" android:textSize="11sp" android:paddingStart="4dp"/>
     <ProgressBar android:id="@+id/watchProgress"
         style="?android:attr/progressBarStyleHorizontal"
         android:layout_width="match_parent" android:layout_height="3dp"
@@ -39,7 +42,7 @@
         android:progressBackgroundTint="#44536D89"/>
  </LinearLayout>
  <ImageView android:id="@+id/moreOptions"
-    android:layout_width="42dp" android:layout_height="44dp"
+    android:layout_width="48dp" android:layout_height="48dp"
     android:padding="10dp" android:src="@drawable/orbit_ic_more"
     android:background="@drawable/orbit_icon_surface"
     android:contentDescription="Video options" />

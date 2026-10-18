@@ -2,13 +2,11 @@ package com.orbitplayer.app
 
 import android.app.Activity
 import android.app.AlertDialog
-import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
-import android.view.View
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
@@ -45,6 +43,7 @@ class SettingsActivity : Activity() {
         }
         scroll.addView(content)
         setContentView(scroll)
+        applyContentInsets(scroll)
         build()
     }
 
@@ -66,7 +65,8 @@ class SettingsActivity : Activity() {
         }
         val back = label("‹", 38f, color = white).apply {
             gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(dp(43), dp(48))
+            contentDescription = "Back to library"
+            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
             setOnClickListener { finish() }
         }
         header.addView(back)
@@ -208,6 +208,7 @@ class SettingsActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(15), dp(11), dp(13), dp(11))
             background = surface()
+            minimumHeight = dp(64)
         }
         val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         info.addView(label(title, 14.5f, true))
@@ -226,6 +227,7 @@ class SettingsActivity : Activity() {
     private fun toggle(title: String, desc: String, initial: Boolean, change: (Boolean) -> Unit) {
         val row = makeRow(title, desc)
         val control = Switch(this).apply {
+            contentDescription = title
             isChecked = initial
             setOnCheckedChangeListener { _, checked -> change(checked) }
         }
@@ -251,7 +253,7 @@ class SettingsActivity : Activity() {
         val items = settings.folders(kind).sorted()
         if (items.isEmpty()) {
             AlertDialog.Builder(this).setTitle(title).setMessage(
-                "No folders in this list. Long press any folder in the Albums screen to pin or hide it."
+                "No folders in this list. Use a folder’s ⋮ menu to pin or hide it."
             ).setPositiveButton("OK", null).show()
             return
         }

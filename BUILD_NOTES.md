@@ -1,30 +1,65 @@
 # Build notes and engineering decisions
 
-## Build status
+The project remains Kotlin + native Views/XML + Media3, minSdk 26, compileSdk 36,
+targetSdk 35, Java 17 and Gradle 8.13. App ID and production signing configuration
+are unchanged. This branch remains development version 0.3.1 / versionCode 14.
 
-This workspace does not have the Android SDK, Gradle, Gradle wrapper jar or access to Maven/Google downloads. There is **no compiled APK and no Android-device test result** attached to this source delivery. GitHub Actions is set up to perform the actual build on an online Ubuntu runner. Build failures remain possible and should be investigated using workflow logs.
+See [the current audit and evidence](docs/ORBIT_RELEASE_AUDIT_2026_10_18.md).
+The unchanged takeover baseline compiles locally in debug and optimized release,
+and its unit tests pass. Current-source checks must be distinguished from that
+baseline; a compiled development APK is not a verified production release.
 
-## Design goals
+## Architecture
 
-- Code is separated into browsing (`MainActivity` / `VideoRepository`), list rendering (`VideoAdapter`), playback (`PlayerActivity`), and gesture handling (`PlayerGestureZone`).
-- ExoPlayer and native Android views avoid additional native codec libraries, reducing initial package weight.
-- The Android platform's Storage Access Framework provides a no-permission fallback for single-file playback.
-- The player stops and releases its media session on `onStop`. Background audio is **not** part of this version.
-- Resume history is stored privately in Android SharedPreferences keyed by a URI hash; no sensitive file content is uploaded.
+- MainActivity snapshots view/preferences state; LibraryEngine filters, sorts and
+  groups immutable metadata on a separate worker. A generation token rejects
+  stale results. RecyclerView's existing asynchronous diffs remain intact.
+- ThumbnailLoader shares one 12 MiB cache between folders, videos and Continue
+  Watching. Two workers decode; the pending queue is bounded. Recycled targets
+  cancel outstanding work. URI, modified time and size form the cache key.
+- Primary-storage folder keys and existing content URIs stay compatible with
+  previous preferences. Removable-storage folders additionally include the
+  MediaStore volume so equally named paths on different volumes cannot merge.
+- Collections retain their existing local preferences and ordered JSON arrays.
+  Rename is an atomic preference edit and refuses an existing destination name.
+  No organization action moves or deletes original videos.
+- Queue serialization runs on a single worker; an explicit restored flag prevents
+  an intentionally empty external-file queue from restoring stale library items.
+- ExoPlayer owns audio focus and noisy-headset handling. The platform MediaSession
+  routes active-player controls. There is no background MediaSessionService or
+  dedicated playback notification in this branch.
+- Subtitle URI, MIME, track parameters, pause intent, touch lock and sleep deadline
+  survive activity recreation. A stopped player retains the active session's
+  exact position separately from the near-end persistence/completion policy.
+- Network access remains user initiated through the update checker. It selects
+  only the expected Orbit APK asset name in this shared repository. It never
+  silently installs an update. Playback accepts local content/file URIs.
 
-## Potential improvements for next iterations
+## Validation
 
-1. Run official compilation and instrumented-device tests. Correct any API or OEM-specific issues.
-2. Use a proper PlayerEngine abstraction before introducing LibVLC. Size-test ARM64 native libraries against codec coverage.
-3. Migrate deprecated activity result APIs to Activity Result Contracts after baseline passes.
-4. Add full lifecycle/media-session support for PiP and background playback.
-5. Add track subtitle sync, external subtitle filename matching via SAF-granted tree access, and playback queue persisted on disk.
-6. Add robust thumbnail request cancellation/de-duplication for huge libraries and memory-pressure testing.
-7. Add UI automation tests and accessibility audits for touch targets, screen-reader labels, landscape layouts, and insets.
-8. Configure private release signing and run R8 release builds before distribution.
+```bash
+python3 scripts/check_layouts.py
+python3 scripts/check_library_ui.py
+gradle --no-daemon :app:assembleDebug :app:assembleRelease \
+  :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease \
+  :app:assembleDebugAndroidTest
+```
 
-## Official dependency references
+With a running emulator/device and generated H.264/AAC `smoke.mp4`:
 
-- Media3: https://developer.android.com/jetpack/androidx/releases/media3
-- AGP 8.13: https://developer.android.com/build/releases/agp-8-13-0-release-notes
-- Android partial media permission: https://developer.android.com/about/versions/14/changes/partial-photo-video-access
+```bash
+bash scripts/run_emulator_smoke.sh
+gradle --no-daemon :app:connectedDebugAndroidTest
+python3 scripts/create_media_fixtures.py qa/media
+python3 scripts/run_media_matrix.py qa/media
+```
+
+Instrumentation expects `orbit_smoke.mp4` to have been indexed by the smoke script.
+Its collection tests use separate QA preference files. Subtitle assets are packaged
+only in the test APK. Synthetic fixtures prove repeatable cases; physical-device
+codec coverage, audible output, SD-card behavior, long-session battery/performance
+and a signed in-place upgrade still require separate evidence.
+
+Release signing uses the existing private PKCS12 key through GitHub Actions secrets.
+No production signing key is available in this workspace; none is generated or
+substituted. Do not distribute debug APKs as updates to production installs.

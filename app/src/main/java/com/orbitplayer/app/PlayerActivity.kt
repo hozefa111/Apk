@@ -14,7 +14,6 @@ import android.view.HapticFeedbackConstants
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.ActivityInfo
-import android.database.Cursor
 import android.media.AudioManager
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
@@ -25,12 +24,9 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
 import android.view.Gravity
-import android.view.MotionEvent
 import android.view.View
-import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
-import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.C
@@ -39,6 +35,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
@@ -47,6 +44,7 @@ import androidx.media3.ui.PlayerView
 import kotlin.math.roundToInt
 
 /** No Internet needed. Plays accessible content URIs through the Android Media3/ExoPlayer engine. */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class PlayerActivity : Activity() {
     companion object {
         const val EXTRA_URI = "video_uri"
@@ -102,6 +100,14 @@ class PlayerActivity : Activity() {
     private var repeatOne = false
     private var resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
     private var brightness = 0.5f
+    private var volumeLevel = 0f
+    private var retainedTracks: TrackSelectionParameters? = null
+    private var subtitleType = MimeTypes.APPLICATION_SUBRIP
+    private var sleepDeadline = 0L
+    private var optionsDialog: Dialog? = null
+    private val subtitleExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private var subtitleRequest = 0
+    private var pendingSubtitleUri: Uri? = null
     private var toastHide: Runnable? = null
     private val progressSaver = object : Runnable {
         override fun run() {
@@ -129,12 +135,13 @@ class PlayerActivity : Activity() {
         gestureMeter = findViewById(R.id.gestureMeter)
         speedButton = findViewById(R.id.btnSpeed)
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        volumeControlStream = AudioManager.STREAM_MUSIC
         videoUri = intent?.data?.toString()
             ?: intent?.getStringExtra(EXTRA_URI).orEmpty()
         videoTitle = intent?.getStringExtra(EXTRA_TITLE)?.takeIf { it.isNotBlank() }
             ?: intent?.data?.lastPathSegment?.substringAfterLast('/') ?: "Video"
-        if (videoUri.isBlank()) {
-            Toast.makeText(this, "No video was selected", Toast.LENGTH_LONG).show()
+        if (videoUri.isBlank() || Uri.parse(videoUri).scheme !in setOf("content", "file")) {
+            Toast.makeText(this, "Choose a local video file to play", Toast.LENGTH_LONG).show()
             finish()
             return
         }
@@ -161,11 +168,12 @@ class PlayerActivity : Activity() {
         runCatching {
             playerView.subtitleView?.setFractionalTextSize(0.0533f * userOptions.subtitleScale)
         }
+        applyPlayerInsets()
         enableImmersiveMode()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         findViewById<View>(R.id.back).setOnClickListener { finish() }
         findViewById<View>(R.id.btnTracks).setOnClickListener { showTrackChooser() }
-        findViewById<View>(R.id.btnSubs).setOnClickListener { chooseSubtitle() }
+        findViewById<View>(R.id.btnSubs).setOnClickListener { showTrackChooser() }
         speedButton.setOnClickListener { showSpeedChooser() }
         findViewById<View>(R.id.btnMore).setOnClickListener { showMoreOptions() }
         findViewById<View>(R.id.btnPrevious).setOnClickListener { switchQueue(-1) }
@@ -205,6 +213,14 @@ class PlayerActivity : Activity() {
                 scheduleAutoHide()
             }
         })
+        findViewById<TextView>(R.id.btnRewind).apply {
+            text = "↶ ${userOptions.seekSeconds}"
+            contentDescription = "Rewind ${userOptions.seekSeconds} seconds"
+        }
+        findViewById<TextView>(R.id.btnForward).apply {
+            text = "${userOptions.seekSeconds} ↷"
+            contentDescription = "Forward ${userOptions.seekSeconds} seconds"
+        }
         attachGestureZones()
         adjustForScreenSize()
         showControls()
@@ -216,6 +232,13 @@ class PlayerActivity : Activity() {
             videoUri = savedInstanceState.getString("uri", videoUri)
             videoTitle = savedInstanceState.getString("title", videoTitle)
             subtitleUri = savedInstanceState.getString("subtitle_uri")?.let(Uri::parse)
+            subtitleType = savedInstanceState.getString("subtitle_type") ?: MimeTypes.APPLICATION_SUBRIP
+            savedInstanceState.getString("pending_subtitle_uri")?.let { attachSubtitle(Uri.parse(it)) }
+            retainedTracks = savedInstanceState.getBundle("track_parameters")?.let(TrackSelectionParameters::fromBundle)
+            touchLocked = savedInstanceState.getBoolean("touch_locked", false)
+            if (touchLocked) hideControls()
+            sleepDeadline = savedInstanceState.getLong("sleep_deadline", 0L)
+            restoreSleepTimer()
             showRemainingTime = savedInstanceState.getBoolean("show_remaining_time", false)
             playerTitle.text = videoTitle
         } else {
@@ -245,6 +268,8 @@ class PlayerActivity : Activity() {
         val exo = ExoPlayer.Builder(this).build()
         exo.setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, true)
         exo.setHandleAudioBecomingNoisy(true)
+        // API 35 requires the activity to be foreground before requesting audio focus.
+        // Activity.onStart is the active playback ownership boundary.
         player = exo
         playerView.player = exo
         // Controls from wired/Bluetooth headsets are routed to this foreground player.
@@ -260,7 +285,7 @@ class PlayerActivity : Activity() {
             params.setPreferredAudioLanguage(userOptions.preferredAudio)
         if (userOptions.preferredSubtitle.isNotBlank())
             params.setPreferredTextLanguage(userOptions.preferredSubtitle)
-        exo.trackSelectionParameters = params.build()
+        exo.trackSelectionParameters = retainedTracks ?: params.build()
         playerView.resizeMode = resizeMode
         exo.repeatMode = if (repeatOne) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         exo.addListener(object : Player.Listener {
@@ -282,17 +307,49 @@ class PlayerActivity : Activity() {
                     .setTitle("Unable to play this video")
                     .setMessage("Decoder or file problem: ${error.errorCodeName}.\n\n" +
                         "Orbit Pro uses the decoders available on your device. This codec might require an additional decoder.")
-                    .setPositiveButton("OK", null)
+                    .setPositiveButton("Retry") { _, _ ->
+                        exo.prepare()
+                        exo.playWhenReady = true
+                    }
+                    .setNeutralButton("Close video") { _, _ -> finish() }
+                    .setNegativeButton(if (PlaybackQueue.adjacent(videoUri, 1) != null) "Next video" else "Dismiss") { _, _ ->
+                        if (PlaybackQueue.adjacent(videoUri, 1) != null) switchQueue(1)
+                    }
                     .show()
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 updateSystemPlaybackState()
                 updatePlayPauseButton()
+                if (isPlaying) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 if (isPlaying) scheduleAutoHide() else {
                     handler.removeCallbacks(hideControlsTask)
                     if (!touchLocked) showControls()
                 }
+            }
+
+            override fun onTracksChanged(tracks: Tracks) {
+                if (BuildConfig.DEBUG) tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.forEach { group ->
+                    (0 until group.length).filter(group::isTrackSelected).forEach { index ->
+                        android.util.Log.i("OrbitPlayerQA", "AUDIO_SELECTED ${group.getTrackFormat(index).sampleMimeType}")
+                    }
+                }
+                val audio = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+                if (audio.isNotEmpty() && audio.none { group -> (0 until group.length).any(group::isTrackSupported) })
+                    notifyGesture("Audio codec unavailable on this device")
+            }
+
+            override fun onRenderedFirstFrame() {
+                if (BuildConfig.DEBUG) android.util.Log.i("OrbitPlayerQA", "FIRST_FRAME")
+            }
+
+            override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                updateSystemPlaybackState()
+            }
+
+            override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
+                updateSystemPlaybackState()
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -333,7 +390,17 @@ class PlayerActivity : Activity() {
         handler.postDelayed(progressSaver, 5000)
         handler.removeCallbacks(progressUpdater)
         handler.post(progressUpdater)
+        updateQueueControls()
         scheduleAutoHide()
+    }
+
+    private fun updateQueueControls() {
+        listOf(R.id.btnPrevious to -1, R.id.btnNext to 1).forEach { (id, delta) ->
+            findViewById<View>(id).apply {
+                isEnabled = PlaybackQueue.adjacent(videoUri, delta) != null
+                alpha = if (isEnabled) 1f else 0.3f
+            }
+        }
     }
 
     /** Platform MediaSession works on Android 8+ without an extra coroutine dependency. */
@@ -343,6 +410,7 @@ class PlayerActivity : Activity() {
                 MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
             setCallback(object : MediaSession.Callback() {
                 override fun onPlay() {
+                    if (player?.playbackState == Player.STATE_ENDED) player?.seekTo(0)
                     player?.play()
                     updateSystemPlaybackState()
                 }
@@ -402,7 +470,7 @@ class PlayerActivity : Activity() {
         subtitleUri?.let { uri ->
             item.setSubtitleConfigurations(
                 listOf(MediaItem.SubtitleConfiguration.Builder(uri)
-                    .setMimeType(subtitleMime(uri))
+                    .setMimeType(subtitleType)
                     .setLanguage("und")
                     .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
                     .build())
@@ -419,9 +487,11 @@ class PlayerActivity : Activity() {
         if (exo.playbackState == Player.STATE_ENDED) return
         val duration = exo.duration
         val pos = exo.currentPosition.coerceAtLeast(0L)
-        val save = if (duration > 0 && pos >= duration - 8000) 0L else pos
+        val save = if (duration > 0 && pos >= duration - 5000) 0L else pos
         prefs.edit().putLong(positionKey(videoUri), save).apply()
-        lastSavedPosition = save
+        // Persistence deliberately treats near-end media as complete, but a live session
+        // must return to its exact position after a picker/background transition.
+        lastSavedPosition = pos
     }
 
     private fun recordWatchHistory(uri: String) {
@@ -445,11 +515,16 @@ class PlayerActivity : Activity() {
         videoTitle = adjacent.title
         playerTitle.text = videoTitle
         updateSystemMetadata()
+        ++subtitleRequest
+        pendingSubtitleUri = null
         subtitleUri = null
+        retainedTracks = null
+        updateQueueControls()
         lastSavedPosition = if (userOptions.resume) savedProgress(videoUri) else 0L
         try {
             player?.apply {
                 trackSelectionParameters = trackSelectionParameters.buildUpon()
+                    .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
                     .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                     .build()
@@ -552,23 +627,46 @@ class PlayerActivity : Activity() {
         if (requestCode == PICK_SUBTITLE && resultCode == RESULT_OK) {
             val uri = data?.data ?: return
             runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-            subtitleUri = uri
-            val exo = player ?: return
-            val pos = exo.currentPosition.coerceAtLeast(0L)
-            val wasPlaying = exo.playWhenReady
-            exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
-                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).build()
-            exo.setMediaItem(buildMediaItem(), pos)
-            exo.prepare()
-            exo.playWhenReady = wasPlaying
-            Toast.makeText(this, "Subtitle attached", Toast.LENGTH_SHORT).show()
+            attachSubtitle(uri)
+        }
+    }
+
+    private fun attachSubtitle(uri: Uri) {
+        pendingSubtitleUri = uri
+        val request = ++subtitleRequest
+        val currentVideo = videoUri
+        subtitleExecutor.execute {
+            val mime = subtitleMime(uri)
+            handler.post {
+                if (isDestroyed || request != subtitleRequest || currentVideo != videoUri) return@post
+                subtitleUri = uri
+                pendingSubtitleUri = null
+                subtitleType = mime
+                // A document picker can stop/release the activity's player. Retain
+                // selection for onStart even when no ExoPlayer currently exists.
+                retainedTracks = retainedTracks?.buildUpon()
+                    ?.clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                    ?.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)?.build()
+                player?.let { exo ->
+                    val position = exo.currentPosition.coerceAtLeast(0L)
+                    val playing = exo.playWhenReady
+                    exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).build()
+                    exo.setMediaItem(buildMediaItem(), position)
+                    exo.prepare()
+                    exo.playWhenReady = playing
+                }
+                Toast.makeText(this, "Subtitle attached", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
     private fun showMoreOptions() {
         handler.removeCallbacks(hideControlsTask)
+        optionsDialog?.dismiss()
         val dialog = Dialog(this)
+        optionsDialog = dialog
         dialog.setContentView(R.layout.orbit_pro_sheet)
         dialog.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
@@ -583,6 +681,10 @@ class PlayerActivity : Activity() {
                 work()
             }
         }
+        dialog.findViewById<TextView>(R.id.gestureHelp).text =
+            "Swipe to seek  •  Double tap ±${userOptions.seekSeconds}s  •  Hold for 2×"
+        action(R.id.actionSpeed) { showSpeedChooser() }
+        action(R.id.actionLock) { setTouchLocked(true) }
         action(R.id.actionTracks) { showTrackChooser() }
         action(R.id.actionInformation) { showVideoInfo() }
         action(R.id.actionSleep) { showSleepTimer() }
@@ -596,8 +698,9 @@ class PlayerActivity : Activity() {
             userOptions.repeat = repeatOne
             notifyGesture(if (repeatOne) "Repeat on" else "Repeat off")
         }
+        dialog.findViewById<View>(R.id.actionPip).visibility = if (supportsPip()) View.VISIBLE else View.GONE
         action(R.id.actionPip) { startPictureInPicture() }
-        dialog.setOnDismissListener { scheduleAutoHide() }
+        dialog.setOnDismissListener { optionsDialog = null; scheduleAutoHide() }
         dialog.show()
         // Android resets the dialog window on show() on some API levels.
         dialog.window?.apply {
@@ -655,10 +758,13 @@ class PlayerActivity : Activity() {
                 sleepTimerRunnable?.let { handler.removeCallbacks(it) }
                 sleepTimerRunnable = null
                 sleepTimerMinutes = values[which]
+                sleepDeadline = if (sleepTimerMinutes > 0) android.os.SystemClock.elapsedRealtime() + sleepTimerMinutes * 60_000L else 0
                 if (sleepTimerMinutes > 0) {
                     val task = Runnable {
+                        savedPlayWhenReady = false
                         player?.pause()
                         sleepTimerMinutes = 0
+                        sleepDeadline = 0
                         sleepTimerRunnable = null
                         showControls()
                         notifyGesture("Sleep timer finished")
@@ -669,6 +775,28 @@ class PlayerActivity : Activity() {
                 notifyGesture(if (sleepTimerMinutes > 0) "Timer: $sleepTimerMinutes min" else "Sleep timer off")
                 dialog.dismiss()
             }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun restoreSleepTimer() {
+        if (sleepDeadline <= 0) return
+        val remaining = sleepDeadline - android.os.SystemClock.elapsedRealtime()
+        if (remaining <= 0) {
+            savedPlayWhenReady = false
+            sleepDeadline = 0
+            return
+        }
+        sleepTimerMinutes = ((remaining + 59_999) / 60_000).toInt()
+        val task = Runnable {
+            savedPlayWhenReady = false
+            player?.pause()
+            sleepDeadline = 0
+            sleepTimerMinutes = 0
+            sleepTimerRunnable = null
+            showControls()
+            notifyGesture("Sleep timer finished")
+        }
+        sleepTimerRunnable = task
+        handler.postDelayed(task, remaining)
     }
 
     private fun seekRelative(delta: Long) {
@@ -685,6 +813,13 @@ class PlayerActivity : Activity() {
         val layer = findViewById<FrameLayout>(R.id.gestureLayer)
         val zone = PlayerGestureZone(
             this,
+            onGestureStarted = {
+                volumeLevel = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat()
+                val current = window.attributes.screenBrightness
+                brightness = if (current >= 0) current else runCatching {
+                    android.provider.Settings.System.getInt(contentResolver, android.provider.Settings.System.SCREEN_BRIGHTNESS) / 255f
+                }.getOrDefault(0.5f)
+            },
             onTap = {
                 if (BuildConfig.DEBUG) android.util.Log.i("OrbitPlayerQA", "TOUCH_SINGLE_TAP")
                 if (touchLocked) showUnlockButton() else toggleControls()
@@ -702,8 +837,8 @@ class PlayerActivity : Activity() {
                 if (!touchLocked) {
                     if (right && userOptions.gestureVolume) {
                         val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-                        val current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-                        val next = (current + delta * max).roundToInt().coerceIn(0, max)
+                        volumeLevel = (volumeLevel + delta * max).coerceIn(0f, max.toFloat())
+                        val next = volumeLevel.roundToInt()
                         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, next, 0)
                         val percent = (100f * next / max).roundToInt()
                         showGestureHud("Volume  $percent%", percent)
@@ -796,14 +931,17 @@ class PlayerActivity : Activity() {
 
     private fun togglePlayPause() {
         val exo = player ?: return
-        if (exo.isPlaying) exo.pause() else exo.play()
+        if (exo.playbackState == Player.STATE_ENDED) {
+            exo.seekTo(0)
+            exo.play()
+        } else if (exo.playWhenReady) exo.pause() else exo.play()
         updatePlayPauseButton()
         showControls()
     }
 
     private fun updatePlayPauseButton() {
         if (!::playPauseButton.isInitialized) return
-        val isPlaying = player?.isPlaying == true
+        val isPlaying = player?.let { it.playWhenReady && it.playbackState != Player.STATE_ENDED } == true
         playPauseButton.setImageResource(if (isPlaying) R.drawable.orbit_ic_pause else R.drawable.orbit_ic_play)
         playPauseButton.contentDescription = if (isPlaying) "Pause video" else "Play video"
     }
@@ -852,6 +990,7 @@ class PlayerActivity : Activity() {
     }
 
     private fun showControls() {
+        if (isInPictureInPictureMode) { hideControls(); return }
         if (touchLocked) { showUnlockButton(); return }
         controlsVisible = true
         unlockButton.visibility = View.GONE
@@ -872,6 +1011,7 @@ class PlayerActivity : Activity() {
 
     private fun scheduleAutoHide() {
         handler.removeCallbacks(hideControlsTask)
+        if ((getSystemService(ACCESSIBILITY_SERVICE) as android.view.accessibility.AccessibilityManager).isTouchExplorationEnabled) return
         if (controlsVisible && !touchLocked && !userSeeking)
             handler.postDelayed(hideControlsTask,
                 (if (player?.isPlaying == true) userOptions.controlsTimeout
@@ -906,14 +1046,15 @@ class PlayerActivity : Activity() {
     }
 
     private fun rotateVideo() {
-        requestedOrientation = if (requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE)
-            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        requestedOrientation = if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         showControls()
     }
 
     /** Compact landscape keeps video unobstructed; advanced actions remain in the sheet. */
     private fun adjustForScreenSize() {
         val compact = resources.configuration.screenHeightDp < 510
+        findViewById<View>(R.id.btnPip).visibility = if (supportsPip()) View.VISIBLE else View.GONE
         findViewById<View>(R.id.quickActions).visibility = if (compact) View.GONE else View.VISIBLE
         topBar.layoutParams = topBar.layoutParams.apply {
             height = ((if (compact) 54 else 76) * resources.displayMetrics.density).toInt()
@@ -925,14 +1066,35 @@ class PlayerActivity : Activity() {
         }
         val timeline = findViewById<View>(R.id.timelineRow)
         timeline.layoutParams = timeline.layoutParams.apply {
-            height = ((if (compact) 36 else 42) * resources.displayMetrics.density).toInt()
+            height = (48 * resources.displayMetrics.density).toInt()
         }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         adjustForScreenSize()
+        findViewById<View>(R.id.playerRoot).requestApplyInsets()
         if (!touchLocked) showControls()
+    }
+
+    private fun applyPlayerInsets() {
+        val density = resources.displayMetrics.density
+        findViewById<View>(R.id.playerRoot).setOnApplyWindowInsetsListener { _, insets ->
+            val bars = if (Build.VERSION.SDK_INT >= 30)
+                insets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.displayCutout())
+            else null
+            val left = if (Build.VERSION.SDK_INT >= 30) bars!!.left else insets.stableInsetLeft
+            val right = if (Build.VERSION.SDK_INT >= 30) bars!!.right else insets.stableInsetRight
+            val top = if (Build.VERSION.SDK_INT >= 30) bars!!.top else insets.stableInsetTop
+            val bottom = if (Build.VERSION.SDK_INT >= 30) bars!!.bottom else insets.stableInsetBottom
+            topBar.setPadding(left + (12 * density).toInt(), top, right + (14 * density).toInt(), 0)
+            topBar.layoutParams = topBar.layoutParams.apply {
+                height = ((if (resources.configuration.screenHeightDp < 510) 54 else 76) * density).toInt() + top
+            }
+            bottomControls.setPadding(left + (16 * density).toInt(), (24 * density).toInt(),
+                right + (16 * density).toInt(), bottom + (13 * density).toInt())
+            insets
+        }
     }
 
     private fun enableImmersiveMode() {
@@ -949,8 +1111,10 @@ class PlayerActivity : Activity() {
         if (hasFocus) enableImmersiveMode()
     }
 
+    private fun supportsPip() = packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)
+
     private fun startPictureInPicture() {
-        if (Build.VERSION.SDK_INT < 26) return
+        if (!supportsPip()) { notifyGesture("PiP not supported on this device"); return }
         val videoSize = player?.videoSize
         val width = videoSize?.width?.takeIf { it > 0 } ?: 16
         val height = videoSize?.height?.takeIf { it > 0 } ?: 9
@@ -969,8 +1133,13 @@ class PlayerActivity : Activity() {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         findViewById<View>(R.id.gestureLayer).visibility =
             if (isInPictureInPictureMode) View.GONE else View.VISIBLE
-        if (isInPictureInPictureMode) hideControls()
+        if (isInPictureInPictureMode) { hideControls(); gestureHud.visibility = View.GONE }
         else { enableImmersiveMode(); showControls() }
+    }
+
+    @Deprecated("Touch lock also guards the system back action")
+    override fun onBackPressed() {
+        if (touchLocked) showUnlockButton() else super.onBackPressed()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -981,19 +1150,24 @@ class PlayerActivity : Activity() {
         outState.putString("uri", videoUri)
         outState.putString("title", videoTitle)
         outState.putString("subtitle_uri", subtitleUri?.toString())
+        outState.putString("subtitle_type", subtitleType)
+        outState.putString("pending_subtitle_uri", pendingSubtitleUri?.toString())
+        outState.putBundle("track_parameters", (player?.trackSelectionParameters ?: retainedTracks)?.toBundle())
+        outState.putBoolean("touch_locked", touchLocked)
+        outState.putLong("sleep_deadline", sleepDeadline)
         outState.putBoolean("show_remaining_time", showRemainingTime)
         super.onSaveInstanceState(outState)
     }
 
     override fun onStop() {
-        if (Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode) {
-            super.onStop()
-            return
-        }
+        optionsDialog?.dismiss()
+        // Visible PiP is paused, not stopped. Once stopped (dismissed/hidden),
+        // release ownership even if Android still reports the old PiP mode.
         handler.removeCallbacks(progressSaver)
         handler.removeCallbacks(progressUpdater)
         handler.removeCallbacks(hideControlsTask)
         savedPlayWhenReady = player?.playWhenReady ?: savedPlayWhenReady
+        retainedTracks = player?.trackSelectionParameters ?: retainedTracks
         savePosition()
         holdSpeedRestore?.let { player?.setPlaybackSpeed(it) }
         holdSpeedRestore = null
@@ -1013,6 +1187,7 @@ class PlayerActivity : Activity() {
         playerView.player = null
         player?.release()
         player = null
+        subtitleExecutor.shutdownNow()
         sleepTimerRunnable?.let { handler.removeCallbacks(it) }
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()

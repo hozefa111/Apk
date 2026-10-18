@@ -8,3 +8,10 @@ local.properties
 *.aab
 *.jks
 *.keystore
+
+.kotlin/
+/qa/
+smoke.mp4
+
+__pycache__/
+*.pyc

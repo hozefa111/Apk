@@ -14,7 +14,7 @@ jobs:
   smoke:
     name: Native playback / Android API ${{ matrix.api }}
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 55
     strategy:
       fail-fast: false
       matrix:
@@ -33,7 +33,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - run: gradle --no-daemon :app:assembleDebug
+      - run: gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
       - name: Create playable H264/AAC test media
         run: |
           sudo apt-get update -qq
@@ -43,6 +43,8 @@ jobs:
             -f lavfi -i sine=frequency=440:sample_rate=44100 \
             -t 28 -c:v libx264 -preset ultrafast -profile:v baseline \
             -pix_fmt yuv420p -c:a aac -b:a 64k -movflags +faststart -y smoke.mp4
+      - name: Generate compatibility fixtures
+        run: python3 scripts/create_media_fixtures.py qa/media
       - name: Check KVM acceleration
         run: |
           if [ -e /dev/kvm ]; then sudo chmod a+rw /dev/kvm; fi
@@ -59,11 +61,18 @@ jobs:
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -camera-back none -gpu swiftshader_indirect
           disk-size: 4096M
           disable-animations: true
-          script: bash scripts/run_emulator_smoke.sh
+          script: |
+            bash scripts/run_emulator_smoke.sh
+            python3 scripts/run_permission_smoke.py
+            gradle --no-daemon :app:connectedDebugAndroidTest
+            python3 scripts/run_media_matrix.py qa/media
       - name: Upload emulator QA diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: emulator-playback-smoke-logs-api-${{ matrix.api }}
-          path: qa/
+          path: |
+            qa/
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
           if-no-files-found: ignore

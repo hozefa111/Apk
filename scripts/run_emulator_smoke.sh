@@ -117,6 +117,8 @@ grep -F "$PACKAGE/.PlayerActivity" qa/gallery-player-activity.txt >/dev/null || 
   echo "Tapping a gallery thumbnail did not open PlayerActivity"; exit 1;
 }
 
+# Clear the first session's READY evidence before evaluating the external route.
+adb logcat -c || true
 # Exercise exported ACTION_VIEW route (required by Android 13+ intent-filter enforcement).
 adb shell am start -W -a android.intent.action.VIEW -c android.intent.category.DEFAULT -d "$URI" -t video/mp4 -n "$PACKAGE/.PlayerActivity" | tee qa/player-launch.txt
 sleep 2
