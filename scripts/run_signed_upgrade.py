@@ -12,9 +12,9 @@ import xml.etree.ElementTree as ET
 package='com.orbitplayer.app'
 report=Path('qa/upgrade')
 report.mkdir(parents=True,exist_ok=True)
-def adb(*args,raw=False,stdin=None):
+def adb(*args,raw=False,stdin=None,check=True):
     r=subprocess.run(['adb',*args],input=stdin,capture_output=True,timeout=120)
-    if r.returncode:raise RuntimeError(f'adb {args!r}: {r.stderr.decode(errors="replace")} {r.stdout.decode(errors="replace")}')
+    if check and r.returncode:raise RuntimeError(f'adb {args!r}: {r.stderr.decode(errors="replace")} {r.stdout.decode(errors="replace")}')
     return r.stdout if raw else r.stdout.decode()
 def prefs(name):
     return adb('shell','cat',f'/data/user/0/{package}/shared_prefs/{name}.xml')
@@ -72,13 +72,13 @@ assert 'versionCode=14' in metadata and 'versionName=0.3.1' in metadata
 after={n:values(prefs(n)) for n in before}
 assert before==after,'Install changed legacy collections/progress/history'
 # Launch the upgraded optimized build so preferences are actually consumed.
-adb('logcat','-c')
+adb('logcat','-c',check=False)
 launch()
 time.sleep(5)
-log=adb('logcat','-d','-v','brief')
-assert 'FATAL EXCEPTION' not in log, 'Optimized candidate crashed'
 pid=adb('shell','pidof',package).strip()
 assert pid,'Candidate exited'
+log=adb('logcat','-d','-v','brief',f'--pid={pid}')
+assert 'FATAL EXCEPTION' not in log, 'Optimized candidate crashed'
 (report/'optimized-playback.txt').write_text(log)
 (report/'optimized-playback.png').write_bytes(adb('exec-out','screencap','-p',raw=True))
 # Saved progress must advance beyond the position written by stable playback.
