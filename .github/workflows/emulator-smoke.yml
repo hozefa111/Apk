@@ -61,11 +61,7 @@ jobs:
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -camera-back none -gpu swiftshader_indirect
           disk-size: 4096M
           disable-animations: true
-          script: |
-            bash scripts/run_emulator_smoke.sh
-            python3 scripts/run_permission_smoke.py
-            gradle --no-daemon :app:connectedDebugAndroidTest
-            python3 scripts/run_media_matrix.py qa/media
+          script: bash scripts/run_full_emulator_qa.sh
       - name: Upload emulator QA diagnostics
         if: always()
         uses: actions/upload-artifact@v4

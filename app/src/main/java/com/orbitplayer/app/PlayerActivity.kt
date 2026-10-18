@@ -317,7 +317,7 @@ class PlayerActivity : Activity() {
                 if (BuildConfig.DEBUG) android.util.Log.e("OrbitPlayerQA", "PLAYER_ERROR ${error.errorCodeName}", error)
                 if (isFinishing || isDestroyed) return
                 val failedUri = videoUri
-                if (!repeatOne && PlaybackQueue.autoAdvance &&
+                if (subtitleUri == null && !repeatOne && PlaybackQueue.autoAdvance &&
                     PlaybackQueue.adjacent(failedUri, 1) != null) {
                     Toast.makeText(this@PlayerActivity,
                         "Unable to play ${videoTitle.take(50)}. Trying next video.",
@@ -330,14 +330,30 @@ class PlayerActivity : Activity() {
                 AlertDialog.Builder(this@PlayerActivity)
                     .setTitle("Unable to play this video")
                     .setMessage("Decoder or file problem: ${error.errorCodeName}.\n\n" +
-                        "Orbit Pro uses the decoders available on your device. This codec might require an additional decoder.")
+                        "Check file access and subtitle format. Orbit Pro uses the decoders available on your device; some codecs are unsupported.")
                     .setPositiveButton("Retry") { _, _ ->
                         exo.prepare()
                         exo.playWhenReady = true
                     }
                     .setNeutralButton("Close video") { _, _ -> finish() }
-                    .setNegativeButton(if (PlaybackQueue.adjacent(videoUri, 1) != null) "Next video" else "Dismiss") { _, _ ->
-                        if (PlaybackQueue.adjacent(videoUri, 1) != null) switchQueue(1)
+                    .setNegativeButton(when {
+                        subtitleUri != null -> "Without subtitles"
+                        PlaybackQueue.adjacent(videoUri, 1) != null -> "Next video"
+                        else -> "Dismiss"
+                    }) { _, _ ->
+                        if (subtitleUri != null) {
+                            ++subtitleRequest
+                            pendingSubtitleUri = null
+                            subtitleUri = null
+                            selectExternalSubtitle = false
+                            val position = exo.currentPosition.coerceAtLeast(0L)
+                            val playing = exo.playWhenReady
+                            exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+                                .clearOverridesOfType(C.TRACK_TYPE_TEXT).setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
+                            exo.setMediaSource(buildMediaSource(), position)
+                            exo.prepare()
+                            exo.playWhenReady = playing
+                        } else if (PlaybackQueue.adjacent(videoUri, 1) != null) switchQueue(1)
                     }
                     .show()
             }
@@ -422,7 +438,7 @@ class PlayerActivity : Activity() {
             }
         })
         try {
-            exo.setMediaItem(buildMediaItem(), lastSavedPosition.coerceAtLeast(0L))
+            exo.setMediaSource(buildMediaSource(), lastSavedPosition.coerceAtLeast(0L))
             exo.prepare()
             exo.playWhenReady = savedPlayWhenReady ?: userOptions.autoplay
         } catch (ex: Exception) {
@@ -470,19 +486,7 @@ class PlayerActivity : Activity() {
                     player?.seekTo(pos.coerceAtLeast(0L))
                     updateSystemPlaybackState()
                 }
-                private fun releasePlayer() {
-        val closing = player
-        // Invalidate the owner before release(), which can synchronously dispatch
-        // timeout/state callbacks and must not reopen UI or advance a stopped queue.
-        player = null
-        playerView.player = null
-        mediaSession?.release()
-        mediaSession = null
-        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        closing?.release()
-    }
-
-    override fun onStop() {
+                override fun onStop() {
                     player?.pause()
                     updateSystemPlaybackState()
                 }
@@ -525,19 +529,10 @@ class PlayerActivity : Activity() {
         val item = MediaItem.Builder()
             .setUri(Uri.parse(videoUri))
             .setMediaMetadata(MediaMetadata.Builder().setTitle(videoTitle).build())
-        subtitleUri?.let { uri ->
-            item.setSubtitleConfigurations(
-                listOf(MediaItem.SubtitleConfiguration.Builder(uri)
-                    .setMimeType(subtitleType)
-                    .setId("orbit_external_subtitle")
-                    .setLabel("External subtitles")
-                    .setLanguage("und")
-                    .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-                    .build())
-            )
-        }
         return item.build()
     }
+
+    private fun buildMediaSource() = LocalMediaSource.create(this, buildMediaItem(), subtitleUri, subtitleType)
 
     private fun positionKey(uri: String) = "position_${uri.hashCode()}"
     private fun savedProgress(uri: String) = prefs.getLong(positionKey(uri), 0L)
@@ -589,7 +584,7 @@ class PlayerActivity : Activity() {
                     .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                     .build()
-                setMediaItem(buildMediaItem(), lastSavedPosition)
+                setMediaSource(buildMediaSource(), lastSavedPosition)
                 prepare()
                 playWhenReady = true
             }
@@ -718,7 +713,7 @@ class PlayerActivity : Activity() {
                     exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
                         .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                         .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).build()
-                    exo.setMediaItem(buildMediaItem(), position)
+                    exo.setMediaSource(buildMediaSource(), position)
                     exo.prepare()
                     exo.playWhenReady = playing
                 }
@@ -1223,6 +1218,18 @@ class PlayerActivity : Activity() {
         outState.putLong("sleep_deadline", sleepDeadline)
         outState.putBoolean("show_remaining_time", showRemainingTime)
         super.onSaveInstanceState(outState)
+    }
+
+    private fun releasePlayer() {
+        val closing = player
+        // Invalidate the owner before release(), which can synchronously dispatch
+        // timeout/state callbacks and must not reopen UI or advance a stopped queue.
+        player = null
+        playerView.player = null
+        mediaSession?.release()
+        mediaSession = null
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        closing?.release()
     }
 
     override fun onStop() {
