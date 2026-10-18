@@ -77,6 +77,28 @@ public class FirebaseGatewayEmulatorTest {
         gateway.refresh();await(()->live.get()&&!busy.get());ready(()->gateway.deleteDocument("rounds",id,"Deleted test round"));await(()->rounds.get().stream().noneMatch(r->id.equals(r.get("id")))&&live.get()&&!busy.get());
         ready(()->gateway.restoreBackup(archive.get()));await(()->rounds.get().stream().anyMatch(r->id.equals(r.get("id")))&&live.get());
     }
+    @Test public void sdkCodecPreservesAllArchiveTypesAndLiteralFieldNames()throws Exception{
+        com.google.firebase.firestore.FirebaseFirestore db=com.google.firebase.firestore.FirebaseFirestore.getInstance(com.google.firebase.FirebaseApp.getInstance("three-patti-native"));
+        Map<String,Object> values=FirebaseGateway.map("stamp",new com.google.firebase.Timestamp(1700000000,123456789),"bytes",com.google.firebase.firestore.Blob.fromBytes(new byte[]{0,1,-1}),"point",new com.google.firebase.firestore.GeoPoint(12.4,-77.2),"reference",db.document("players/a"),"null",null,"integer",Long.MAX_VALUE,"double",1.5d,"nan",Double.NaN,"infinity",Double.POSITIVE_INFINITY,"literal.dot",FirebaseGateway.map("nested",Arrays.asList(true,"value",4L)));
+        JSONObject fields=SdkDocuments.fields(values);
+        assertTrue(BulkWritePlan.sameJson(fields,SdkDocuments.fields(SdkDocuments.decode(fields,db))));
+        CountDownLatch saved=new CountDownLatch(1);
+        ready(()->gateway.patchDocument("players","a",FirebaseGateway.map("literal.dot","literal value"),"Literal edit",saved::countDown));
+        completed(saved,"literal field edit");
+        JSONObject actual=request("GET","/players/a",null).getJSONObject("fields");
+        assertEquals("literal value",actual.getJSONObject("literal.dot").getString("stringValue"));
+        assertFalse(actual.has("literal"));
+    }
+    @Test public void externalEditArrivesDirectlyAndOldDialogCannotOverwriteIt()throws Exception{
+        String oldVersion=String.valueOf(players.get().stream().filter(p->"a".equals(p.get("id"))).findFirst().get().get("_updateTime"));
+        JSONObject fields=request("GET","/players/a",null).getJSONObject("fields");
+        fields.put("externalMarker",new JSONObject().put("stringValue","other-client"));
+        request("PATCH","/players/a",new JSONObject().put("fields",fields));
+        await(()->live.get()&&players.get().stream().anyMatch(p->"other-client".equals(p.get("externalMarker"))));notice.set("");
+        ready(()->gateway.patchDocument("players","a",FirebaseGateway.map("externalMarker","stale-dialog"),"Must not save",oldVersion,null));
+        await(()->notice.get().startsWith("Not saved:"));
+        assertEquals("other-client",request("GET","/players/a",null).getJSONObject("fields").getJSONObject("externalMarker").getString("stringValue"));
+    }
     @Test public void staleVersionCannotOverwriteNewerEdit()throws Exception{
         Map<String,Object> player=players.get().stream().filter(p->"a".equals(p.get("id"))).findFirst().get();String oldVersion=String.valueOf(player.get("_updateTime"));
         CountDownLatch first=new CountDownLatch(1);
@@ -137,7 +159,10 @@ public class FirebaseGatewayEmulatorTest {
         Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
         android.util.AtomicFile journal=new android.util.AtomicFile(new java.io.File(context.getFilesDir(),"pending-data-operation.json"));
         java.io.FileOutputStream out=journal.startWrite();out.write(plan.bytes());out.getFD().sync();journal.finishWrite(out);
-        request("POST",":commit",new JSONObject().put("writes",plan.batch()));
+        // Simulate an already committed batch through emulator REST admin setup only.
+        JSONArray committed=plan.batch();
+        for(int i=0;i<committed.length();i++)committed.getJSONObject(i).put("currentDocument",new JSONObject().put("exists",true));
+        request("POST",":commit",new JSONObject().put("writes",committed));
         InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.stop());startGateway();assertTrue(gateway.hasPendingBulkOperation());
         notice.set("");ready(()->gateway.patchDocument("players","a",FirebaseGateway.map("blockedBulkWrite",true),"Must not save"));
         await(()->notice.get().contains("interrupted data operation"));

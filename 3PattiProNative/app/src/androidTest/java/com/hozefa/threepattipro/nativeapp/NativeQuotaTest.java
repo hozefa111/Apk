@@ -3,7 +3,7 @@ package com.hozefa.threepattipro.nativeapp;
 import android.content.Context;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.platform.app.InstrumentationRegistry;
-import okhttp3.*;
+import com.google.firebase.firestore.*;
 import org.junit.*;
 import java.nio.file.*;
 import java.util.*;
@@ -16,57 +16,52 @@ import static androidx.test.espresso.action.ViewActions.*;
 import static androidx.test.espresso.matcher.ViewMatchers.*;
 import static androidx.test.espresso.assertion.ViewAssertions.*;
 
-/** Synthetic HTTP failures against the demo project only. No production credentials or writes. */
+/** Synthetic SDK listener limits against the demo project only. No production credentials. */
 public class NativeQuotaTest {
     private Context context;
     private byte[] savedCache;
     private Path cache;
     private FirebaseGateway gateway;
     private final AtomicBoolean live=new AtomicBoolean(),quota=new AtomicBoolean();
-    private final AtomicInteger requests=new AtomicInteger();
     private final AtomicReference<List<Map<String,Object>>> players=new AtomicReference<>(Collections.emptyList());
-    private void await(BooleanSupplier condition)throws Exception{long end=System.currentTimeMillis()+15000;while(System.currentTimeMillis()<end){if(condition.getAsBoolean())return;Thread.sleep(100);}fail("Expected quota/recovery state did not arrive: live="+live.get()+", quota="+quota.get()+", REST requests="+requests.get());}
+    private void await(BooleanSupplier condition)throws Exception{long end=System.currentTimeMillis()+15000;while(System.currentTimeMillis()<end){if(condition.getAsBoolean())return;Thread.sleep(100);}fail("Expected quota/recovery state did not arrive: live="+live.get()+", quota="+quota.get()+"");}
     private FirebaseGateway.Listener listener(){return new FirebaseGateway.Listener(){
         public void dataUpdated(List<Map<String,Object>> p,List<Map<String,Object>> r,List<Map<String,Object>> s){players.set(p);}
         public void authChanged(boolean a){}public void notice(String m){}public void busy(boolean b){}
         public void syncState(boolean online){live.set(online);}
         public void syncProblem(String message,long retryAt,boolean limit){quota.set(limit);}
     };}
-    private void start(OkHttpClient client,AtomicLong clock)throws Exception{
+    private void start(AtomicLong clock)throws Exception{
         live.set(false);quota.set(false);
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{gateway=new FirebaseGateway(context,listener(),"demo-key",client,clock::get);gateway.start();});
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{gateway=new FirebaseGateway(context,listener(),"demo-key",clock::get);gateway.start();});
     }
     private void stop(){if(gateway!=null){InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.stop());gateway=null;}}
     @Before public void setup()throws Exception{
         Assume.assumeTrue(BuildConfig.USE_EMULATORS);context=InstrumentationRegistry.getInstrumentation().getTargetContext();assertTrue(context.getPackageName().endsWith(".sandbox"));
-        context.getSharedPreferences("firebase_sync_retry",0).edit().clear().commit();
+        context.getSharedPreferences("firebase_sdk_retry_v1",0).edit().clear().commit();
         cache=context.getFilesDir().toPath().resolve("3patti_snapshot.json");savedCache=Files.isRegularFile(cache)?Files.readAllBytes(cache):null;
     }
-    @After public void cleanup()throws Exception{stop();if(context!=null){context.getSharedPreferences("firebase_sync_retry",0).edit().clear().commit();if(savedCache==null)Files.deleteIfExists(cache);else Files.write(cache,savedCache);}}
+    @After public void cleanup()throws Exception{stop();if(context!=null){context.getSharedPreferences("firebase_sdk_retry_v1",0).edit().clear().commit();if(savedCache==null)Files.deleteIfExists(cache);else Files.write(cache,savedCache);}}
     @Test public void quotaCooldownSurvivesRestartAndRefreshThenRecoversWithoutWriting()throws Exception{
         Files.write(cache,"{\"players\":[{\"id\":\"cached-only\",\"name\":\"Cached synthetic player\",\"active\":true}],\"rounds\":[],\"sessions\":[],\"savedAt\":1}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        AtomicLong clock=new AtomicLong(System.currentTimeMillis());AtomicBoolean limited=new AtomicBoolean(true);
-        OkHttpClient client=new OkHttpClient.Builder().addInterceptor(chain->{
-            assertTrue(chain.request().url().encodedPath().contains("/projects/demo-three-patti/"));requests.incrementAndGet();
-            if(limited.get())return new Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(429).message("Too Many Requests").header("Retry-After","120").body(ResponseBody.create("Quota exceeded",MediaType.get("text/plain"))).build();
-            return chain.proceed(chain.request());
-        }).build();
-        start(client,clock);await(()->quota.get()&&players.get().stream().anyMatch(p->"cached-only".equals(p.get("id"))));assertFalse(live.get());Thread.sleep(600);
-        int count=requests.get();assertTrue(count>=1&&count<=3);
-        for(int i=0;i<20;i++){gateway.refresh();InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{gateway.setForeground(false);gateway.setForeground(true);});}
-        Thread.sleep(600);assertEquals("Refresh/resume cannot bypass quota",count,requests.get());
+        AtomicLong clock=new AtomicLong(System.currentTimeMillis());
+        start(clock);await(live::get);
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.onListenFailure(new FirebaseFirestoreException("Synthetic SDK limit",FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED)));
+        await(quota::get);assertFalse(live.get());Thread.sleep(300);
+        long deadline=context.getSharedPreferences("firebase_sdk_retry_v1",0).getLong("quota_until",0);assertTrue(deadline>clock.get());
+        for(int i=0;i<20;i++){assertFalse(gateway.refresh());InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{gateway.setForeground(false);gateway.setForeground(true);});}
+        assertEquals(deadline,context.getSharedPreferences("firebase_sdk_retry_v1",0).getLong("quota_until",0));
         gateway.signIn("tester@example.test","test-password-123");await(gateway::loggedIn);
-        stop();start(client,clock);await(()->quota.get());await(gateway::loggedIn);Thread.sleep(600);assertEquals("Restart must retain cooldown",count,requests.get());
+        stop();start(clock);await(quota::get);await(gateway::loggedIn);assertFalse(live.get());
         AtomicBoolean wrote=new AtomicBoolean();CountDownLatch rejected=new CountDownLatch(1);gateway.write("Must never save",token->wrote.set(true),()->{},rejected::countDown);assertTrue(rejected.await(5,TimeUnit.SECONDS));assertFalse(wrote.get());
-        limited.set(false);clock.addAndGet(121000);assertTrue(gateway.refresh());await(()->live.get()&&!quota.get());assertTrue(requests.get()>count);
+        clock.addAndGet(121000);assertTrue(gateway.refresh());await(()->live.get()&&!quota.get());
         assertFalse(players.get().stream().anyMatch(p->"cached-only".equals(p.get("id"))));
     }
-    @Test public void healthyRealtimeConnectionDoesNotRedownloadEveryMinute()throws Exception{
-        AtomicLong clock=new AtomicLong(System.currentTimeMillis());OkHttpClient client=new OkHttpClient.Builder().addInterceptor(chain->{requests.incrementAndGet();return chain.proceed(chain.request());}).build();
-        start(client,clock);await(live::get);long until=System.currentTimeMillis()+15000,stableAt=System.currentTimeMillis();int previous=requests.get();
-        while(System.currentTimeMillis()<until&&System.currentTimeMillis()-stableAt<2000){Thread.sleep(100);if(previous!=requests.get()||!live.get()){previous=requests.get();stableAt=System.currentTimeMillis();}}
-        assertTrue(live.get());int count=requests.get();
-        Thread.sleep(63000);assertTrue(live.get());assertEquals("No periodic full-table REST scan while listeners are healthy",count,requests.get());
+    @Test public void oldRestCooldownDoesNotBlockHealthySdkAndNoMinutePolling()throws Exception{
+        context.getSharedPreferences("firebase_sync_retry",0).edit().putLong("quota_until",System.currentTimeMillis()+3600000).putInt("quota_failures",6).commit();
+        start(new AtomicLong(System.currentTimeMillis()));await(live::get);
+        assertEquals(0,context.getSharedPreferences("firebase_sync_retry",0).getAll().size());
+        Thread.sleep(63000);assertTrue(live.get());assertFalse(quota.get());
     }
     @Test public void quotaScreenReplacesEndlessLoadingAndKeepsCachedTableReadable()throws Exception{
         try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){

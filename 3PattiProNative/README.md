@@ -67,7 +67,7 @@ confirmed batch. Large operations are recoverable, not globally atomic: interrup
 can leave completed batches in place. Settings offers retry or an explicit stop;
 unrelated writes are blocked until this is resolved. Retry reconciles ambiguous
 commits without overwriting newer records and requires the initiating account.
-All pages are read; repeated server page tokens fail closed. Portable imports and
+Complete SDK query snapshots are used; there is no REST pagination. Portable imports and
 recovery snapshots remain limited to 16 MB; export validation prevents creation of
 an unrestorable archive. Archives larger than that limit must be split before import.
 
@@ -83,6 +83,6 @@ Run `gradle verifyReleaseSigning` before a release. The keystore must match the
 installed APK for update-in-place. Debug APKs are verification builds and are not
 uploaded as final releases by the native build workflow.
 
-## Quota-safe sync (2.3.2)
+## Direct SDK sync (2.3.3)
 
-See [QUOTA_SYNC.md](QUOTA_SYNC.md) for the HTTP 429 fix, read reduction, persistent retry cooldown and offline/recovery behavior. This update cannot reset an exhausted Firebase project quota.
+See [QUOTA_SYNC.md](QUOTA_SYNC.md) for direct realtime SDK snapshots, transaction conflict checks, legacy cooldown migration and offline/recovery behavior. An HTTP 429 alone does not identify the exhausted quota.

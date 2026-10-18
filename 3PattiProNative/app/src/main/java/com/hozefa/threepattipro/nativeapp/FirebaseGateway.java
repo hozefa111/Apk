@@ -4,7 +4,7 @@ import android.content.Context;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.FirebaseOptions;
 import com.google.firebase.auth.FirebaseAuth;
-import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.*;
 import com.google.firebase.firestore.ListenerRegistration;
 import com.google.firebase.firestore.MetadataChanges;
 import com.google.android.gms.tasks.Tasks;
@@ -13,19 +13,12 @@ import android.os.Looper;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.*;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.MediaType;
-import okhttp3.Response;
 import java.util.concurrent.TimeUnit;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongSupplier;
 import com.google.firebase.firestore.FirebaseFirestoreException;
@@ -51,11 +44,11 @@ public final class FirebaseGateway {
     private final String project = BuildConfig.USE_EMULATORS?"demo-three-patti":"patti-pro-a61d8";
     private final Context context;
     private final Listener listener;
-    private final String apiKey;
+    private final Object snapshotLock=new Object();
+    private final Map<String,QuerySnapshot> liveCollections=new HashMap<>();
+    private int subscriptionGeneration;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private final ExecutorService fetchers = Executors.newFixedThreadPool(3);
     private final Handler ui = new Handler(Looper.getMainLooper());
-    private final OkHttpClient http;
     private final LongSupplier retryClock;
     private final SyncRetryPolicy retry;
     private final android.content.SharedPreferences retryStore;
@@ -84,23 +77,20 @@ public final class FirebaseGateway {
     private volatile String idToken;
     private volatile boolean running;
     private volatile boolean freshSnapshot=false;
-    private boolean loading;
     private final AtomicBoolean writeInFlight=new AtomicBoolean(false);
-    private boolean reloadRequested=false;
     private final Runnable refreshLoop=()->{startSubscriptions();queueLoad(true);};
-    private final String dbRoot;
     private final String documentRoot = "projects/" + project + "/databases/(default)/documents";
 
     public FirebaseGateway(Context c, Listener l, String key) {
-        this(c,l,key,new OkHttpClient.Builder().callTimeout(25,TimeUnit.SECONDS).connectTimeout(14,TimeUnit.SECONDS).readTimeout(14,TimeUnit.SECONDS).build(),System::currentTimeMillis);
+        this(c,l,key,System::currentTimeMillis);
     }
-    FirebaseGateway(Context c,Listener l,String key,OkHttpClient client,LongSupplier clock) {
-        http=client;retryClock=clock;
+    FirebaseGateway(Context c,Listener l,String key,LongSupplier clock) {
+        retryClock=clock;
         context = c.getApplicationContext();
         listener = l;
-        retryStore=context.getSharedPreferences("firebase_sync_retry",Context.MODE_PRIVATE);
+        retryStore=context.getSharedPreferences("firebase_sdk_retry_v1",Context.MODE_PRIVATE);
         retry=new SyncRetryPolicy(retryClock.getAsLong(),retryStore.getLong("quota_until",0),retryStore.getInt("quota_failures",0));
-        apiKey = BuildConfig.USE_EMULATORS?"demo-key":key;
+        String apiKey = BuildConfig.USE_EMULATORS?"demo-key":key;
         FirebaseOptions options=new FirebaseOptions.Builder().setProjectId(project)
                 .setApiKey(apiKey).setApplicationId("1:570573461138:web:4414d0ce87282b91b2f84b").build();
         FirebaseApp firebase;boolean initialized=false;
@@ -114,7 +104,8 @@ public final class FirebaseGateway {
         }
         // Legacy REST refresh tokens are discarded; Firebase Auth owns session persistence.
         context.getSharedPreferences("patti_native_auth",Context.MODE_PRIVATE).edit().clear().apply();
-        dbRoot = (BuildConfig.USE_EMULATORS?"http://10.0.2.2:8080":"https://firestore.googleapis.com")+"/v1/projects/" + project + "/databases/(default)/documents";
+        // Old REST-only cooldowns must not prevent a healthy SDK connection.
+        context.getSharedPreferences("firebase_sync_retry",Context.MODE_PRIVATE).edit().clear().apply();
     }
     public void start() {
         if(running)return;
@@ -124,11 +115,8 @@ public final class FirebaseGateway {
             if(!running)return;
             animationContinuity=false;liveRevision.incrementAndGet();freshSnapshot=false;listener.syncState(false);
             if(state.getCurrentUser()==null){idToken=null;listener.authChanged(false);}
-            else if(retry.remaining(retryClock.getAsLong())>0){
-                // Restoring Firebase Auth is independent of a paused Firestore quota.
-                executor.execute(()->{try{ensureIdToken();}catch(Exception expired){idToken=null;ui.post(()->{if(running)listener.authChanged(false);});}});
-            }
-            ui.removeCallbacks(liveRefresh);ui.postDelayed(liveRefresh,500);
+            else executor.execute(()->{try{ensureIdToken();}catch(Exception expired){idToken=null;ui.post(()->{if(running)listener.authChanged(false);});}});
+            removeSubscriptions();startSubscriptions();scheduleNext();
         };
         auth.addAuthStateListener(authObserver);
         readQueued.set(true);
@@ -137,34 +125,36 @@ public final class FirebaseGateway {
     }
     private void startSubscriptions(){
         if(!running||!foreground||!subscriptions.isEmpty()||retry.remaining(retryClock.getAsLong())>0)return;
+        final int generation=subscriptionGeneration;
         for(String collection:Arrays.asList("players","rounds","sessions")){
             subscriptions.add(firestore.collection(collection).addSnapshotListener(MetadataChanges.INCLUDE,(snapshot,error)->{
-                if(!running)return;
-                if(error!=null){
-                    animationContinuity=false;liveRevision.incrementAndGet();freshSnapshot=false;listener.syncState(false);
-                    if(error.getCode()==FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED)recordQuota(null);
-                    else{retry.unavailable(retryClock.getAsLong());publishProblem("Connection interrupted. Saved data remains available.");ui.post(this::removeSubscriptions);scheduleNext();}
-                    return;
-                }
+                if(!running||generation!=subscriptionGeneration)return;
+                if(error!=null){onListenFailure(error);return;}
                 if(snapshot==null)return;
-                if(snapshot.getMetadata().isFromCache()){
-                    animationContinuity=false;freshSnapshot=false;listener.syncState(false);scheduleNext();return;
-                }
-                // Ignore ordinary metadata acknowledgements. After a cache/offline
-                // transition, verify once on reconnection rather than waiting for polling.
-                if(snapshot.getDocumentChanges().isEmpty()){
-                    if(!freshSnapshot){ui.removeCallbacks(liveRefresh);ui.postDelayed(liveRefresh,500);}
-                    return;
-                }
-                liveRevision.incrementAndGet();freshSnapshot=false;listener.syncState(false);
-                if(!foreground){readAgain.set(true);return;}
-                ui.removeCallbacks(liveRefresh);ui.postDelayed(liveRefresh,500);
+                synchronized(snapshotLock){liveCollections.put(collection,snapshot);liveRevision.incrementAndGet();}
+                // Pending local writes/cache events never enable another mutation.
+                freshSnapshot=false;listener.syncState(false);
+                ui.removeCallbacks(liveRefresh);ui.postDelayed(liveRefresh,150);
             }));
         }
+        scheduleNext();
+    }
+    /** Shared SDK listener error path; package visibility permits emulator-only fault injection. */
+    void onListenFailure(FirebaseFirestoreException error){
+        animationContinuity=false;freshSnapshot=false;listener.syncState(false);
+        if(error.getCode()==FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED){recordQuota(null);return;}
+        retry.unavailable(retryClock.getAsLong());
+        String message=error.getCode()==FirebaseFirestoreException.Code.PERMISSION_DENIED?
+                "Firebase access denied. Check the signed-in account and project rules.":
+                "Connection interrupted ("+error.getCode().name()+"). Saved data remains available.";
+        publishProblem(message);removeSubscriptions();scheduleNext();
     }
     private void removeSubscriptions(){
+        subscriptionGeneration++;
         for(ListenerRegistration registration:subscriptions)registration.remove();
         subscriptions.clear();
+        synchronized(snapshotLock){liveCollections.clear();liveRevision.incrementAndGet();}
+        freshSnapshot=false;
     }
     public void setForeground(boolean visible){
         foreground=visible;ui.removeCallbacks(backgroundStop);
@@ -186,39 +176,59 @@ public final class FirebaseGateway {
     public void stop() { running=false;
         if(authObserver!=null)auth.removeAuthStateListener(authObserver);
         removeSubscriptions();ui.removeCallbacksAndMessages(null);
-        http.dispatcher().cancelAll();executor.shutdownNow();fetchers.shutdownNow();
+        executor.shutdownNow();
     }
     private void notify(String msg) { ui.post(() -> { if (running) listener.notice(msg); }); }
     private void setBusy(boolean b) { ui.post(() -> { if (running) listener.busy(b); }); }
-    private String encoded(String s) throws Exception { return URLEncoder.encode(s, "UTF-8"); }
-    private String getError(JSONObject j) {
-        JSONObject e = j.optJSONObject("error");
-        if (e == null) return "Connection failed";
-        return e.optString("message", "Connection failed");
+    /** All preconditions are read and checked before any write in this SDK transaction. */
+    private void commit(JSONArray writes)throws Exception {
+        if(retry.remaining(retryClock.getAsLong())>0)throw new IOException("Sync retry is pending");
+        final String owner=bulkOwner();
+        Tasks.await(firestore.runTransaction(transaction->{
+            try{
+                if(signingOut||!owner.equals(bulkOwner()))throw new IOException("Login changed");
+                List<DocumentReference> refs=new ArrayList<>();
+                List<Map<String,Object>> edits=new ArrayList<>();
+                for(int i=0;i<writes.length();i++){
+                    JSONObject write=writes.getJSONObject(i);
+                    String name=write.has("delete")?write.getString("delete"):write.getJSONObject("update").getString("name");
+                    String path=BackupArchive.path(new JSONObject().put("name",name),project);
+                    DocumentReference ref=firestore.document(path);refs.add(ref);
+                    DocumentSnapshot current=transaction.get(ref);
+                    JSONObject expected=write.getJSONObject("currentDocument");
+                    if(expected.has("exists")){
+                        if(current.exists()!=expected.getBoolean("exists"))throw new IOException("Record already exists or was removed. Refresh and retry.");
+                    }else{
+                        String token=expected.getString("updateTime");
+                        if(!token.startsWith("sdk1:"))throw new IOException("This operation uses an older sync version. Export its recovery backup before stopping it in Settings.");
+                        if(!current.exists()||!token.equals(DocumentVersion.of(SdkDocuments.fields(current.getData()))))
+                            throw new IOException("Record changed. Refresh before saving; newer data was kept.");
+                    }
+                    if(write.has("delete")){edits.add(null);continue;}
+                    Map<String,Object> values=SdkDocuments.decode(write.getJSONObject("update").getJSONObject("fields"),firestore);
+                    JSONArray transforms=write.optJSONArray("updateTransforms");
+                    if(transforms!=null)for(int j=0;j<transforms.length();j++)values.put(transforms.getJSONObject(j).getString("fieldPath"),FieldValue.serverTimestamp());
+                    edits.add(values);
+                }
+                // SDK transactions fail offline; unlike batches they cannot queue an offline save.
+                for(int i=0;i<writes.length();i++){
+                    JSONObject write=writes.getJSONObject(i);DocumentReference ref=refs.get(i);
+                    if(write.has("delete"))transaction.delete(ref);
+                    else if(write.has("updateMask")){
+                        Map<FieldPath,Object> updates=new HashMap<>();
+                        for(Map.Entry<String,Object> edit:edits.get(i).entrySet())updates.put(FieldPath.of(edit.getKey()),edit.getValue());
+                        // set with explicit FieldPaths preserves literal keys containing dots.
+                        transaction.set(ref,edits.get(i),SetOptions.mergeFieldPaths(new ArrayList<>(updates.keySet())));
+                    }else transaction.set(ref,edits.get(i));
+                }
+                return null;
+            }catch(Exception error){throw new FirebaseFirestoreException(error.getMessage(),FirebaseFirestoreException.Code.FAILED_PRECONDITION,error);}
+        }),60,TimeUnit.SECONDS);
     }
-    private JSONObject network(String method, String url, String contentType, String body, String bearer) throws Exception {
-        if(retry.quota()&&retry.remaining(retryClock.getAsLong())>0)throw new HttpFailure(429,"Firebase sync is paused until its scheduled retry");
-        Request.Builder req = new Request.Builder().url(url).header("Accept", "application/json");
-        if(bearer!=null)req.header("Authorization", "Bearer " + bearer);
-        if(body!=null) {
-            RequestBody rb=RequestBody.create(body, MediaType.parse(contentType));
-            req.method(method,rb);
-        } else if("GET".equals(method)) req.get();
-        else req.method(method,null);
-        try (Response response=http.newCall(req.build()).execute()) {
-            String content=response.body()==null?"":response.body().string();
-            if(response.code()==429)recordQuota(response.header("Retry-After"));
-            JSONObject obj;
-            try{obj=content.isEmpty()?new JSONObject():new JSONObject(content);}catch(org.json.JSONException invalid){
-                if(!response.isSuccessful())throw new HttpFailure(response.code(),"Firebase request failed");
-                throw invalid;
-            }
-            if(!response.isSuccessful())throw new HttpFailure(response.code(),getError(obj));
-            return obj;
-        }
-    }
-    private JSONObject jsonCall(String method,String endpoint,JSONObject body,String bearer) throws Exception {
-        return network(method,endpoint,"application/json; charset=utf-8",body==null?null:body.toString(),bearer);
+    private JSONObject readDocument(String collection,String id)throws Exception{
+        DocumentSnapshot doc=Tasks.await(firestore.collection(collection).document(id).get(Source.SERVER),25,TimeUnit.SECONDS);
+        if(!doc.exists())throw new IOException("Record not found");
+        return new JSONObject().put("fields",SdkDocuments.fields(doc.getData()));
     }
     private void ensureIdToken() throws Exception {
         if(signingOut || auth.getCurrentUser()==null){idToken=null;return;}
@@ -247,7 +257,7 @@ public final class FirebaseGateway {
         long now=retryClock.getAsLong();
         if(retry.remaining(now)>0){publishProblem(retry.quota()?quotaMessage():"Connection unavailable. Automatic retry is scheduled.");scheduleNext();return false;}
         synchronized(this){if(now-lastRefreshRequestAt<10000)return false;lastRefreshRequestAt=now;}
-        ui.removeCallbacks(refreshLoop);queueLoad(false);return true;
+        ui.removeCallbacks(refreshLoop);ui.post(()->{startSubscriptions();queueLoad(false);});return true;
     }
     private void scheduleNext() {
         ui.removeCallbacks(refreshLoop);
@@ -257,7 +267,7 @@ public final class FirebaseGateway {
         if(delay==0&&freshSnapshot)return;
         ui.postDelayed(refreshLoop,delay>0?delay:30000);
     }
-    private String quotaMessage(){return "Firebase request limit reached. Sync is paused; saved data is read-only. Retry is automatic. A daily quota may need its reset or a billing change by the owner.";}
+    private String quotaMessage(){return "Firebase request limit reached. Sync is paused; saved data is read-only. Retry is automatic. The exact project limit must be checked if this persists.";}
     private void publishProblem(String message){
         long deadline=retry.deadline();boolean quota=retry.quota();
         ui.post(()->{if(running){listener.snapshotContinuity(false);listener.syncState(false);listener.syncProblem(message,deadline,quota);}});
@@ -270,57 +280,41 @@ public final class FirebaseGateway {
         publishProblem(quotaMessage());
         ui.post(()->{if(running){removeSubscriptions();ui.removeCallbacks(liveRefresh);scheduleNext();}});
     }
-    private static final class HttpFailure extends IOException {
-        final int status;
-        HttpFailure(int status,String message){super(message+" (HTTP "+status+")");this.status=status;}
-    }
     private void load() {
-        if (!running) return;
+        if(!running)return;
         if(retry.remaining(retryClock.getAsLong())>0){publishProblem(retry.quota()?quotaMessage():"Connection unavailable. Automatic retry is scheduled.");scheduleNext();return;}
-        if (loading) { reloadRequested=true; return; }
-        loading=true;
-        try {
-            if (auth.getCurrentUser() != null) {
-                try { ensureIdToken(); } catch (Exception ex) {
-                    idToken=null;
-                    ui.post(()->{if(running) listener.authChanged(false);});
-                }
+        try{
+            Map<String,QuerySnapshot> collections;long revision;
+            synchronized(snapshotLock){collections=new HashMap<>(liveCollections);revision=liveRevision.get();}
+            if(collections.size()!=3){scheduleNext();return;}
+            boolean server=true;
+            List<CollectionSnapshot> decoded=new ArrayList<>();
+            for(String name:Arrays.asList("players","rounds","sessions")){
+                QuerySnapshot snapshot=collections.get(name);
+                server&=!snapshot.getMetadata().isFromCache()&&!snapshot.getMetadata().hasPendingWrites();
+                decoded.add(decodeSnapshot(name,snapshot));
             }
-            readAgain.set(false); // Changes already observed are included in this fetch.
-            long revision=liveRevision.get();
-            // Fetch independent collections in parallel rather than blocking the
-            // admin action queue for the sum of three HTTP latencies.
-            Future<CollectionSnapshot> playerFetch=fetchers.submit(()->fetchCollection("players"));
-            Future<CollectionSnapshot> roundFetch=fetchers.submit(()->fetchCollection("rounds"));
-            Future<CollectionSnapshot> sessionFetch=fetchers.submit(()->fetchCollection("sessions"));
-            CollectionSnapshot ps=playerFetch.get(),rs=roundFetch.get(),ss=sessionFetch.get();
-            if(retry.quota()&&retry.remaining(retryClock.getAsLong())>0)throw new HttpFailure(429,"Firebase request limit reached");
-            List<Map<String,Object>> p=ps.rows,r=rs.rows,s=ss.rows;
+            if(!server){
+                freshSnapshot=false;animationContinuity=false;
+                publishProblem("Waiting for a server connection. The last saved table remains read-only; retry is automatic.");
+                scheduleNext();return;
+            }
+            CollectionSnapshot ps=decoded.get(0),rs=decoded.get(1),ss=decoded.get(2);
             Map<String,String> nextVersions=new HashMap<>();Map<String,JSONObject> nextDocuments=new HashMap<>();
-            for(CollectionSnapshot collection:Arrays.asList(ps,rs,ss)){nextVersions.putAll(collection.versions);nextDocuments.putAll(collection.documents);}
-            versions=nextVersions;rawDocuments=nextDocuments;
-            snapshotAt=System.currentTimeMillis();
-            freshSnapshot=revision==liveRevision.get();
-            final boolean coherent=freshSnapshot;
-            final boolean continuous=coherent&&animationContinuity&&snapshotAt-animationSnapshotAt<75000;
+            for(CollectionSnapshot collection:decoded){nextVersions.putAll(collection.versions);nextDocuments.putAll(collection.documents);}
+            boolean coherent=server&&revision==liveRevision.get();
+            versions=nextVersions;rawDocuments=nextDocuments;snapshotAt=System.currentTimeMillis();freshSnapshot=coherent;
+            boolean continuous=coherent&&animationContinuity&&snapshotAt-animationSnapshotAt<75000;
             animationContinuity=coherent;animationSnapshotAt=snapshotAt;
-            retry.succeeded();retryStore.edit().remove("quota_until").remove("quota_failures").apply();
-            saveCachedSnapshot(p,r,s);
-            ui.post(()->{if(running){listener.syncProblem(null,0,false);startSubscriptions();}});
-            ui.post(() -> { if(running) { listener.snapshotContinuity(continuous);listener.syncState(coherent); listener.dataUpdated(p,r,s); } });
-        } catch (Exception ex) {
-            animationContinuity=false;
-            freshSnapshot=false;
-            ui.post(()->{if(running){listener.snapshotContinuity(false);listener.syncState(false);}});
-            if(!retry.quota()||retry.remaining(retryClock.getAsLong())==0){
-                retry.unavailable(retryClock.getAsLong());
-                publishProblem("Cannot connect to the shared table. Check your internet connection. Saved data remains available; retry is automatic.");
-            }else publishProblem(quotaMessage());
-        } finally {
-            loading=false;
-            if (running && reloadRequested){reloadRequested=false;queueLoad(true);}
-            else if(running) scheduleNext();
-        }
+            if(coherent){retry.succeeded();retryStore.edit().clear().apply();saveCachedSnapshot(ps.rows,rs.rows,ss.rows);}
+            final boolean online=coherent;
+            ui.post(()->{
+                if(!running||revision!=liveRevision.get())return;
+                if(online)listener.syncProblem(null,0,false);
+                listener.snapshotContinuity(continuous);listener.dataUpdated(ps.rows,rs.rows,ss.rows);listener.syncState(online);
+            });
+            scheduleNext();
+        }catch(Exception error){freshSnapshot=false;animationContinuity=false;retry.unavailable(retryClock.getAsLong());publishProblem("Cannot read the shared table. Saved data remains available; retry is automatic.");scheduleNext();}
     }
     // A private read-only offline snapshot. It NEVER queues or replays mutations.
     private File snapshotFile(){return new File(context.getFilesDir(),"3patti_snapshot.json");}
@@ -397,30 +391,16 @@ public final class FirebaseGateway {
         }
         return value;
     }
-    private CollectionSnapshot fetchCollection(String name) throws Exception {
-        CollectionSnapshot result=new CollectionSnapshot();
-        String next=null;
-        Set<String> pageTokens=new HashSet<>();
-        while(true) {
-            String url=dbRoot + "/" + name + "?pageSize=500"
-                    + (next==null?"":"&pageToken="+encoded(next));
-            JSONObject data=jsonCall("GET",url,null,idToken);
-            JSONArray docs=data.optJSONArray("documents");
-            if(docs!=null) for(int i=0;i<docs.length();i++) {
-                JSONObject doc=docs.getJSONObject(i);
-                Map<String,Object> map=decodeFields(doc.optJSONObject("fields"));
-                String full=doc.optString("name","");
-                map.put("id",full.substring(full.lastIndexOf('/')+1));
-                map.put("_updateTime",doc.optString("updateTime"));
-                result.documents.put(name+"/"+map.get("id"),doc);
-                result.versions.put(name+"/"+map.get("id"),doc.optString("updateTime"));
-                result.rows.add(map);
-            }
-            next=data.optString("nextPageToken","");
-            if(next.isEmpty()) break;
-            if(!pageTokens.add(next))throw new IOException("Repeated Firebase page token. Refusing incomplete records.");
+    private CollectionSnapshot decodeSnapshot(String name,QuerySnapshot snapshot)throws Exception {
+        CollectionSnapshot out=new CollectionSnapshot();
+        for(DocumentSnapshot doc:snapshot.getDocuments()){
+            JSONObject fields=SdkDocuments.fields(doc.getData());String token=DocumentVersion.of(fields);
+            Map<String,Object> row=decodeFields(fields);row.put("id",doc.getId());row.put("_updateTime",token);
+            String path=name+"/"+doc.getId();
+            out.rows.add(row);out.versions.put(path,token);
+            out.documents.put(path,new JSONObject().put("name",documentRoot+"/"+path).put("fields",fields).put("updateTime",token));
         }
-        return result;
+        return out;
     }
     private Map<String,Object> decodeFields(JSONObject fields) throws Exception {
         Map<String,Object> result=new HashMap<>();
@@ -545,7 +525,7 @@ public final class FirebaseGateway {
             JSONObject deletion=new JSONObject().put("delete",documentRoot+"/"+collection+"/"+id)
                 .put("currentDocument",precondition(expected,collection+"/"+id));
             preserveBackup();
-            jsonCall("POST",dbRoot+":commit",new JSONObject().put("writes",new JSONArray().put(deletion)),token);
+            commit(new JSONArray().put(deletion));
         });
     }
     public interface Action { void run(String token) throws Exception; }
@@ -656,7 +636,7 @@ public final class FirebaseGateway {
             while(plan.remaining.length()>0){
                 if(signingOut||auth.getCurrentUser()==null||!plan.owner.equals(bulkOwner()))throw new IOException("Login changed");
                 JSONArray batch=plan.batch();
-                jsonCall("POST",dbRoot+":commit",new JSONObject().put("writes",batch),token);
+                commit(batch);
                 plan=plan.acknowledged(batch.length());
                 // If this save fails, replay reconciles already committed document contents.
                 atomicSave(bulkFile(),plan.bytes());
@@ -746,7 +726,7 @@ public final class FirebaseGateway {
         final String documentId=UUID.randomUUID().toString();
         write(success,token->{
             JSONObject update=updateWrite(collection,documentId,fields,new JSONObject().put("exists",false),false);
-            jsonCall("POST",dbRoot+":commit",new JSONObject().put("writes",new JSONArray().put(update)),token);
+            commit(new JSONArray().put(update));
         },onSaved,onFailed);
     }
     /**
@@ -757,16 +737,15 @@ public final class FirebaseGateway {
     public void addRoundWithId(String id,Map<String,Object> fields,
                                Runnable onSaved,Runnable onFailed) {
         write("Round saved successfully",token->{
-            String path=dbRoot+"/rounds/"+encoded(id);
             JSONObject update=updateWrite("rounds",id,fields,new JSONObject().put("exists",false),false);
             try {
-                jsonCall("POST",dbRoot+":commit",new JSONObject().put("writes",new JSONArray().put(update)),token);
+                commit(new JSONArray().put(update));
             }catch(Exception failure){
                 // A timeout might occur AFTER the backend committed the write.
                 // Verify our unique UUID before offering a retry, to avoid
                 // inserting the same round twice into the source of truth.
                 try{
-                    JSONObject existing=jsonCall("GET",path,null,token);
+                    JSONObject existing=readDocument("rounds",id);
                     if(!sameRound(decodeFields(existing.optJSONObject("fields")),fields))
                         throw new IOException("Round ID already contains different data. Refresh before retrying.");
                 }catch(Exception verificationFailure){
@@ -797,7 +776,7 @@ public final class FirebaseGateway {
         final Map<String,String> expected=new HashMap<>(versions);expected.put(collection+"/"+id,expectedVersion);
         write(success,token -> {
             JSONObject update=updateWrite(collection,id,fields,precondition(expected,collection+"/"+id),true);
-            jsonCall("POST",dbRoot+":commit",new JSONObject().put("writes",new JSONArray().put(update)),token);
+            commit(new JSONArray().put(update));
         },onSaved,null);
     }
 }
