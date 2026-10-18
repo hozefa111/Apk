@@ -21,7 +21,7 @@ import static androidx.test.espresso.matcher.RootMatchers.*;
 public class NativeAnalyticsTest {
     private static final String A="Alpha with a very long synthetic player name",B="Beta synthetic partner",C="Gamma synthetic opponent";
     private Context context(){return InstrumentationRegistry.getInstrumentation().getTargetContext();}
-    private void awaitText(String text)throws Exception{long until=System.currentTimeMillis()+20000;Throwable last=null;while(System.currentTimeMillis()<until){try{onView(withText(text)).check(matches(isDisplayed()));return;}catch(RuntimeException|AssertionError e){last=e;Thread.sleep(150);}}throw new AssertionError(text,last);}
+    private void awaitText(String text)throws Exception{long until=System.currentTimeMillis()+20000;Throwable last=null;while(System.currentTimeMillis()<until){try{onView(withText(text)).perform(scrollTo()).check(matches(isDisplayed()));return;}catch(RuntimeException|AssertionError e){last=e;Thread.sleep(150);}}throw new AssertionError(text,last);}
     private void field(MainActivity a,String name,Object value){try{java.lang.reflect.Field f=MainActivity.class.getDeclaredField(name);f.setAccessible(true);f.set(a,value);}catch(Exception e){throw new AssertionError(e);}}
     private List<Map<String,Object>> roster(){return new ArrayList<>(Arrays.asList(FirebaseGateway.map("id","a","name",A,"active",true),FirebaseGateway.map("id","b","name",B,"active",true),FirebaseGateway.map("id","c","name",C,"active",true)));}
     private List<Map<String,Object>> rounds(){List<Map<String,Object>> out=new ArrayList<>();for(int i=0;i<30;i++){String result=i%3==0?"loss":"win";int bid=155+i%4*5;out.add(FirebaseGateway.map("id","analytics-"+i,"type","hukum","timestamp",Instant.parse("2026-01-01T09:00:00Z").plusSeconds(i*900L).toString(),"sessionId",i<15?"old":"current","hukumId","a","hukumName",A,"partnerIds",Arrays.asList("b"),"partnerNames",Arrays.asList(B),"nonPartnerIds",Arrays.asList("c"),"nonPartnerNames",Arrays.asList(C),"playerIds",Arrays.asList("a","b","c"),"bid",bid,"result",result,"scoreChanges",ScoreRules.calculate(Arrays.asList("a","b","c"),bid,"a",Arrays.asList("b"),result)));}return out;}
@@ -31,7 +31,8 @@ public class NativeAnalyticsTest {
         try{java.lang.reflect.Field f=MainActivity.class.getDeclaredField("api");f.setAccessible(true);((FirebaseGateway)f.get(a)).stop();}catch(Exception e){throw new AssertionError(e);}
         field(a,"tab",7);field(a,"rankFilter","all");a.snapshotContinuity(false);a.syncProblem(null,0,false);a.syncState(true);a.dataUpdated(roster(),empty?new ArrayList<>():rounds(),sessions());
     }
-    private void view(int index){onView(withText(startsWith("View · "))).perform(scrollTo(),click());onData(equalTo(AdvancedAnalyticsPage.SECTIONS[index])).inRoot(isDialog()).perform(click());onView(withText("View · "+AdvancedAnalyticsPage.SECTIONS[index])).check(matches(isDisplayed()));}
+    private void settle(){try{Thread.sleep(800);InstrumentationRegistry.getInstrumentation().waitForIdleSync();}catch(InterruptedException e){Thread.currentThread().interrupt();throw new AssertionError(e);}}
+    private void view(int index){onView(withText(startsWith("View · "))).perform(scrollTo(),click());onData(equalTo(AdvancedAnalyticsPage.SECTIONS[index])).inRoot(isDialog()).perform(click());settle();onView(withText("View · "+AdvancedAnalyticsPage.SECTIONS[index])).perform(scrollTo()).check(matches(isDisplayed()));}
     private void capture(String name)throws Exception{Thread.sleep(700);InstrumentationRegistry.getInstrumentation().waitForIdleSync();android.graphics.Bitmap b=InstrumentationRegistry.getInstrumentation().getUiAutomation().takeScreenshot();assertNotNull(b);java.io.File d=new java.io.File(context().getFilesDir(),"verification");assertTrue(d.isDirectory()||d.mkdirs());try(java.io.OutputStream out=new java.io.FileOutputStream(new java.io.File(d,name+".png"))){assertTrue(b.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out));}finally{b.recycle();}}
     @Test public void everyAdvancedViewRendersAndKeepsFiltersReachable()throws Exception{
         Assume.assumeTrue(BuildConfig.USE_EMULATORS);
@@ -59,22 +60,23 @@ public class NativeAnalyticsTest {
         try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
             awaitText("Table Status");scenario.onActivity(a->seed(a,false));view(1);
             onView(withText(startsWith("Compare with · "))).perform(scrollTo(),click());onData(equalTo(C)).inRoot(isDialog()).perform(click());
-            onView(withText("Compare with · "+C)).check(matches(isDisplayed()));
+            settle();onView(withText("Compare with · "+C)).perform(scrollTo()).check(matches(isDisplayed()));
             onView(withContentDescription(startsWith("Score chart."))).perform(scrollTo(),click());
             onView(withContentDescription(startsWith("Score chart."))).check(matches(withContentDescription(containsString("Gamma"))));capture("38-analytics-comparison-chart");
-            scenario.recreate();scenario.onActivity(a->seed(a,false));awaitText("View · Player comparison");onView(withText("Compare with · "+C)).check(matches(isDisplayed()));
-            view(5);onView(withText("Last 5")).perform(scrollTo(),click());onView(withText("Recent form · Last 5 played rounds")).perform(scrollTo()).check(matches(isDisplayed()));
+            scenario.recreate();scenario.onActivity(a->seed(a,false));awaitText("View · Player comparison");settle();onView(withText("Compare with · "+C)).perform(scrollTo()).check(matches(isDisplayed()));
+            view(5);onView(withText("Last 5")).perform(scrollTo(),click());settle();onView(withText("Recent form · Last 5 played rounds")).perform(scrollTo()).check(matches(isDisplayed()));
             scenario.recreate();scenario.onActivity(a->seed(a,false));awaitText("View · Form & consistency");onView(withText("Recent form · Last 5 played rounds")).perform(scrollTo()).check(matches(isDisplayed()));onView(withContentDescription(startsWith("Score chart."))).perform(scrollTo());capture("39-analytics-form-chart");
         }
     }
     @Test public void sessionScopeAndEmptyHistoryDoNotInventStats()throws Exception{
         Assume.assumeTrue(BuildConfig.USE_EMULATORS);
         try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
-            awaitText("Table Status");scenario.onActivity(a->seed(a,false));onView(withText("Round scope · All sessions")).perform(scrollTo(),click());onData(equalTo("Previous completed session")).inRoot(isDialog()).perform(click());
-            onView(withText("Round scope · Previous completed session")).check(matches(isDisplayed()));onView(withText("15")).perform(scrollTo()).check(matches(isDisplayed()));
+            awaitText("Table Status");scenario.onActivity(a->seed(a,false));onView(withText("Round scope · All sessions")).perform(scrollTo(),click());onData(equalTo("Previous completed session")).inRoot(isDialog()).perform(click());settle();
+            onView(withText("Round scope · Previous completed session")).perform(scrollTo()).check(matches(isDisplayed()));awaitText("15");
             scenario.onActivity(a->seed(a,true));awaitText("No rounds in this scope");capture("35-analytics-empty");
             onView(withText(startsWith("View · "))).perform(scrollTo(),click());onData(equalTo("Auto insights")).inRoot(isDialog()).perform(click());onView(withText("No rounds in this scope")).perform(scrollTo()).check(matches(isDisplayed()));
             scenario.onActivity(a->{field(a,"hasData",false);a.syncProblem("Synthetic offline connection",0,false);});awaitText("Analytics needs a loaded or saved table.");capture("40-analytics-no-cache");
+            scenario.onActivity(a->{a.syncProblem(null,0,false);a.dataUpdated(new ArrayList<>(),new ArrayList<>(Arrays.asList(FirebaseGateway.map("id","malformed","type","hukum","timestamp","2026-01-01T10:00:00Z","sessionId","old"))),sessions());});awaitText("No player details in these rounds");
         }
     }
     private String shell(String command)throws Exception{android.os.ParcelFileDescriptor f=InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand(command);try(java.io.InputStream in=new android.os.ParcelFileDescriptor.AutoCloseInputStream(f);java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream()){byte[] data=new byte[1024];int n;while((n=in.read(data))!=-1)out.write(data,0,n);return out.toString("UTF-8").trim();}}
@@ -90,12 +92,12 @@ public class NativeAnalyticsTest {
                 try{
                     orientation(scenario,ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,android.content.res.Configuration.ORIENTATION_LANDSCAPE);
                     scenario.onActivity(a->seed(a,false));view(1);onView(withText(startsWith("Compare with · "))).perform(scrollTo()).check(matches(isCompletelyDisplayed()));capture("36-analytics-large-comparison");
-                    view(5);onView(withText("Last 20")).perform(scrollTo(),click());onView(withText("Recent form · Last 20 played rounds")).perform(scrollTo()).check(matches(isDisplayed()));capture("37-analytics-large-form");
+                    view(5);onView(withText("Last 20")).perform(scrollTo(),click());settle();onView(withText("Recent form · Last 20 played rounds")).perform(scrollTo()).check(matches(isDisplayed()));onView(withContentDescription("Previous chart round")).perform(scrollTo(),click()).check(matches(isCompletelyDisplayed()));onView(withContentDescription(startsWith("Score chart."))).check(matches(withContentDescription(containsString("Round 19"))));capture("37-analytics-large-form");
                 }finally{orientation(scenario,ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,android.content.res.Configuration.ORIENTATION_PORTRAIT);}
             }
         }finally{
             shell("null".equals(old)?"settings delete system font_scale":"settings put system font_scale "+old);
-            float expected=old.matches("[0-9.]+")?Float.parseFloat(old):1f;long end=System.currentTimeMillis()+10000;while(Math.abs(context().getResources().getConfiguration().fontScale-expected)>.01f&&System.currentTimeMillis()<end)Thread.sleep(100);assertEquals(expected,context().getResources().getConfiguration().fontScale,.01f);InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+            float expected=old.matches("[0-9.]+")?Float.parseFloat(old):1f;long end=System.currentTimeMillis()+10000;while(Math.abs(context().getResources().getConfiguration().fontScale-expected)>.01f&&System.currentTimeMillis()<end)Thread.sleep(100);assertEquals(expected,context().getResources().getConfiguration().fontScale,.01f);settle();
         }
     }
 }

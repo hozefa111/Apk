@@ -104,7 +104,7 @@ public class NativeMotionTest {
     }
     @Test public void motionPreferencePersistsThroughActivityRecreation()throws Exception {
         try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
-            waitFor("Table Status");onView(withContentDescription("More options")).perform(click());onView(withText("Settings")).perform(click());
+            waitFor("Table Status");onView(withContentDescription("More options")).perform(click());onView(withText("Settings")).inRoot(androidx.test.espresso.matcher.RootMatchers.isDialog()).perform(click());Thread.sleep(800);
             onView(withText("Animations · full")).perform(scrollTo(),click());onView(withText("Reduced")).perform(click());
             scenario.onActivity(a->assertEquals(MotionPolicy.Mode.REDUCED,a.motionEngine().mode()));
             onView(withText("Animations · reduced")).perform(scrollTo(),click());onView(withText("Off")).perform(click());
