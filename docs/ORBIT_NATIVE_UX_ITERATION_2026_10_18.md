@@ -92,3 +92,43 @@ toolbar. At enlarged fonts on narrow windows, the accessible Orbit icon now
 provides branding while the text area remains an action spacer. All three
 toolbar actions stay available. Gallery toggling also uses the same font-aware
 column calculation as library rendering instead of resetting to two columns.
+
+## Verified storage/lifecycle correction
+
+At `b37b0cf`, [build/unit/lint](https://github.com/hozefa111/Apk/actions/runs/39146961074)
+and the [complete emulator matrix](https://github.com/hozefa111/Apk/actions/runs/39146961059)
+passed. All 12 instrumentation tests ran on each of API 26, 33 and 35, including
+the queue-sheet recreation/order/completion test. Native navigation, permission
+recovery and generated media-matrix suites also passed. The signed-upgrade job
+was intentionally skipped because this was a normal PR run.
+
+The subsequent `c919685` library-only font correction compiled locally. Actual
+API 26 screenshots confirmed the unclipped 150% toolbar, 16:9 gallery cards and
+the 11-item queue opened through the player heading with a physical tap. The
+queue showed its current marker, full folder metadata, overflow actions and
+automatic-next switch. This supplements instrumentation; it does not measure
+phone latency. The same queue stayed open and resized in an actual landscape
+screenshot; its list remains scrollable in the shorter window. Test-device font
+scale and orientation were restored afterwards and playback stopped.
+
+At `c919685`, [debug/release build, both unit and lint variants](https://github.com/hozefa111/Apk/actions/runs/39147342124)
+passed. Debug, optimized release and instrumentation APKs compiled; all 24 unit
+tests passed in each variant. The final source's cross-version result is recorded
+below when complete. No updated signed candidate or physical-device verification
+is implied by compilation or emulator results.
+
+## Final application-source result
+
+Application SHA: `c919685d9d3846d2f3d7a79e081faab66ea1df00`.
+[Full emulator run 39147342044](https://github.com/hozefa111/Apk/actions/runs/39147342044)
+passed on API 26, 33 and 35. Each device ran all 12 instrumentation tests plus
+native library/player/Settings navigation, permission recovery and the generated
+12-case media startup/error matrix. The corrupt sample produced a handled error;
+this is not a claim of universal or audible codec support. The optional signed
+upgrade job was skipped. The matching build/unit/lint run above also passed.
+
+Later documentation-only commits do not change this tested application source.
+This completes the first native UX batch, not the entire advanced-feature or
+physical-device release plan. The branch stays unmerged; no new signed APK or
+production release was published. Device acceptance and a new candidate's signed
+upgrade check remain necessary before a final release recommendation.
