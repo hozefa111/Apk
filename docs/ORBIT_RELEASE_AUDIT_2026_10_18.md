@@ -1,6 +1,7 @@
 # Orbit Player Pro release audit — 18 October 2026
 
-Current follow-up work is tracked in [the native UX iteration](ORBIT_NATIVE_UX_ITERATION_2026_10_18.md).
+Follow-up work is tracked in [the native UX iteration](ORBIT_NATIVE_UX_ITERATION_2026_10_18.md)
+and [19 October performance/recovery QA](ORBIT_PERFORMANCE_QA_2026_10_19.md).
 The signed-candidate results below identify the earlier tested source; they do not
 implicitly verify subsequent Settings/queue/UI edits. The user confirmed that the
 original web reference is unknown; native work proceeds with parity unclaimed.

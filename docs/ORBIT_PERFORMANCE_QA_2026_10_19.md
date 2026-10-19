@@ -43,3 +43,30 @@ Physical-device acceptance, long sessions, removable storage and signed upgrade
 verification for a new final candidate remain separate gates. Original web source
 is still unknown and exact parity remains unverified. No new APK delivery or public
 release is part of this QA batch.
+
+## Local environment finding
+
+The local software API 26 emulator reported `ANR in system` at 00:55:31 UTC and
+`ANR in com.android.systemui` at 00:57:03, before Orbit's first process started
+at 01:00:08. A window dump during the new Retry test showed focus held by the
+System UI ANR dialog, with a second system ANR dialog underneath. The first local
+run's Retry assertion failed while those dialogs blocked accessibility input;
+it is retained as a failed run, not changed into a pass. Diagnostics were captured
+before interacting with the dialogs. A clean focused run is required to establish
+actual recovery. No app ANR or physical-phone performance conclusion follows from
+these OS boot dialogs.
+
+## First CI result and test portability correction
+
+At `9c6eb35`, [build, both unit variants and lint](https://github.com/hozefa111/Apk/actions/runs/39183255502)
+passed (25 unit tests per variant). The [expanded emulator run](https://github.com/hozefa111/Apk/actions/runs/39183255496)
+failed the new Retry-button input assertion on all three APIs; all other 13
+instrumentation tests per device passed, as did native navigation, permissions
+and the generated media matrix. These failures are not presented as green.
+
+The button matcher now accepts Android's all-caps label transformation and
+records focused package/matching labels in failure diagnostics. It still must
+activate the actual Retry button and verify the same repaired URI reaches READY,
+has no player error and is set to play. After dismissing both local OS ANR dialogs,
+the corrected focused recovery test passed on API 26, including missing/corrupt
+middle-entry skipping and final-file recovery. Fresh full CI remains required.

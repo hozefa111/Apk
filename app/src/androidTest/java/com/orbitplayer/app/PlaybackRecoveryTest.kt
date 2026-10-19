@@ -78,15 +78,20 @@ class PlaybackRecoveryTest {
                 }
                 context.contentResolver.openInputStream(base)!!.use { input -> recovered.outputStream().use(input::copyTo) }
                 var clicked = false
+                var observed = "No active accessibility window"
                 val until = System.currentTimeMillis() + 15_000
                 while (!clicked && System.currentTimeMillis() < until) {
                     val root = instrumentation.uiAutomation.rootInActiveWindow
-                    clicked = root?.findAccessibilityNodeInfosByText("Retry")
-                        ?.firstOrNull { it.text?.toString() == "Retry" }
+                    val matches = root?.findAccessibilityNodeInfosByText("Retry")
+                    observed = "package=${root?.packageName}, labels=${matches?.map { it.text?.toString() }}"
+                    // Android themes can expose transformed, all-caps button text.
+                    clicked = matches
+                        ?.firstOrNull { it.text?.toString()?.equals("Retry", ignoreCase = true) == true }
                         ?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
                     if (!clicked) Thread.sleep(100)
                 }
-                assertTrue("Error dialog did not expose a working Retry button", clicked)
+                assertTrue("Error dialog did not expose a working Retry button: $observed", clicked)
+                println("RECOVERY_RETRY_INPUT $observed")
                 waitFor(scenario, "Retry did not recover the repaired file") {
                     it.currentMediaItem?.localConfiguration?.uri == Uri.fromFile(recovered) &&
                         it.playbackState == Player.STATE_READY && it.playerError == null && it.playWhenReady
