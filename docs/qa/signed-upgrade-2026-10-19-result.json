@@ -1,0 +1,27 @@
+{
+  "source_sha": "a17c85b15d63d28e41a66cb0d9e71b0cbfd00d66",
+  "run_url": "https://github.com/hozefa111/Apk/actions/runs/39183907391",
+  "artifact_id": 12157592622,
+  "artifact_name": "OrbitPlayer-internal-signed-upgrade-verified",
+  "application_id": "com.orbitplayer.app",
+  "version_name": "0.3.1",
+  "version_code": 14,
+  "min_sdk": 26,
+  "target_sdk": 35,
+  "apk_bytes": 1160893,
+  "apk_sha256": "19ba69dbff2659afd5c5204f9ae119420390cdbc816449b19724f508c0ed3d93",
+  "certificate_sha256": "27d8f4fd282016b5829348caace9ffb47dbd36f3ea1cfd7819569708274fbda2",
+  "local_apksigner_verification_passed": true,
+  "workflow_result": {
+    "passed": true,
+    "stable_version": "0.3.0",
+    "candidate_version": "0.3.1",
+    "same_certificate_install": true,
+    "collections_fixture_preserved": true,
+    "actual_stable_resume_and_history_preserved": true,
+    "optimized_playback_advanced": true,
+    "physical_device_verified": false
+  },
+  "scope": "Disposable API 26 emulator; legacy-format favorite/playlist fixtures, actual stable resume/history and optimized playback. Physical-device QA and other settings/folder migration scenarios remain open.",
+  "public_release_published": false
+}

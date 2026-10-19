@@ -28,6 +28,11 @@ This is a **native APK**, not a website packaged in a WebView. All local video p
 - Android 13+ video permission flow, partial selected-video permission on Android 14+, and Android file picker.
 - Optional **user-initiated** GitHub update checks; other local playback is offline.
 
+Video filtering, album grouping and Continue Watching selection run on a worker.
+RecyclerView keeps asynchronous list diffs and bounded thumbnail decoding. See
+the [latest responsiveness/recovery QA](docs/ORBIT_PERFORMANCE_QA_2026_10_19.md)
+for test scope, results and physical-device limits.
+
 ## Known limitations — not promised
 
 - There is **no LibVLC/FFmpeg codec fallback**. Unsupported video/audio codecs can still fail or be silent.

@@ -37,7 +37,7 @@ passed. PR #10 remains open on `orbit-pro-qa-hardening-oct17`.
 - Existing generated metadata unit fixtures still cover up to 10,000 entries;
   their elapsed times measure computation in the test runtime, not phone UI speed.
 
-Results will be recorded after tests complete. A passing build or selected audio
+Verification results and initial failures are recorded below. A passing build or selected audio
 track does not establish audible codecs, hardware performance or release readiness.
 Physical-device acceptance, long sessions, removable storage and signed upgrade
 verification for a new final candidate remain separate gates. Original web source
@@ -53,7 +53,7 @@ System UI ANR dialog, with a second system ANR dialog underneath. The first loca
 run's Retry assertion failed while those dialogs blocked accessibility input;
 it is retained as a failed run, not changed into a pass. Diagnostics were captured
 before interacting with the dialogs. A clean focused run is required to establish
-actual recovery. No app ANR or physical-phone performance conclusion follows from
+actual recovery; its result is recorded below. No app ANR or physical-phone performance conclusion follows from
 these OS boot dialogs.
 
 ## First CI result and test portability correction
@@ -69,4 +69,47 @@ records focused package/matching labels in failure diagnostics. It still must
 activate the actual Retry button and verify the same repaired URI reaches READY,
 has no player error and is set to play. After dismissing both local OS ANR dialogs,
 the corrected focused recovery test passed on API 26, including missing/corrupt
-middle-entry skipping and final-file recovery. Fresh full CI remains required.
+middle-entry skipping and final-file recovery. The fresh full CI result follows.
+
+## Corrected source verification
+
+Source: `a17c85b15d63d28e41a66cb0d9e71b0cbfd00d66` (application code matches
+`9c6eb35`; only the Retry test and documentation changed).
+[Build/unit/lint 39183899969](https://github.com/hozefa111/Apk/actions/runs/39183899969)
+passed: debug, optimized release and instrumentation APKs compile, both lint
+variants complete, and all 25 unit tests pass in each variant.
+
+The [corrected full suite](https://github.com/hozefa111/Apk/actions/runs/39183899936)
+and [internal signed-upgrade run](https://github.com/hozefa111/Apk/actions/runs/39183907391)
+completed for this exact source; results are recorded below. Signed validation
+uses the existing production certificate in Actions
+and a disposable emulator; it does not publish a release or establish phone QA.
+
+The corrected full suite **passed on API 26, 33 and 35**: all 14 instrumentation
+tests per device, native navigation/player UI, permission recovery and the
+generated 12-case media startup/error matrix. This includes the actual Retry
+button input and successful playback of the repaired final file. The matching
+three smoke jobs in the signed workflow also passed before its upgrade job began.
+Generated codec results do not establish audible output or universal codec support.
+
+## Verified internal signed candidate
+
+[Run 39183907391](https://github.com/hozefa111/Apk/actions/runs/39183907391)
+passed all three native suites and the signed v0.3.0 upgrade job. Android accepted
+`adb install -r` with the existing production certificate, without uninstalling
+stable or clearing its data. Legacy-format favorite/ordered-playlist fixtures and
+real stable playback's resume/history were preserved. The optimized candidate
+then resumed and advanced beyond the position saved by stable playback.
+
+The downloaded artifact was independently verified with `apksigner` and `aapt`:
+`com.orbitplayer.app`, 0.3.1 / code 14, minSdk 26, targetSdk 35. Certificate SHA-256
+is `27d8f4fd282016b5829348caace9ffb47dbd36f3ea1cfd7819569708274fbda2`.
+APK SHA-256 is `19ba69dbff2659afd5c5204f9ae119420390cdbc816449b19724f508c0ed3d93`.
+See [the signed evidence record](qa/signed-upgrade-2026-10-19-result.json).
+
+This is an internal QA candidate for source `a17c85b`, not a published release.
+Later documentation-only commits do not change its tested application/test source.
+Physical-phone speed, audible codecs/Bluetooth/interruption behavior, SD-card
+handling, long sessions and broader settings/folder migration acceptance remain
+open. The original web reference remains unknown. No merge, tag or public release
+was performed, and the previously delivered APK was not overwritten.
