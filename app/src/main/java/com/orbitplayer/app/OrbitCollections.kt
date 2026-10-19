@@ -63,6 +63,18 @@ class OrbitCollections(context: Context) {
         prefs.edit().putString("playlists", data.toString()).apply()
     }
 
+    fun rename(name: String, newName: String): Boolean {
+        val title = newName.trim().take(50)
+        val data = readPlaylists()
+        if (title.isBlank() || !data.has(name)) return false
+        if (title == name) return true
+        if (data.has(title)) return false
+        data.put(title, data.getJSONArray(name))
+        data.remove(name)
+        prefs.edit().putString("playlists", data.toString()).apply()
+        return true
+    }
+
     fun delete(name: String) {
         val data = readPlaylists()
         data.remove(name)

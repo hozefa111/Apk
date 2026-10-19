@@ -14,31 +14,32 @@
         android:paddingBottom="24dp">
         <View android:layout_width="40dp" android:layout_height="4dp"
             android:layout_gravity="center_horizontal"
-            android:layout_marginBottom="20dp"
+            android:layout_marginBottom="12dp"
             android:background="@drawable/orbit_pro_handle"/>
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="ORBIT PLAYER PRO"
-            android:textColor="#72D5EA" android:textSize="11sp"
-            android:letterSpacing="0.20"/>
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="6dp" android:layout_marginBottom="18dp"
-            android:text="Playback settings" android:textSize="23sp"
+            android:layout_marginBottom="12dp" android:text="Playback settings" android:textSize="21sp"
             android:fontFamily="sans-serif-medium" android:textColor="#F4F6FF"/>
-        <TextView android:id="@+id/actionTracks" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="51dp"
+        <TextView android:id="@+id/actionTracks" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="51dp"
             android:text="Audio &amp; subtitle tracks"/>
-        <TextView android:id="@+id/actionInformation" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="51dp"
+        <TextView android:id="@+id/actionSpeed" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="51dp"
+            android:text="Playback speed"/>
+        <TextView android:id="@+id/actionLock" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="51dp"
+            android:text="Lock screen controls"/>
+        <TextView android:id="@+id/actionQueue" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="51dp"
+            android:text="@string/playing_queue"/>
+        <TextView android:id="@+id/actionInformation" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="51dp"
             android:text="Video information"/>
-        <TextView android:id="@+id/actionSleep" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="51dp"
+        <TextView android:id="@+id/actionSleep" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="51dp"
             android:text="Sleep timer"/>
-        <TextView android:id="@+id/actionRotate" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="51dp"
+        <TextView android:id="@+id/actionRotate" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="51dp"
             android:text="Rotate video"/>
-        <TextView android:id="@+id/actionAspect" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="51dp"
+        <TextView android:id="@+id/actionAspect" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="51dp"
             android:text="Fit / crop / stretch"/>
-        <TextView android:id="@+id/actionRepeat" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="51dp"
+        <TextView android:id="@+id/actionRepeat" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="51dp"
             android:text="Repeat video"/>
-        <TextView android:id="@+id/actionPip" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="51dp"
+        <TextView android:id="@+id/actionPip" style="@style/OrbitProSheetAction" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="51dp"
             android:text="Picture in picture"/>
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        <TextView android:id="@+id/gestureHelp" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:text="Swipe to seek  •  Double tap ±10s  •  Hold for 2×"
             android:textColor="#95A8C8" android:gravity="center"

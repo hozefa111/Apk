@@ -25,8 +25,8 @@ class OrbitSettings(context: Context) {
         get() = prefs.getInt("folder_columns", 3).coerceIn(2,4)
         set(value) = prefs.edit().putInt("folder_columns", value.coerceIn(2,4)).apply()
     var sort: Int
-        get() = prefs.getInt("sort", 0).coerceIn(0,3)
-        set(value) = prefs.edit().putInt("sort", value.coerceIn(0,3)).apply()
+        get() = prefs.getInt("sort", 0).coerceIn(0,4)
+        set(value) = prefs.edit().putInt("sort", value.coerceIn(0,4)).apply()
     var resume: Boolean
         get() = prefs.getBoolean("resume", true)
         set(value) = prefs.edit().putBoolean("resume", value).apply()
@@ -69,6 +69,12 @@ class OrbitSettings(context: Context) {
     var defaultOrientation: String
         get() = prefs.getString("default_orientation", "Automatic") ?: "Automatic"
         set(value) = prefs.edit().putString("default_orientation", value).apply()
+    var defaultAspect: String
+        get() = prefs.getString("default_aspect", "Fit")?.takeIf {
+            it in setOf("Fit", "Crop", "Stretch")
+        } ?: "Fit"
+        set(value) = prefs.edit().putString("default_aspect",
+            if (value in setOf("Fit", "Crop", "Stretch")) value else "Fit").apply()
     var lastTab: String
         get() = prefs.getString("last_tab", "") ?: ""
         set(value) = prefs.edit().putString("last_tab", value).apply()

@@ -12,7 +12,13 @@ xml = subprocess.run(["adb","exec-out","cat","/sdcard/window.xml"],
 root = ET.fromstring(xml)
 found = None
 for node in root.iter("node"):
-    if node.get("resource-id") == target:
+    if target.startswith("desc:"):
+        matches = node.get("content-desc") == target.removeprefix("desc:")
+    elif target.startswith("text:"):
+        matches = node.get("text") == target.removeprefix("text:")
+    else:
+        matches = node.get("resource-id") == target
+    if matches:
         found = node.get("bounds")
         break
 if not found:

@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "stable_version": "0.3.0",
+  "candidate_version": "0.3.1",
+  "same_certificate_install": true,
+  "collections_fixture_preserved": true,
+  "actual_stable_resume_and_history_preserved": true,
+  "optimized_playback_advanced": true,
+  "physical_device_verified": false
+}

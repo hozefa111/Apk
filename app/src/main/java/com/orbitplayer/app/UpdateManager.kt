@@ -82,7 +82,7 @@ object UpdateManager {
             if (assets != null) {
                 for (i in 0 until assets.length()) {
                     val asset = assets.optJSONObject(i) ?: continue
-                    if (asset.optString("name").endsWith(".apk", ignoreCase = true)) {
+                    if (asset.optString("name").equals("OrbitPlayer-v$tag.apk", ignoreCase = true)) {
                         apkUrl = asset.optString("browser_download_url").takeIf { it.startsWith("https://") }
                         if (apkUrl != null) break
                     }
@@ -122,7 +122,7 @@ object UpdateManager {
                 .putLong(DOWNLOAD_ID, id).putString(DOWNLOAD_VERSION, release.version).apply()
             AlertDialog.Builder(activity)
                 .setTitle("Download started")
-                .setMessage("Android will notify you when the APK is downloaded. Then tap 'Updates' again to install it, or open the download notification.")
+                .setMessage("Android will notify you when the APK is downloaded. Then open Settings → Check for updates again to install it, or open the download notification.")
                 .setPositiveButton("OK", null).show()
         } catch (error: Exception) {
             AlertDialog.Builder(activity).setTitle("Download failed")
@@ -166,7 +166,7 @@ object UpdateManager {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !activity.packageManager.canRequestPackageInstalls()) {
             AlertDialog.Builder(activity)
                 .setTitle("Allow Orbit Player updates")
-                .setMessage("Android requires you to allow app installs from Orbit Player once. After enabling it, return and tap Updates > Install again.")
+                .setMessage("Android requires you to allow app installs from Orbit Player once. After enabling it, return and open Settings → Check for updates → Install again.")
                 .setPositiveButton("Open settings") { _, _ ->
                     activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
                         .setData(Uri.parse("package:${activity.packageName}")))

@@ -1,0 +1,174 @@
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.13/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build
+
+> Configure project :app
+w: file:///workspace/Apk/app/build.gradle.kts:43:21: 'jvmTarget: String' is deprecated. Please migrate to the compilerOptions DSL. More details are here: https://kotl.in/u1r8ln
+Checking the license for package Android SDK Build-Tools 35 in /workspace/toolchains/android/licenses
+License for package Android SDK Build-Tools 35 accepted.
+Preparing "Install Android SDK Build-Tools 35 v.35.0.0".
+"Install Android SDK Build-Tools 35 v.35.0.0" ready.
+Installing Android SDK Build-Tools 35 in /workspace/toolchains/android/build-tools/35.0.0
+"Install Android SDK Build-Tools 35 v.35.0.0" complete.
+"Install Android SDK Build-Tools 35 v.35.0.0" finished.
+
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:generateDebugResValues
+> Task :app:dataBindingMergeDependencyArtifactsDebug
+> Task :app:generateDebugResources
+> Task :app:processDebugNavigationResources
+> Task :app:generateDebugBuildConfig
+> Task :app:checkDebugAarMetadata
+> Task :app:mapDebugSourceSetPaths
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :app:mergeDebugResources
+> Task :app:processDebugMainManifest
+> Task :app:packageDebugResources
+> Task :app:parseDebugLocalResources
+> Task :app:compileDebugNavigationResources
+> Task :app:dataBindingGenBaseClassesDebug
+> Task :app:processDebugManifest
+> Task :app:processDebugManifestForPackage
+> Task :app:javaPreCompileDebug
+> Task :app:mergeDebugShaders
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets
+> Task :app:compressDebugAssets
+> Task :app:desugarDebugFileDependencies
+> Task :app:processDebugResources
+> Task :app:checkDebugDuplicateClasses
+> Task :app:compileDebugKotlin
+> Task :app:mergeExtDexDebug
+
+> Task :app:compileDebugKotlin
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/FolderAdapter.kt:68:42 'class Thumbnails : Any, BaseColumns' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/FolderAdapter.kt:68:53 'static fun getThumbnail(p0: ContentResolver!, p1: Long, p2: Int, p3: BitmapFactory.Options!): Bitmap!' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/FolderAdapter.kt:69:46 'class Thumbnails : Any, BaseColumns' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/FolderAdapter.kt:69:57 'static field MINI_KIND: Int' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/MainActivity.kt:738:16 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/MainActivity.kt:739:16 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/MainActivity.kt:888:20 'fun onBackPressed(): Unit' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/PlayerActivity.kt:342:35 'static field FLAG_HANDLES_MEDIA_BUTTONS: Int' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/PlayerActivity.kt:343:30 'static field FLAG_HANDLES_TRANSPORT_CONTROLS: Int' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/SettingsActivity.kt:38:16 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/SettingsActivity.kt:39:16 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/VideoAdapter.kt:100:42 'class Thumbnails : Any, BaseColumns' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/VideoAdapter.kt:100:53 'static fun getThumbnail(p0: ContentResolver!, p1: Long, p2: Int, p3: BitmapFactory.Options!): Bitmap!' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/VideoAdapter.kt:101:46 'class Thumbnails : Any, BaseColumns' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/VideoAdapter.kt:101:57 'static field MINI_KIND: Int' is deprecated. Deprecated in Java.
+
+> Task :app:compileDebugJavaWithJavac
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts
+
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts
+
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts
+
+
+> Task :app:dexBuilderDebug
+> Task :app:mergeDebugGlobalSynthetics
+> Task :app:processDebugJavaRes
+> Task :app:mergeLibDexDebug
+> Task :app:mergeProjectDexDebug
+> Task :app:mergeDebugJniLibFolders
+> Task :app:mergeDebugNativeLibs NO-SOURCE
+> Task :app:stripDebugDebugSymbols NO-SOURCE
+> Task :app:mergeDebugJavaResource
+> Task :app:validateSigningDebug
+> Task :app:writeDebugAppMetadata
+> Task :app:writeDebugSigningConfigVersions
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:mergeReleaseJniLibFolders
+> Task :app:mergeReleaseNativeLibs NO-SOURCE
+> Task :app:stripReleaseDebugSymbols NO-SOURCE
+> Task :app:extractReleaseNativeSymbolTables NO-SOURCE
+> Task :app:mergeReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:buildKotlinToolingMetadata
+> Task :app:checkReleaseDuplicateClasses
+> Task :app:dataBindingMergeDependencyArtifactsRelease
+> Task :app:generateReleaseResValues FROM-CACHE
+> Task :app:generateReleaseResources FROM-CACHE
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:assembleDebug
+> Task :app:processReleaseNavigationResources FROM-CACHE
+> Task :app:generateReleaseBuildConfig
+> Task :app:checkReleaseAarMetadata
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksRelease FROM-CACHE
+> Task :app:processReleaseMainManifest
+> Task :app:processReleaseManifest
+> Task :app:processReleaseManifestForPackage
+> Task :app:javaPreCompileRelease FROM-CACHE
+> Task :app:mergeReleaseArtProfile
+> Task :app:extractProguardFiles
+> Task :app:mergeReleaseStartupProfile
+> Task :app:mergeReleaseShaders
+> Task :app:compileReleaseShaders NO-SOURCE
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseAssets
+> Task :app:compressReleaseAssets
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:collectReleaseDependencies
+> Task :app:sdkReleaseDependencyData
+> Task :app:writeReleaseAppMetadata
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:mergeReleaseResources
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:packageReleaseResources
+> Task :app:parseReleaseLocalResources FROM-CACHE
+> Task :app:dataBindingGenBaseClassesRelease FROM-CACHE
+> Task :app:compileReleaseNavigationResources FROM-CACHE
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:processReleaseResources
+> Task :app:compileDebugUnitTestKotlin
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest FROM-CACHE
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes
+
+> Task :app:testDebugUnitTest
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts
+
+> Task :app:compileReleaseKotlin
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/FolderAdapter.kt:68:42 'class Thumbnails : Any, BaseColumns' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/FolderAdapter.kt:68:53 'static fun getThumbnail(p0: ContentResolver!, p1: Long, p2: Int, p3: BitmapFactory.Options!): Bitmap!' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/FolderAdapter.kt:69:46 'class Thumbnails : Any, BaseColumns' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/FolderAdapter.kt:69:57 'static field MINI_KIND: Int' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/MainActivity.kt:738:16 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/MainActivity.kt:739:16 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/MainActivity.kt:888:20 'fun onBackPressed(): Unit' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/PlayerActivity.kt:342:35 'static field FLAG_HANDLES_MEDIA_BUTTONS: Int' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/PlayerActivity.kt:343:30 'static field FLAG_HANDLES_TRANSPORT_CONTROLS: Int' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/SettingsActivity.kt:38:16 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/SettingsActivity.kt:39:16 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/VideoAdapter.kt:100:42 'class Thumbnails : Any, BaseColumns' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/VideoAdapter.kt:100:53 'static fun getThumbnail(p0: ContentResolver!, p1: Long, p2: Int, p3: BitmapFactory.Options!): Bitmap!' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/VideoAdapter.kt:101:46 'class Thumbnails : Any, BaseColumns' is deprecated. Deprecated in Java.
+w: file:///workspace/Apk/app/src/main/java/com/orbitplayer/app/VideoAdapter.kt:101:57 'static field MINI_KIND: Int' is deprecated. Deprecated in Java.
+
+> Task :app:compileReleaseJavaWithJavac
+> Task :app:mergeReleaseGeneratedProguardFiles
+> Task :app:processReleaseJavaRes
+> Task :app:mergeReleaseJavaResource
+> Task :app:expandReleaseArtProfileWildcards
+> Task :app:generateReleaseLintVitalReportModel
+> Task :app:minifyReleaseWithR8
+> Task :app:lintVitalAnalyzeRelease
+> Task :app:lintVitalReportRelease
+> Task :app:lintVitalRelease
+> Task :app:compileReleaseArtProfile
+> Task :app:convertShrunkResourcesToBinaryRelease
+> Task :app:optimizeReleaseResources
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+
+BUILD SUCCESSFUL in 4m 22s
+94 actionable tasks: 85 executed, 9 from cache

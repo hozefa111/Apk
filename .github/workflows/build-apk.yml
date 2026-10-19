@@ -38,7 +38,14 @@ jobs:
       - name: Validate premium library screen
         run: python3 scripts/check_library_ui.py
       - name: Build debug APK and test
-        run: gradle --no-daemon :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest
+        run: gradle --no-daemon :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebugAndroidTest
+      - name: Upload lint evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-lint-reports
+          path: app/build/reports/lint-results-*
+          if-no-files-found: ignore
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:

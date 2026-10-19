@@ -1,11 +1,6 @@
 package com.orbitplayer.app
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.os.Build
-import android.provider.MediaStore
-import android.util.LruCache
-import android.util.Size
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -13,69 +8,52 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.DiffUtil
-import java.util.concurrent.Executors
-import android.os.Handler
-import android.os.Looper
+import androidx.recyclerview.widget.AsyncListDiffer
 
 /** Album thumbnails are loaded and cached off the main thread. */
 class FolderAdapter(
     private val context: Context,
     private val onOpen: (FolderAlbum) -> Unit,
+    private val thumbnails: ThumbnailLoader,
     private val onOptions: (FolderAlbum) -> Unit
 ) : RecyclerView.Adapter<FolderAdapter.Holder>() {
-    private var items = emptyList<FolderAlbum>()
-    private val executor = Executors.newFixedThreadPool(2)
-    private val handler = Handler(Looper.getMainLooper())
-    private val cache = object : LruCache<String, Bitmap>(10 * 1024) {
-        override fun sizeOf(key: String, value: Bitmap) = (value.byteCount / 1024).coerceAtLeast(1)
+    private val differ = AsyncListDiffer(this, object : DiffUtil.ItemCallback<FolderAlbum>() {
+        override fun areItemsTheSame(oldItem: FolderAlbum, newItem: FolderAlbum) =
+            oldItem.path == newItem.path
+        override fun areContentsTheSame(oldItem: FolderAlbum, newItem: FolderAlbum) =
+            oldItem.count == newItem.count && oldItem.pinned == newItem.pinned &&
+                oldItem.cover == newItem.cover &&
+                oldItem.displayName == newItem.displayName
+    })
+    private val items: List<FolderAlbum> get() = differ.currentList
+    private var disposed = false
+    private var compact = false
+    fun useCompact(value: Boolean) {
+        if (compact == value) return
+        compact = value
+        notifyDataSetChanged() // Different layouts intentionally require new holders.
     }
-    init { setHasStableIds(true) }
+    override fun getItemViewType(position: Int) = if (compact) 1 else 0
+    init { setHasStableIds(false) }
     override fun getItemId(position: Int) = items[position].path.hashCode().toLong()
     override fun getItemCount() = items.size
-    fun submit(next: List<FolderAlbum>) {
-        val old = items
-        val newer = next.toList()
-        val changes = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
-            override fun getOldListSize() = old.size
-            override fun getNewListSize() = newer.size
-            override fun areItemsTheSame(i: Int, j: Int) = old[i].path == newer[j].path
-            override fun areContentsTheSame(i: Int, j: Int): Boolean {
-                val before = old[i]
-                val after = newer[j]
-                return before.count == after.count && before.pinned == after.pinned &&
-                    before.cover.uri == after.cover.uri && before.displayName == after.displayName
-            }
-        })
-        items = newer
-        changes.dispatchUpdatesTo(this)
+    fun submit(next: List<FolderAlbum>, committed: () -> Unit = {}) {
+        if (!disposed) differ.submitList(next.toList(), committed)
     }
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder =
-        Holder(LayoutInflater.from(parent.context).inflate(R.layout.row_folder, parent, false))
+        Holder(LayoutInflater.from(parent.context).inflate(if (viewType == 1) R.layout.row_folder_list else R.layout.row_folder, parent, false))
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val album = items[position]
         holder.title.text = album.displayName
         holder.count.text = "${album.count} ${if (album.count == 1) "video" else "videos"}"
         holder.pin.visibility = if (album.pinned) View.VISIBLE else View.GONE
-        holder.thumb.setImageDrawable(null)
-        holder.thumb.tag = album.path
-        synchronized(cache) { cache.get(album.path) }?.let(holder.thumb::setImageBitmap) ?: run {
-            executor.execute {
-                val bitmap = try {
-                    if (Build.VERSION.SDK_INT >= 29)
-                        context.contentResolver.loadThumbnail(album.cover.uri, Size(300, 300), null)
-                    else {
-                        val id = album.cover.uri.lastPathSegment?.toLongOrNull() ?: -1L
-                        MediaStore.Video.Thumbnails.getThumbnail(context.contentResolver, id,
-                            MediaStore.Video.Thumbnails.MINI_KIND, null)
-                    }
-                } catch (_: Exception) { null }
-                if (bitmap != null) {
-                    synchronized(cache) { cache.put(album.path, bitmap) }
-                    handler.post {
-                        if (holder.thumb.tag == album.path) holder.thumb.setImageBitmap(bitmap)
-                    }
-                }
-            }
+        holder.path.text = album.path.substringBeforeLast('/', "Internal storage")
+        holder.itemView.contentDescription = "${album.displayName}, ${album.count} videos, ${album.path}"
+        holder.glyph.visibility = View.VISIBLE
+        thumbnails.load(holder.thumb, album.cover) { holder.glyph.visibility = View.GONE }
+        holder.more.contentDescription = "Options for ${album.displayName}"
+        holder.more.setOnClickListener {
+            holder.bindingAdapterPosition.takeIf { it in items.indices }?.let { onOptions(items[it]) }
         }
         holder.itemView.setOnClickListener {
             holder.bindingAdapterPosition.takeIf { it in items.indices }?.let { onOpen(items[it]) }
@@ -85,15 +63,18 @@ class FolderAdapter(
             true
         }
     }
-    fun dispose() {
-        executor.shutdownNow()
-        handler.removeCallbacksAndMessages(null)
-        synchronized(cache) { cache.evictAll() }
+    override fun onViewRecycled(holder: Holder) {
+        thumbnails.clear(holder.thumb)
+        super.onViewRecycled(holder)
     }
+    fun dispose() { disposed = true }
     class Holder(root: View) : RecyclerView.ViewHolder(root) {
         val thumb: ImageView = root.findViewById(R.id.folderThumb)
         val title: TextView = root.findViewById(R.id.folderTitle)
         val count: TextView = root.findViewById(R.id.folderCount)
         val pin: TextView = root.findViewById(R.id.folderPinned)
+        val glyph: View = root.findViewById(R.id.folderGlyph)
+        val path: TextView = root.findViewById(R.id.folderPath)
+        val more: View = root.findViewById(R.id.folderMore)
     }
 }

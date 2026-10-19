@@ -13,6 +13,7 @@ import kotlin.math.abs
  */
 class PlayerGestureZone(
     context: Context,
+    private val onGestureStarted: () -> Unit,
     private val onTap: () -> Unit,
     private val onDoubleTap: (Float) -> Unit,
     private val onVerticalScroll: (Boolean, Float) -> Unit,
@@ -27,12 +28,13 @@ class PlayerGestureZone(
     private var horizontalFraction = 0f
     private var zoomAccumulated = 1f
     private var boosting = false
+    private var multiTouch = false
     private val detector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(event: MotionEvent): Boolean = true
 
         override fun onSingleTapConfirmed(event: MotionEvent): Boolean {
             if (boosting) return true
-            onTap()
+            performClick()
             return true
         }
 
@@ -74,6 +76,7 @@ class PlayerGestureZone(
         override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
             zoomAccumulated = 1f
             swipe = Swipe.NONE
+            onGestureCancelled()
             return true
         }
 
@@ -90,9 +93,30 @@ class PlayerGestureZone(
         }
     })
 
+    override fun performClick(): Boolean {
+        super.performClick()
+        onTap()
+        return true
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            multiTouch = false
+            swipe = Swipe.NONE
+            onGestureStarted()
+        }
+        if (event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
+            multiTouch = true
+            swipe = Swipe.NONE
+            onGestureCancelled()
+            if (boosting) { boosting = false; onHoldBoost(false) }
+            val cancel = MotionEvent.obtain(event)
+            cancel.action = MotionEvent.ACTION_CANCEL
+            detector.onTouchEvent(cancel)
+            cancel.recycle()
+        }
         scaleDetector.onTouchEvent(event)
-        if (event.pointerCount == 1 && !scaleDetector.isInProgress) detector.onTouchEvent(event)
+        if (!multiTouch && event.pointerCount == 1 && !scaleDetector.isInProgress) detector.onTouchEvent(event)
         if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
             if (boosting) {
                 boosting = false

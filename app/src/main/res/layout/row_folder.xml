@@ -2,27 +2,38 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent" android:layout_height="wrap_content"
     android:layout_marginHorizontal="5dp" android:layout_marginBottom="13dp"
-    android:orientation="vertical">
-    <FrameLayout android:layout_width="match_parent"
+    android:orientation="vertical" android:padding="7dp" android:background="@drawable/orbit_gallery_card_bg">
+    <com.orbitplayer.app.SquareFrameLayout android:layout_width="match_parent"
         android:layout_height="114dp" android:background="@drawable/orbit_thumb_bg"
         android:clipToOutline="true">
         <ImageView android:id="@+id/folderThumb"
             android:layout_width="match_parent" android:layout_height="match_parent"
             android:scaleType="centerCrop" android:contentDescription="Folder cover" />
+        <ImageView android:id="@+id/folderGlyph" android:layout_width="36dp" android:layout_height="36dp"
+            android:layout_gravity="center" android:src="@drawable/orbit_nav_folder" android:importantForAccessibility="no"/>
+        <ImageView android:id="@+id/folderMore"
+            android:layout_width="48dp" android:layout_height="48dp"
+            android:layout_gravity="top|end" android:layout_margin="5dp"
+            android:padding="14dp" android:background="@drawable/orbit_thumbnail_action_bg"
+            android:src="@drawable/orbit_ic_more"
+            android:contentDescription="Folder options" />
         <TextView android:id="@+id/folderPinned" android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:layout_gravity="top|end"
+            android:layout_height="wrap_content" android:layout_gravity="top|start"
             android:layout_margin="5dp" android:paddingHorizontal="6dp"
             android:paddingVertical="3dp" android:background="@drawable/orbit_duration_bg"
             android:text="★" android:textColor="#FFE79E" android:textSize="12sp"
             android:visibility="gone" />
-    </FrameLayout>
+    </com.orbitplayer.app.SquareFrameLayout>
     <TextView android:id="@+id/folderTitle"
         android:layout_width="match_parent" android:layout_height="wrap_content"
         android:layout_marginTop="8dp" android:ellipsize="end"
         android:maxLines="1" android:textColor="#F4F6FD"
         android:textSize="13sp" android:fontFamily="sans-serif-medium"/>
+    <TextView android:id="@+id/folderPath" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:maxLines="1" android:ellipsize="middle"
+        android:layout_marginTop="3dp" android:textSize="12sp" android:textColor="#A7B4CE" />
     <TextView android:id="@+id/folderCount"
         android:layout_width="match_parent" android:layout_height="wrap_content"
         android:layout_marginTop="3dp" android:textColor="#8998B2"
-        android:textSize="11sp"/>
+        android:textSize="12sp"/>
 </LinearLayout>

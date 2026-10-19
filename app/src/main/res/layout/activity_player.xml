@@ -34,14 +34,16 @@
         android:background="@drawable/player_toolbar_bg">
         <ImageView
             android:id="@+id/back"
-            android:layout_width="46dp"
+            android:layout_width="48dp"
             android:layout_height="48dp"
             android:padding="12dp"
             android:src="@drawable/orbit_ic_back"
             android:contentDescription="Back to videos" />
         <LinearLayout
+            android:id="@+id/playerHeading"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
+            android:gravity="center_vertical"
             android:layout_weight="1"
             android:paddingStart="9dp"
             android:orientation="vertical">
@@ -56,25 +58,26 @@
                 android:textColor="#F7F8FF"
                 android:textSize="15sp" />
             <TextView
+                android:id="@+id/playerContext"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="3dp"
-                android:letterSpacing="0.20"
-                android:text="O R B I T   P R O"
+                android:maxLines="1" android:ellipsize="end"
+                android:text="@string/local_video"
                 android:textColor="#76D7E9"
-                android:textSize="9sp" />
+                android:textSize="12sp" />
         </LinearLayout>
         <ImageView
             android:id="@+id/btnPip"
-            android:layout_width="44dp"
-            android:layout_height="46dp"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:padding="12dp"
             android:src="@drawable/orbit_ic_pip"
             android:contentDescription="Picture in picture" />
         <ImageView
             android:id="@+id/btnMore"
-            android:layout_width="44dp"
-            android:layout_height="46dp"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:padding="10dp"
             android:src="@drawable/orbit_ic_more"
             android:contentDescription="Playback settings" />
@@ -97,12 +100,12 @@
         <LinearLayout
             android:id="@+id/timelineRow"
             android:layout_width="match_parent"
-            android:layout_height="42dp"
+            android:layout_height="48dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
             <TextView
                 android:id="@+id/timeCurrent"
-                android:layout_width="54dp"
+                android:layout_width="wrap_content" android:minWidth="54dp"
                 android:layout_height="wrap_content"
                 android:text="00:00"
                 android:fontFamily="sans-serif-medium"
@@ -112,7 +115,7 @@
             <SeekBar
                 android:id="@+id/playerSeekBar"
                 android:layout_width="0dp"
-                android:layout_height="42dp"
+                android:layout_height="48dp"
                 android:layout_weight="1"
                 android:max="1000"
                 android:progress="0"
@@ -124,9 +127,9 @@
                 android:contentDescription="Video seek bar" />
             <TextView
                 android:id="@+id/timeDuration"
-                android:layout_width="54dp"
-                android:layout_height="wrap_content"
-                android:gravity="end"
+                android:layout_width="wrap_content" android:minWidth="54dp"
+                android:layout_height="match_parent"
+                android:gravity="center_vertical|end"
                 android:text="00:00"
                 android:fontFamily="sans-serif-medium"
                 android:textColor="#E7E9F6"
@@ -150,7 +153,7 @@
                 android:contentDescription="Previous video"/>
             <TextView
                 android:id="@+id/btnRewind"
-                android:layout_width="56dp"
+                android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:gravity="center"
                 android:fontFamily="sans-serif-medium"
@@ -162,14 +165,14 @@
                 android:id="@+id/btnPlayPause"
                 android:layout_width="64dp"
                 android:layout_height="64dp"
-                android:layout_marginHorizontal="12dp"
+                android:layout_marginHorizontal="4dp"
                 android:padding="17dp"
                 android:src="@drawable/orbit_ic_play"
                 android:background="@drawable/orbit_player_play_bg"
                 android:contentDescription="Play or pause video"/>
             <TextView
                 android:id="@+id/btnForward"
-                android:layout_width="56dp"
+                android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:gravity="center"
                 android:fontFamily="sans-serif-medium"
@@ -190,7 +193,7 @@
         <LinearLayout
             android:id="@+id/quickActions"
             android:layout_width="match_parent"
-            android:layout_height="46dp"
+            android:layout_height="48dp"
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:baselineAligned="false">
@@ -198,7 +201,7 @@
                 android:id="@+id/btnLock"
                 android:layout_width="0dp"
                 android:layout_weight="1"
-                android:layout_height="42dp"
+                android:layout_height="48dp"
                 android:gravity="center"
                 android:text="LOCK"
                 android:textColor="#BECADD"
@@ -209,18 +212,18 @@
                 android:id="@+id/btnSubs"
                 android:layout_width="0dp"
                 android:layout_weight="1"
-                android:layout_height="42dp"
+                android:layout_height="48dp"
                 android:gravity="center"
                 android:text="SUBS"
                 android:textColor="#BECADD"
                 android:textSize="11sp"
                 android:letterSpacing="0.04"
-                android:contentDescription="Choose external subtitles"/>
+                android:contentDescription="Subtitle tracks and external files"/>
             <TextView
                 android:id="@+id/btnTracks"
                 android:layout_width="0dp"
                 android:layout_weight="1"
-                android:layout_height="42dp"
+                android:layout_height="48dp"
                 android:gravity="center"
                 android:text="AUDIO"
                 android:textColor="#BECADD"
@@ -231,7 +234,7 @@
                 android:id="@+id/btnSpeed"
                 android:layout_width="0dp"
                 android:layout_weight="1"
-                android:layout_height="42dp"
+                android:layout_height="48dp"
                 android:gravity="center"
                 android:text="1×"
                 android:textColor="#D7DDFF"
@@ -242,7 +245,7 @@
                 android:id="@+id/btnAspect"
                 android:layout_width="0dp"
                 android:layout_weight="1"
-                android:layout_height="42dp"
+                android:layout_height="48dp"
                 android:gravity="center"
                 android:text="FIT"
                 android:textColor="#BECADD"
@@ -288,7 +291,7 @@
     <TextView
         android:id="@+id/btnUnlock"
         android:layout_width="wrap_content"
-        android:layout_height="46dp"
+        android:layout_height="48dp"
         android:layout_gravity="top|start"
         android:layout_margin="15dp"
         android:gravity="center"
