@@ -35,6 +35,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private static final int BLUE = 0xFF4FACFE;
     private FirebaseGateway api;
     private MotionEngine motion;
+    private VoiceRoundGuide voiceGuide;
     private final MotionEvents motionEvents=new MotionEvents();
     private boolean resumed, launchReveal, screenEntry;
     private int displayedTab=-1;
@@ -103,12 +104,15 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(state!=null){tab=state.getInt("tab",0);historyTab=state.getInt("historyTab",0);rankFilter=state.getString("rankFilter","all");profileId=state.getString("profileId");customStart=state.getLong("customStart");customEnd=state.getLong("customEnd");searchQuery=state.getString("searchQuery","");}
         if(state!=null)analyticsState.restore(state);
         buildShell();
+        voiceGuide=new VoiceRoundGuide(this,motion,this::saveVoiceRound);
+        voiceGuide.restore(state);
         clock.post(tick);
         api=new FirebaseGateway(this,this,getString(R.string.firebase_web_api_key));
         api.start();
     }
     @Override protected void onDestroy() {
         persistDraft();
+        if(voiceGuide!=null)voiceGuide.destroy();
         if(authDialog!=null){authDialog.dismiss();authDialog=null;}
         if(motion!=null)motion.close();
         clock.removeCallbacksAndMessages(null);
@@ -198,14 +202,14 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(tab==2&&roundSaveView!=null&&roundPreviewSection!=null&&roundHintView!=null)
             updateRoundForm();
     }
-    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);analyticsState.save(state);persistDraft();state.putInt("tab",tab);state.putInt("historyTab",historyTab);state.putString("rankFilter",rankFilter);state.putString("profileId",profileId);state.putLong("customStart",customStart);state.putLong("customEnd",customEnd);state.putString("searchQuery",searchQuery);}
+    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);if(voiceGuide!=null)voiceGuide.saveState(state);analyticsState.save(state);persistDraft();state.putInt("tab",tab);state.putInt("historyTab",historyTab);state.putString("rankFilter",rankFilter);state.putString("profileId",profileId);state.putLong("customStart",customStart);state.putLong("customEnd",customEnd);state.putString("searchQuery",searchQuery);}
     @Override protected void onResume(){
-        super.onResume();resumed=true;motion.resume();motionEvents.invalidate();if(api!=null)api.setForeground(true);
+        super.onResume();resumed=true;if(voiceGuide!=null)voiceGuide.resume();motion.resume();motionEvents.invalidate();if(api!=null)api.setForeground(true);
         if(launchReveal){launchReveal=false;motion.enter(root,0);}
         if(deferredRoundResult!=null){Map<String,Object> result=deferredRoundResult;deferredRoundResult=null;showRoundSaved(result,false);}
         if(deferredSessionSummary!=null){Map<String,Object> result=deferredSessionSummary;deferredSessionSummary=null;showSessionSummary(result,false);}
     }
-    @Override protected void onPause(){if(api!=null)api.setForeground(false);resumed=false;sessionStartRevealUntil=0;motionEvents.invalidate();if(motion!=null)motion.pause();persistDraft();super.onPause();}
+    @Override protected void onPause(){if(voiceGuide!=null)voiceGuide.pause();if(api!=null)api.setForeground(false);resumed=false;sessionStartRevealUntil=0;motionEvents.invalidate();if(motion!=null)motion.pause();persistDraft();super.onPause();}
     MotionEngine motionEngine(){return motion;}
 
     private boolean persistDraft(){
@@ -1026,6 +1030,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(playing==null)playing=activeIds();
         if(active.size()<3){empty("At least 3 active players are required.");return;}
         roundPlayingButtons.clear();roundHukumButtons.clear();roundPartnerButtons.clear();
+        content.addView(button("🎙  Voice se round add karo",false,this::startVoiceRound));
+        gap(content,8);content.addView(text("Optional voice guide. Neeche purana manual form bhi use kar sakte ho.",12,MUTED,false));gap(content,18);
 
         label(content,"01  •  Who's playing");
         LinearLayout participants=panel();
@@ -1220,7 +1226,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private Map<String,Integer> scoreChanges() {
         return ScoreRules.calculate(new ArrayList<>(playing),bid,hukum,new ArrayList<>(partners),outcome);
     }
-    private void saveRound() {
+    private void saveRound() {saveRound(false);}
+    private void saveRound(boolean voiceConfirmed) {
         if(roundSaving||busy){Toast.makeText(this,"A save is already in progress",Toast.LENGTH_SHORT).show();return;}
         if(!validRound()){motion.error(roundHintView);Toast.makeText(this,"Complete the round details first",Toast.LENGTH_SHORT).show();return;}
         List<String> pIds=new ArrayList<>(playing), partnerIds=new ArrayList<>(partners), opponentIds=new ArrayList<>();
@@ -1234,22 +1241,40 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                 "partnerIds",partnerIds,"partnerNames",partnerNames,
                 "nonPartnerIds",opponentIds,"nonPartnerNames",opponentNames,
                 "playerIds",pIds,"result",outcome,"scoreChanges",scores);
+        Runnable confirmedSave=()->{
+            String key=bid+"|"+hukum+"|"+outcome+"|"+
+                    new TreeSet<>(playing)+"|"+new TreeSet<>(partners);
+            if(pendingRoundKey!=null&&!key.equals(pendingRoundKey)){
+                notice("An earlier round is unconfirmed. Restore that selection and retry before changing it.");return;
+            }
+            if(pendingRoundId==null){pendingRoundKey=key;pendingRoundId=UUID.randomUUID().toString();pendingRoundTimestamp=Instant.now().toString();}
+            if(pendingRoundJson==null){Map<String,Object> durable=new LinkedHashMap<>(body);durable.put("timestamp",pendingRoundTimestamp);pendingRoundJson=new org.json.JSONObject(durable).toString();}
+            if(!persistDraft()){notice("Could not persist this round safely. Free storage and retry.");return;}
+            sendPendingRound();
+        };
+        if(voiceConfirmed){confirmedSave.run();return;}
         new MotionDialogBuilder(this,motion)
                 .setTitle("Save this round?")
                 .setMessage("Bid "+bid+" · "+nameOf(hukum)+" · "+("win".equals(outcome)?"Hukum win":"Hukum lose")+
                         "\n\nThis will add one new round to your existing Firebase data.")
                 .setNegativeButton("Cancel",null)
-                .setPositiveButton("Save Round",(d,w)->{
-                    String key=bid+"|"+hukum+"|"+outcome+"|"+
-                            new TreeSet<>(playing)+"|"+new TreeSet<>(partners);
-                    if(pendingRoundKey!=null&&!key.equals(pendingRoundKey)){
-                        notice("An earlier round is unconfirmed. Restore that selection and retry before changing it.");return;
-                    }
-                    if(pendingRoundId==null){pendingRoundKey=key;pendingRoundId=UUID.randomUUID().toString();pendingRoundTimestamp=Instant.now().toString();}
-                    if(pendingRoundJson==null){Map<String,Object> durable=new LinkedHashMap<>(body);durable.put("timestamp",pendingRoundTimestamp);pendingRoundJson=new org.json.JSONObject(durable).toString();}
-                    if(!persistDraft()){notice("Could not persist this round safely. Free storage and retry.");return;}
-                    sendPendingRound();
-                }).show();
+                .setPositiveButton("Save Round",(d,w)->confirmedSave.run()).show();
+    }
+    private void startVoiceRound(){
+        if(!loggedIn||roundSaving||busy||pendingRoundId!=null){notice("Finish or retry the pending round before starting voice entry.");return;}
+        Map<String,String> roster=new LinkedHashMap<>();for(Map<String,Object> p:activePlayers())roster.put(id(p),str(p,"name"));
+        if(roster.size()<3){notice("At least 3 active players are required.");return;}
+        Collection<String> previous=playing==null?Collections.emptyList():playing;
+        if(!cachedGames.isEmpty())previous=strings(cachedGames.get(0).get("playerIds"));
+        voiceGuide.open(new VoiceRoundDraft(roster,previous));
+    }
+    private boolean saveVoiceRound(VoiceRoundDraft draft){
+        if(!loggedIn||!hasData||!liveConnected||roundSaving||busy||pendingRoundId!=null)return false;
+        Set<String> active=activeIds();
+        for(String pid:draft.players)if(!active.contains(pid)||!nameOf(pid).equals(draft.name(pid))){notice("Players changed. Cancel voice and start with the updated table.");return false;}
+        try{draft.scores();}catch(IllegalArgumentException invalid){notice(invalid.getMessage());return false;}
+        playing=new LinkedHashSet<>(draft.players);hukum=draft.hukum;bid=draft.bid;partners.clear();partners.addAll(draft.partners);outcome=draft.result;
+        updateRoundForm();persistDraft();saveRound(true);return pendingRoundId!=null||roundSaving;
     }
     private void retryPendingRound(){
         if(pendingRoundId==null||pendingRoundJson==null){notice("No unconfirmed round");return;}
@@ -1716,6 +1741,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
+        if(voiceGuide!=null&&voiceGuide.result(request,result,data))return;
         if(request==700&&result==RESULT_OK&&data!=null&&data.getData()!=null&&pendingExport!=null){
             final byte[] bytes=pendingExport;final android.net.Uri uri=data.getData();pendingExport=null;
             new Thread(()->{try(java.io.OutputStream out=getContentResolver().openOutputStream(uri)){if(out==null)throw new java.io.IOException("Cannot open file");out.write(bytes);runOnUiThread(()->{exportedFingerprint=pendingExportFingerprint;notice("Backup saved");});}catch(Exception error){runOnUiThread(()->notice("Backup failed: "+error.getMessage()));}}).start();
