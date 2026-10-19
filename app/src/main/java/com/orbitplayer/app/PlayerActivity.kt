@@ -293,7 +293,7 @@ class PlayerActivity : Activity() {
                 android.util.Log.e("OrbitPlayer", "Player startup failed", error)
                 AlertDialog.Builder(this)
                     .setTitle("Player could not start")
-                    .setMessage((error.message ?: error.javaClass.simpleName).take(1200) + "\\n\\nPlease copy any error report shown after reopening the app.")
+                    .setMessage((error.message ?: error.javaClass.simpleName).take(1200) + "\n\nCheck file access or choose a different video.")
                     .setPositiveButton("Close") { _, _ -> finish() }
                     .setCancelable(false)
                     .show()

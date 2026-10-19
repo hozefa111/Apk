@@ -23,6 +23,18 @@ internal data class LibraryAlbum(val path: String, val items: List<LibraryEntry>
 
 /** Call on a worker. Stable tie breakers make refreshes predictable. No Android I/O. */
 internal object LibraryEngine {
+    /** Prefer the last played accessible unfinished item; otherwise the newest one. */
+    fun continueWatching(source: List<LibraryEntry>, preferred: String?, positions: Map<String, Long>,
+        hidden: Set<String>): LibraryEntry? {
+        var newest: LibraryEntry? = null
+        for (entry in source) {
+            if (entry.folder in hidden || !hasResumePosition(positions[entry.key] ?: 0, entry.durationMs)) continue
+            if (entry.key == preferred) return entry
+            if (newest == null || entry.modifiedSeconds > newest.modifiedSeconds) newest = entry
+        }
+        return newest
+    }
+
     fun videos(source: List<LibraryEntry>, query: LibraryQuery): List<LibraryEntry> {
         val playlist = query.playlist?.withIndex()?.associate { it.value to it.index }
         val history = query.history.withIndex().associate { it.value to it.index }

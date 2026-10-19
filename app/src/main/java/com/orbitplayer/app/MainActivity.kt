@@ -81,6 +81,8 @@ class MainActivity : Activity() {
     private val filterExecutor = Executors.newSingleThreadExecutor()
     private var filterTask: Future<*>? = null
     private var filterGeneration = 0
+    private var continueTask: Future<*>? = null
+    private var continueGeneration = 0
     private var albumScroll: Parcelable? = null
     private var returningToAlbums = false
     private var albumQuery = ""
@@ -461,13 +463,13 @@ class MainActivity : Activity() {
                     allVideos = result.getOrDefault(emptyList())
                     rebuildFolders()
                     filterVideos()
-                    refreshContinueCard()
                 } else {
                     allVideos = emptyList()
                     rebuildFolders()
                     filterVideos()
                     status.text = "Library could not be read. Open a video instead."
                 }
+                refreshContinueCard()
             }
         }
     }
@@ -480,14 +482,6 @@ class MainActivity : Activity() {
             folderOptions.drop(1).toSet()).apply()
     }
 
-    private fun savedPosition(item: VideoItem): Long =
-        progress.getLong("position_${item.uri.toString().hashCode()}", 0L)
-
-    private fun hasProgress(item: VideoItem): Boolean {
-        val pos = savedPosition(item)
-        return item.durationMs > 0L && pos >= 3_000L && pos < item.durationMs - 5_000L
-    }
-
     private fun filterVideos() {
         // Albums have their own search/grouping logic. Avoid diffing and sorting the
         // entire video list invisibly whenever the user browses default Folders.
@@ -496,21 +490,27 @@ class MainActivity : Activity() {
             return
         }
         val source = allVideos
-        val history = progress.getString("recently_watched", "")?.split("|")
-            ?.filter { it.isNotBlank() }.orEmpty()
-        val stored = progress.all
+        val playlistName = currentPlaylist
         val request = LibraryQuery(
             text = query, folder = chosenFolder, format = selectedFormat,
             filter = if (tab == Tab.CONTINUE && filter != Filter.HISTORY) "CONTINUE" else filter.name,
-            sort = sort.name, hidden = preferences.folders("hidden"),
-            favorites = collections.favorites(), history = history,
-            playlist = currentPlaylist?.let(collections::items))
+            sort = sort.name)
         val token = ++filterGeneration
         filterTask?.cancel(true)
         filterTask = filterExecutor.submit {
             val byKey = source.associateBy { it.uri.toString() }
-            val snapshot = request.copy(positions = source.associate { it.uri.toString() to
-                (stored["position_${it.uri.toString().hashCode()}"] as? Long ?: 0L) })
+            // SharedPreferences snapshots/playlist JSON can grow with the library.
+            // Read them on the worker, and only copy positions for a resume filter.
+            val stored = if (request.filter == "CONTINUE") progress.all else emptyMap()
+            val snapshot = request.copy(
+                hidden = preferences.folders("hidden"),
+                favorites = if (request.filter == "FAVORITES") collections.favorites() else emptySet(),
+                history = if (request.filter == "HISTORY") progress.getString("recently_watched", "")
+                    ?.split("|")?.filter(String::isNotBlank).orEmpty() else emptyList(),
+                playlist = playlistName?.let(collections::items),
+                positions = if (request.filter == "CONTINUE") byKey.keys.associateWith {
+                    stored["position_${it.hashCode()}"] as? Long ?: 0L
+                } else emptyMap())
             val result = LibraryEngine.videos(source.map { it.entry() }, snapshot).mapNotNull { byKey[it.key] }
             handler.post {
                 if (destroyed || token != filterGeneration) return@post
@@ -571,20 +571,39 @@ class MainActivity : Activity() {
     }
 
     private fun refreshContinueCard() {
-        val preferred = progress.getString("last_played_uri", null)
-        val hidden = preferences.folders("hidden")
-        val accessible = allVideos.filterNot { it.folder in hidden }
-        continueVideo = accessible.firstOrNull { it.uri.toString() == preferred && hasProgress(it) }
-            ?: accessible.filter(::hasProgress).maxByOrNull { it.modifiedSeconds }
-        val item = continueVideo
-        continueCard.visibility =
-            if (item == null || tab != Tab.VIDEOS || chosenFolder != "All folders") View.GONE
-            else View.VISIBLE
-        if (item == null) return
-        findViewById<TextView>(R.id.continueTitle).text = item.title
-        findViewById<TextView>(R.id.continueDetails).text =
-            "${formatDuration(savedPosition(item))} watched  ·  ${formatDuration(item.durationMs)} total"
-        thumbnails.load(continueThumb, item)
+        val source = allVideos
+        val token = ++continueGeneration
+        continueTask?.cancel(true)
+        // Preferences may have just hidden a folder or cleared all progress.
+        // Do not leave the previous card clickable while the fresh snapshot runs.
+        continueVideo = null
+        continueCard.visibility = View.GONE
+        if (source.isEmpty()) {
+            thumbnails.clear(continueThumb)
+            renderChrome()
+            return
+        }
+        continueTask = filterExecutor.submit {
+            val stored = progress.all
+            val positions = source.associate { it.uri.toString() to
+                (stored["position_${it.uri.toString().hashCode()}"] as? Long ?: 0L) }
+            val selected = LibraryEngine.continueWatching(source.map { it.entry() },
+                stored["last_played_uri"] as? String, positions, preferences.folders("hidden"))
+            val item = selected?.let { entry -> source.firstOrNull { it.uri.toString() == entry.key } }
+            val position = selected?.let { positions[it.key] } ?: 0L
+            handler.post {
+                if (destroyed || token != continueGeneration) return@post
+                continueVideo = item
+                if (item == null) thumbnails.clear(continueThumb)
+                else {
+                    findViewById<TextView>(R.id.continueTitle).text = item.title
+                    findViewById<TextView>(R.id.continueDetails).text =
+                        "${formatDuration(position)} watched  ·  ${formatDuration(item.durationMs)} total"
+                    thumbnails.load(continueThumb, item)
+                }
+                renderChrome()
+            }
+        }
     }
 
     private fun open(item: VideoItem, playAll: Boolean = false) {
@@ -1036,6 +1055,7 @@ class MainActivity : Activity() {
                         .setNegativeButton("Cancel", null)
                         .setPositiveButton("Hide") { _, _ ->
                             preferences.setFolder("hidden", album.path, true)
+                            refreshContinueCard()
                             updateAlbums()
                         }.show()
                 }
@@ -1057,6 +1077,8 @@ class MainActivity : Activity() {
         ++scanGeneration
         ++filterGeneration
         filterTask?.cancel(true)
+        ++continueGeneration
+        continueTask?.cancel(true)
         filterExecutor.shutdownNow()
         executor.shutdownNow()
         adapter.dispose()

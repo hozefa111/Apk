@@ -61,6 +61,18 @@ class LibraryEngineTest {
         assertFalse(hasResumePosition(55_000,60_000))
         assertFalse(hasResumePosition(5_000,0))
     }
+    @Test fun continueCardPrefersLastPlayedAndFallsBackWithoutExposingHiddenMedia() {
+        val source = listOf(video("old", date=1), video("new", date=20),
+            video("hidden", folder="Hidden", date=30), video("finished", date=40),
+            video("unstarted", date=50), video("unknown", duration=0, date=60))
+        val positions = mapOf("old" to 3_000L, "new" to 10_000L, "hidden" to 10_000L,
+            "finished" to 55_000L, "unstarted" to 2_000L, "unknown" to 10_000L)
+        assertEquals("old", LibraryEngine.continueWatching(source,"old",positions,setOf("Hidden"))?.key)
+        for (preferred in listOf(null,"missing","hidden","finished","unstarted","unknown"))
+            assertEquals("new", LibraryEngine.continueWatching(source,preferred,positions,setOf("Hidden"))?.key)
+        assertNull(LibraryEngine.continueWatching(source,null,emptyMap(),emptySet()))
+        assertNull(LibraryEngine.continueWatching(emptyList(),null,positions,emptySet()))
+    }
     @Test fun generatedLibrariesKeepCountsSearchAndOrderedQueuesAtScale() {
         for (size in listOf(0,1,10,100,1_000,10_000)) {
             val source=(0 until size).map { video("id$it",folder="Folder/${it%50}",duration=it*1000L) }
@@ -72,6 +84,10 @@ class LibraryEngineTest {
             assertEquals(source.count { it.folder=="Folder/1" },LibraryEngine.videos(source,LibraryQuery(folder="Folder/1")).size)
             val order=source.takeLast(100).reversed().map { it.key }
             assertEquals(order,LibraryEngine.videos(source,LibraryQuery(playlist=order)).map { it.key })
+            val positions=source.associate { it.key to 4_000L }
+            val eligible=source.filter { hasResumePosition(4_000,it.durationMs) }
+            assertEquals(eligible.firstOrNull()?.key,
+                LibraryEngine.continueWatching(source,eligible.firstOrNull()?.key,positions,emptySet())?.key)
             println("LIBRARY_FIXTURE size=$size elapsedMs=${(System.nanoTime()-start)/1_000_000.0}")
         }
     }
