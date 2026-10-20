@@ -33,7 +33,7 @@ public class NativeScoreboardTest {
         try(ActivityScenario<MainActivity> s=ActivityScenario.launch(MainActivity.class)){await("Table Status");s.onActivity(a->seed(a,false,true));see("Big Scoreboard");onView(withText("Big Scoreboard")).perform(click());await("Big Scoreboard");
             see("Screen on · Off");onView(withText("Screen on · Off")).perform(click());see("Screen on · On");
             s.onActivity(a->assertTrue((a.getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)!=0));capture("45-big-scoreboard");s.recreate();await("Big Scoreboard");see("Screen on · On");
-            s.onActivity(a->a.onBackPressed());await("Leaderboard");s.onActivity(a->{assertEquals(3,get(a,"tab"));assertFalse((a.getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)!=0);});
+            s.onActivity(a->a.onBackPressed());Thread.sleep(700);s.onActivity(a->assertEquals(get(a,"bigOriginScroll"),((android.widget.ScrollView)get(a,"scroll")).getScrollY()));see("Leaderboard");s.onActivity(a->{assertEquals(3,get(a,"tab"));assertFalse((a.getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)!=0);});
         }
     }
     @Test public void currentSessionWithoutActiveSessionShowsNoInventedScores()throws Exception{
@@ -42,7 +42,7 @@ public class NativeScoreboardTest {
     @Test public void scoreCardsShowPersonalChangeAndSessionAndOfflineBigState()throws Exception{
         try(ActivityScenario<MainActivity> s=ActivityScenario.launch(MainActivity.class)){await("Table Status");s.onActivity(a->seed(a,false,true));see("Last played round  +100");see("70 points behind leader");
             see("Big Scoreboard");onView(withText("Big Scoreboard")).perform(click());await("Big Scoreboard");s.onActivity(a->a.syncState(false));see("Offline · saved scores");capture("47-scoreboard-offline");
-            s.onActivity(a->a.onBackPressed());await("Leaderboard");
+            s.onActivity(a->a.onBackPressed());Thread.sleep(700);s.onActivity(a->assertEquals(get(a,"bigOriginScroll"),((android.widget.ScrollView)get(a,"scroll")).getScrollY()));see("Leaderboard");
         }
     }
     private String shell(String cmd)throws Exception{android.os.ParcelFileDescriptor fd=InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand(cmd);try(java.io.InputStream in=new android.os.ParcelFileDescriptor.AutoCloseInputStream(fd);java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream()){byte[] b=new byte[4096];int n;while((n=in.read(b))!=-1)out.write(b,0,n);return out.toString("UTF-8").trim();}}
