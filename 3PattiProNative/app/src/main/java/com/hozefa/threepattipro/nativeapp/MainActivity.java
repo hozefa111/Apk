@@ -69,7 +69,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private long syncRetryAt;
     private boolean quotaPaused;
     private int tab=0, historyTab=0;
-    private String scoreboardScope="all";
+    private String scoreboardScope="all",lastScoreboardContext="";
     private boolean bigKeepAwake,scoreboardLeaderChanged;
     private int bigOriginScroll;
     private final Map<String,Integer> scoreboardMoves=new HashMap<>();
@@ -927,6 +927,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private ScoreboardModel scoreboardModel(boolean home){return new ScoreboardModel(players,scoreboardSource(home),AdvancedAnalytics.scope(gameRounds(),sessions,"current"));}
     private String scoreboardContext(boolean home){return ("current".equals(scoreboardScope)?"current:":"")+(home?"home":rankFilter+":"+customStart+":"+customEnd);}
     private ScoreboardPage scoreboardPage(LinearLayout target,ScoreboardModel model,boolean home){
+        String context=scoreboardContext(home);
+        if(!context.equals(lastScoreboardContext)){scoreboardMoves.clear();scoreboardLeaderChanged=false;lastScoreboardContext=context;}
         return new ScoreboardPage(this,motion,target,model,scoreboardContext(home),scoreboardMoves,activeSession()!=null,scoreboardLeaderChanged&&scoreMotion!=null,pid->{profileId=pid;tab=5;profileRoundVisible=20;render(true);});
     }
     private void scoreboardControls(LinearLayout target,boolean dates){

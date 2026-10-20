@@ -100,6 +100,9 @@ public class NativeMotionTest {
                 a.dataUpdated(new ArrayList<>(players),new ArrayList<>(Arrays.asList(first,second,third)),new ArrayList<>());
                 assertEquals("Reconnect must not replay point deltas",before,a.motionEngine().deltaCount());assertEquals(0,a.motionEngine().activeCount());
             });
+            onView(withText("Today")).perform(scrollTo(),click());
+            onView(withText("↑ 1 position")).check(doesNotExist());
+            onView(withText("↓ 1 position")).check(doesNotExist());
             scenario.moveToState(Lifecycle.State.CREATED);scenario.moveToState(Lifecycle.State.RESUMED);
             onView(withText("↑ 1 position")).check(doesNotExist());
             onView(withText("↓ 1 position")).check(doesNotExist());
