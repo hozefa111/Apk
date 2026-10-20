@@ -15,6 +15,10 @@ public class OnlineGameTest {
    assertTrue("Native auth exchange completed",ready);
    String nativeUid=com.google.firebase.auth.FirebaseAuth.getInstance(com.google.firebase.FirebaseApp.getInstance("three-patti-native")).getCurrentUser().getUid();
    assertEquals(org.json.JSONObject.quote(nativeUid),js(scenario,"user.uid"));
+   scenario.recreate();until=System.currentTimeMillis()+60000;ready=false;
+   while(System.currentTimeMillis()<until){if("true".equals(js(scenario,"document.documentElement.dataset.nativeIdentity==='ready' && !!user"))){ready=true;break;}Thread.sleep(300);}
+   assertTrue("Native auth exchange survives Activity recreation",ready);
+   assertEquals(org.json.JSONObject.quote(nativeUid),js(scenario,"user.uid"));
   }
  }
 }

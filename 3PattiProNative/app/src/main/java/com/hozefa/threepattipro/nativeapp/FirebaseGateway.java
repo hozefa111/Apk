@@ -244,7 +244,13 @@ public final class FirebaseGateway {
         administrator=false;
         if(!auth.getCurrentUser().isAnonymous()) {
             administrator=Boolean.TRUE.equals(result.getClaims().get("admin"));
-            if(!administrator)administrator=Tasks.await(firestore.collection("admins").document(auth.getCurrentUser().getUid()).get(Source.SERVER),20,TimeUnit.SECONDS).exists();
+            if(!administrator){
+                // Restore the previously server-verified role when reopening offline.
+                // Pending local role writes are never trusted; mutations additionally
+                // require a fresh live snapshot and server rules check authorization.
+                DocumentSnapshot role=Tasks.await(firestore.collection("admins").document(auth.getCurrentUser().getUid()).get(Source.DEFAULT),20,TimeUnit.SECONDS);
+                administrator=role.exists()&&!role.getMetadata().hasPendingWrites();
+            }
         }
         ui.post(()->{if(running)listener.authChanged(loggedIn());});
     }
