@@ -23,7 +23,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -31,11 +31,13 @@ jobs:
         with:
           gradle-version: '8.9'
       - run: npm ci --prefix 3PattiProNative/tests/online-backend/functions/online
-      - run: npm install --global firebase-tools@14.17.0
+      - run: npm install --global firebase-tools@15.34.0
       - name: Provision Android platform with download retries
         run: |
+          KALI_SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$KALI_SDKMANAGER"
           for attempt in 1 2 3; do
-            if sdkmanager --install "platforms;android-${{ matrix.api }}" "build-tools;35.0.0"; then
+            if "$KALI_SDKMANAGER" --install "platforms;android-${{ matrix.api }}" "build-tools;35.0.0"; then
               exit 0
             fi
           done
