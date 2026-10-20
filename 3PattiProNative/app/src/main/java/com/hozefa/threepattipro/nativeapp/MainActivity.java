@@ -114,7 +114,16 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         clock.post(tick);
         api=new FirebaseGateway(this,this,getString(R.string.firebase_web_api_key));
         api.start();
+        if(state==null)openOnlineInvite(getIntent());
     }
+    private void openOnlineInvite(Intent intent){
+        android.net.Uri uri=intent.getData();
+        if(uri==null||!"https".equals(uri.getScheme())||!"hozefa111.github.io".equals(uri.getHost())||uri.getPath()==null||!uri.getPath().startsWith("/hh/online/"))return;
+        String fragment=uri.getFragment();
+        String code=fragment!=null&&fragment.startsWith("join=")?fragment.substring(5):uri.getQueryParameter("join");
+        if(code!=null&&code.matches("[A-Z2-9]{8}"))startActivity(new Intent(this,OnlineGameActivity.class).putExtra("roomCode",code));
+    }
+    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);openOnlineInvite(intent);}
     @Override protected void onDestroy() {
         persistDraft();
         if(voiceGuide!=null)voiceGuide.destroy();
@@ -216,7 +225,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("scoreboardScope",scoreboardScope);state.putBoolean("bigKeepAwake",bigKeepAwake);state.putInt("bigOriginScroll",bigOriginScroll);if(voiceGuide!=null)voiceGuide.saveState(state);analyticsState.save(state);persistDraft();state.putInt("tab",tab);state.putInt("historyTab",historyTab);state.putString("rankFilter",rankFilter);state.putString("profileId",profileId);state.putLong("customStart",customStart);state.putLong("customEnd",customEnd);state.putString("searchQuery",searchQuery);}
     @Override protected void onResume(){
-        super.onResume();resumed=true;applyScoreboardWake();if(voiceGuide!=null)voiceGuide.resume();motion.resume();motionEvents.invalidate();if(hasData&&(tab==0||tab==3||tab==10))render(false);if(api!=null)api.setForeground(true);
+        super.onResume();resumed=true;if(settings.getBoolean("online_sign_in_requested",false)){settings.edit().remove("online_sign_in_requested").apply();clock.post(this::loginDialog);}applyScoreboardWake();if(voiceGuide!=null)voiceGuide.resume();motion.resume();motionEvents.invalidate();if(hasData&&(tab==0||tab==3||tab==10))render(false);if(api!=null)api.setForeground(true);
         if(launchReveal){launchReveal=false;motion.enter(root,0);}
         if(deferredRoundResult!=null){Map<String,Object> result=deferredRoundResult;deferredRoundResult=null;showRoundSaved(result,false);}
         if(deferredSessionSummary!=null){Map<String,Object> result=deferredSessionSummary;deferredSessionSummary=null;showSessionSummary(result,false);}
@@ -295,7 +304,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     private List<Map<String,Object>> gameRounds() { return cachedGames; }
     private Map<String,Object> activeSession() {
-        for(Map<String,Object> s:sessions)if(s.get("endTime")==null)return s;
+        for(Map<String,Object> s:sessions)if(s.get("endTime")==null&&!"online".equals(str(s,"source")))return s;
         return null;
     }
     private int scoreOf(String pid,List<Map<String,Object>> source) {
@@ -469,6 +478,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             if(hasData){gap(banner,8);banner.addView(text("Showing the last saved table. Changes are disabled until live sync returns.",13,WHITE,false));}
             content.addView(banner);gap(content,14);
         }
+        if(!hasData && tab==0){
+            TextView onlineFallback=button("♠  Play Online · Kali Ki Tidi",true,()->startActivity(new Intent(this,OnlineGameActivity.class)));onlineFallback.setContentDescription("Play Online Kali Ki Tidi");content.addView(onlineFallback);gap(content,16);
+        }
         if(!hasData && tab<6 && syncProblem!=null){
             gap(content,24);content.addView(text("Your table has not loaded yet",20,GOLD,true));gap(content,12);
             content.addView(text("This connection error does not delete your points. A fresh install needs one successful connection before an offline table is available. You can leave this screen; the app will retry while open.",14,MUTED,false));
@@ -516,6 +528,15 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     private void home() {
         title(content,"Table Status","3 Patti PRO · Live Game Dashboard");
+        LinearLayout onlineCard=panel();
+        onlineCard.setBackground(gradient(0xFF234C36,0xFF10271F,22));
+        onlineCard.addView(text("♠  PLAY ONLINE  ↗",23,GOLD,true));
+        onlineCard.addView(text("Kali Ki Tidi · Friends & computers · 250 points",12,WHITE,false));
+        onlineCard.setContentDescription("Play Online Kali Ki Tidi");
+        onlineCard.setFocusable(true);
+        onlineCard.setForeground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x35FFE197),null,null));
+        onlineCard.setOnClickListener(v->startActivity(new Intent(this,OnlineGameActivity.class)));
+        content.addView(onlineCard);gap(content,16);
         List<Map<String,Object>> games=gameRounds();
         List<Map<String,Object>> active=activePlayers();
         String winner="—";
@@ -884,7 +905,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             LinkedHashSet<String> order=new LinkedHashSet<>(strings(round.get("playerIds")));order.addAll(changes.keySet());
             for(String pid:order)if(changes.containsKey(pid)){
                 String role=pid.equals(str(round,"hukumId"))?"Hukum":strings(round.get("partnerIds")).contains(pid)?"Partner":"Non-partner";
-                DialogUi.score(body,nameOf(pid),role,num(changes.get(pid)));
+                DialogUi.score(body,roundName(round,pid),role,num(changes.get(pid)));
             }
         }
         return DialogUi.scroll(this,body);
@@ -1017,7 +1038,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         }
     }
     private void sessionActions(Map<String,Object> session) {
-        if(!loggedIn){showSessionSummary(session);return;}
+        if(!loggedIn||"online".equals(str(session,"source"))){showSessionSummary(session);return;}
         new MotionDialogBuilder(this,motion)
                 .setTitle(str(session,"sessionName"))
                 .setItems(new String[]{"View Summary","Share Summary Image","Edit Session Name","Delete Session"},
@@ -1052,7 +1073,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             gap(card,8);
             for(Map.Entry<String,Object> entry:map(r.get("scoreChanges")).entrySet()){
                 int change=num(entry.getValue());
-                line(card,nameOf(entry.getKey()),(change>0?"+":"")+change,change>0?GREEN:change<0?RED:MUTED);
+                line(card,roundName(r,entry.getKey()),(change>0?"+":"")+change,change>0?GREEN:change<0?RED:MUTED);
             }
         }
         card.setClickable(true);card.setFocusable(true);
@@ -1061,13 +1082,17 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         card.setOnClickListener(v->roundActions(r));
         content.addView(card);gap(content,10);
     }
+    private String roundName(Map<String,Object> round,String pid){
+        for(Map<String,Object> p:players)if(id(p).equals(pid))return str(p,"name");
+        return AdvancedAnalytics.historicalName(round,pid);
+    }
     private void roundActions(Map<String,Object> round) {
         AlertDialog.Builder dialog=new MotionDialogBuilder(this,motion)
                 .setTitle("Round · "+when(round.get("timestamp")))
                 .setView(roundDetailBody(round,false))
                 .setPositiveButton("Details",(d,w)->roundDetails(round))
                 .setNeutralButton("Share Image",(d,w)->shareRound(round));
-        if(loggedIn)dialog.setNegativeButton("Delete",(d,w)->confirmRemove("rounds",round,"round"));
+        if(loggedIn&&!"online".equals(str(round,"source")))dialog.setNegativeButton("Delete",(d,w)->confirmRemove("rounds",round,"round"));
         else dialog.setNegativeButton("Close",null);
         dialog.show();
     }
@@ -1419,6 +1444,11 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                         .setPositiveButton("Delete",(dlg,which)->api.deleteDocument(collection,id(record),noun+" deleted",str(record,"_updateTime"))).show())
                 .show();
     }
+    private String sessionParticipantName(Map<String,Object> session,String pid){
+        Object board=session.get("leaderboard");
+        if(board instanceof List)for(Object item:(List<?>)board){Map<String,Object> p=map(item);if(pid.equals(id(p))||pid.equals(str(p,"playerId")))return str(p,"name");}
+        return nameOf(pid);
+    }
     private void showSessionSummary(Map<String,Object> session) {showSessionSummary(session,false);}
     private void showSessionSummary(Map<String,Object> session,boolean celebrate) {
         ScrollView scroller=new DialogUi.BoundedScroll(this);
@@ -1462,7 +1492,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             List<String> ids=strings(badges.get(label[0]));
             if(ids.isEmpty())continue;
             List<String> names=new ArrayList<>();
-            for(String pid:ids)names.add(nameOf(pid));
+            for(String pid:ids)names.add(sessionParticipantName(session,pid));
             line(awards,label[1],android.text.TextUtils.join(", ",names),GOLD);
         }
         display.addView(awards);gap(display,14);
@@ -1564,7 +1594,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         int count=0;
         for(Map<String,Object> round:gameRounds()){
             long t=time(round.get("timestamp"));
-            if(t>=since&&t<=System.currentTimeMillis())count++;
+            if(SessionMembership.includes(round,active))count++;
         }
         if(count==0){
             new MotionDialogBuilder(this,motion).setTitle("End empty session?")
@@ -1586,7 +1616,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         List<Map<String,Object>> r=new ArrayList<>();
         for(Map<String,Object> game:gameRounds()) {
             long t=time(game.get("timestamp"));
-            if(t>=start&&t<=end)r.add(game);
+            if(SessionMembership.includes(game,s))r.add(game);
         }
         Map<String,Object> update=SessionSummary.compute(players,r);
         update.put("endTime",FirebaseGateway.now());
@@ -1625,10 +1655,10 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         String hukumId=str(round,"hukumId");
         List<String> ids=strings(round.get("playerIds")),partners=strings(round.get("partnerIds"));
         Map<String,Object> changes=map(round.get("scoreChanges"));
-        if(ids.isEmpty())ids=new ArrayList<>(changes.keySet());
+        if("online".equals(str(round,"source"))||ids.isEmpty())ids=new ArrayList<>(changes.keySet());
         for(String pid:ids)if(changes.containsKey(pid)){
             String role=pid.equals(hukumId)?"hukum":partners.contains(pid)?"partner":"opponent";
-            rows.add(new NativeImageShare.ScoreRow(nameOf(pid),role,num(changes.get(pid))));
+            rows.add(new NativeImageShare.ScoreRow(roundName(round,pid),role,num(changes.get(pid))));
         }
         NativeImageShare.round(this,when(round.get("timestamp")),str(round,"hukumName"),
                 str(round,"result"),num(round.get("bid")),rows);
@@ -1648,7 +1678,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         Map<String,Object> badges=map(session.get("badges"));
         for(String[] pair:types){
             List<String> names=new ArrayList<>();
-            for(String pid:strings(badges.get(pair[0])))names.add(nameOf(pid));
+            for(String pid:strings(badges.get(pair[0])))names.add(sessionParticipantName(session,pid));
             if(!names.isEmpty())awards.add(new NativeImageShare.AwardRow(pair[1],
                     android.text.TextUtils.join(", ",names)));
         }

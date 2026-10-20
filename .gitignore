@@ -8,3 +8,9 @@ local.properties
 *.aab
 *.jks
 *.keystore
+
+3PattiProNative/tests/online-backend/functions/online/node_modules/
+3PattiProNative/*-debug.log
+3PattiProNative/.firebase/
+
+__pycache__/

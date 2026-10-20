@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     id("com.android.application")
 }
@@ -10,8 +12,8 @@ android {
         minSdk = 26
         targetSdk = 34
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 20
-        versionName = "2.6.2"
+        versionCode = 21
+        versionName = "2.7.0"
     }
     testBuildType = "sandbox"
     buildFeatures { buildConfig = true }
@@ -50,6 +52,7 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.core:core:1.15.0")
+    implementation("androidx.webkit:webkit:1.12.1")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     androidTestImplementation("androidx.test:runner:1.6.2")
@@ -68,3 +71,26 @@ val verifyReleaseSigning = tasks.register("verifyReleaseSigning") {
     }
 }
 tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(verifyReleaseSigning) }
+
+val verifyKaliSharedAssets = tasks.register("verifyKaliSharedAssets") {
+    val assetRoot = file("src/main/assets/kali")
+    val authority = file("../tests/online-backend/functions/online/shared/engine.js")
+    inputs.dir(assetRoot)
+    inputs.file(authority)
+    doLast {
+        val sums = file("src/main/assets/kali/shared-assets.sha256")
+        check(sums.isFile) { "Sync shared online assets from hozefa111/hh before building." }
+        sums.readLines().filter { it.isNotBlank() }.forEach { line ->
+            val parts = line.split("  ", limit = 2)
+            check(parts.size == 2) { "Invalid shared-asset manifest" }
+            val bytes = file("src/main/assets/kali/" + parts[1]).readBytes()
+            val actual = MessageDigest.getInstance("SHA-256").digest(bytes)
+                .joinToString("") { (it.toInt() and 255).toString(16).padStart(2, '0') }
+            check(actual == parts[0]) { "Stale online asset: " + parts[1] }
+        }
+        check(file("src/main/assets/kali/shared/engine.js").readBytes().contentEquals(authority.readBytes())) {
+            "Android and authoritative backend rules differ. Sync from hozefa111/hh."
+        }
+    }
+}
+tasks.named("preBuild").configure { dependsOn(verifyKaliSharedAssets) }

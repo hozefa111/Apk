@@ -1,0 +1,36 @@
+{
+  "functions": [
+    {
+      "source": "functions/online",
+      "codebase": "kali-online",
+      "predeploy": [
+        "node -e \"throw new Error('Emulator fixture only. Deploy the canonical hozefa111/hh backend.')\""
+      ],
+      "runtime": "nodejs22"
+    }
+  ],
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "database": {
+    "rules": "database.rules.json"
+  },
+  "emulators": {
+    "auth": {
+      "port": 9099
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "database": {
+      "port": 9000
+    },
+    "functions": {
+      "port": 5001
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
+  }
+}

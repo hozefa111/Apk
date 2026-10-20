@@ -75,6 +75,7 @@ public final class FirebaseGateway {
     private volatile boolean signingOut=false;
     private final Runnable liveRefresh=()->{if(!this.freshSnapshot)queueLoad(true);};
     private volatile String idToken;
+    private volatile boolean administrator;
     private volatile boolean running;
     private volatile boolean freshSnapshot=false;
     private final AtomicBoolean writeInFlight=new AtomicBoolean(false);
@@ -238,16 +239,22 @@ public final class FirebaseGateway {
     }
     private void ensureIdToken() throws Exception {
         if(signingOut || auth.getCurrentUser()==null){idToken=null;return;}
-        idToken=Tasks.await(auth.getCurrentUser().getIdToken(false),20,TimeUnit.SECONDS).getToken();
+        com.google.firebase.auth.GetTokenResult result=Tasks.await(auth.getCurrentUser().getIdToken(false),20,TimeUnit.SECONDS);
+        idToken=result.getToken();
+        administrator=false;
+        if(!auth.getCurrentUser().isAnonymous()) {
+            administrator=Boolean.TRUE.equals(result.getClaims().get("admin"));
+            if(!administrator)administrator=Tasks.await(firestore.collection("admins").document(auth.getCurrentUser().getUid()).get(Source.SERVER),20,TimeUnit.SECONDS).exists();
+        }
         ui.post(()->{if(running)listener.authChanged(loggedIn());});
     }
-    public boolean loggedIn(){return !signingOut && auth.getCurrentUser()!=null && idToken!=null;}
+    public boolean loggedIn(){return !signingOut && auth.getCurrentUser()!=null && idToken!=null && administrator;}
     public void signIn(String email,String password){
         setBusy(true);
         executor.execute(()->{
             try{
                 Tasks.await(auth.signInWithEmailAndPassword(email,password),25,TimeUnit.SECONDS);
-                signingOut=false;ensureIdToken();load();notify("Admin login successful");
+                signingOut=false;ensureIdToken();if(!loggedIn())throw new IOException("This account has no administrator role. Contact the existing app administrator.");load();notify("Admin login successful");
             }catch(Exception error){notify("Login failed. Check credentials and connection.");}
             finally{setBusy(false);}
         });
@@ -486,6 +493,7 @@ public final class FirebaseGateway {
                     .put("updateMask",new JSONObject().put("fieldPaths",new JSONArray().put("name")))
                     .put("currentDocument",precondition(expected,"players/"+playerId)));
             for(Map<String,Object> round:rounds){
+                if("online".equals(round.get("source")))continue;
                 String rid=String.valueOf(round.get("id"));
                 Map<String,Object> edits=new LinkedHashMap<>();
                 if(playerId.equals(round.get("hukumId")))edits.put("hukumName",newName);
@@ -688,6 +696,8 @@ public final class FirebaseGateway {
             Map<String,String> expected=new TreeMap<>(versions);
             JSONArray writes=new JSONArray();
             for(String path:expected.keySet())if(path.startsWith("rounds/")||path.startsWith("sessions/")){
+                JSONObject raw=rawDocuments.get(path);
+                if(raw!=null&&"online".equals(decodeFields(raw.optJSONObject("fields")).get("source")))continue;
                 writes.put(new JSONObject().put("delete",documentRoot+"/"+path).put("currentDocument",precondition(expected,path)));
             }
             startBulk("clear",writes,token);
@@ -703,6 +713,7 @@ public final class FirebaseGateway {
             for(JSONObject doc:documents){
                 String path=BackupArchive.path(doc,project);
                 JSONObject normalized=SdkDocuments.fields(SdkDocuments.decode(doc.getJSONObject("fields"),firestore));
+                if("online".equals(decodeFields(normalized).get("source")))continue;
                 if(rawDocuments.containsKey(path)){
                     if(!BulkWritePlan.sameJson(rawDocuments.get(path).getJSONObject("fields"),normalized))
                         throw new IOException("Backup conflicts with existing "+path+". No records changed.");
@@ -751,8 +762,12 @@ public final class FirebaseGateway {
      */
     public void addRoundWithId(String id,Map<String,Object> fields,
                                Runnable onSaved,Runnable onFailed) {
+        Map<String,Object> tagged=new HashMap<>(fields);tagged.put("source","manual");
+        if(!tagged.containsKey("sessionId")) {
+            for(Map<String,Object> session:cachedSessionRows())if(session.get("endTime")==null&&!"online".equals(session.get("source"))){tagged.put("sessionId",session.get("id"));break;}
+        }
         write("Round saved successfully",token->{
-            JSONObject update=updateWrite("rounds",id,fields,new JSONObject().put("exists",false),false);
+            JSONObject update=updateWrite("rounds",id,tagged,new JSONObject().put("exists",false),false);
             try {
                 commit(new JSONArray().put(update));
             }catch(Exception failure){
@@ -768,6 +783,13 @@ public final class FirebaseGateway {
                 }
             }
         },onSaved,onFailed);
+    }
+    private List<Map<String,Object>> cachedSessionRows(){
+        List<Map<String,Object>> rows=new ArrayList<>();
+        for(Map.Entry<String,JSONObject> entry:rawDocuments.entrySet())if(entry.getKey().startsWith("sessions/")){
+            try{Map<String,Object> data=decodeFields(entry.getValue().optJSONObject("fields"));data.put("id",entry.getKey().substring(9));rows.add(data);}catch(Exception malformed){throw new IllegalStateException("Invalid cached session",malformed);}
+        }
+        rows.sort((a,b)->String.valueOf(b.get("startTime")).compareTo(String.valueOf(a.get("startTime"))));return rows;
     }
     static boolean sameRound(Map<String,Object> a,Map<String,Object> b){
         for(String key:Arrays.asList("type","bid","hukumId","partnerIds","nonPartnerIds","playerIds","result","scoreChanges")){
