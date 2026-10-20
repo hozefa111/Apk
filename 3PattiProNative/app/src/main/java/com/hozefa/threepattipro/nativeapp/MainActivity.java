@@ -961,10 +961,11 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     private void exitBigScoreboard(){tab=3;render(true);scroll.post(()->scroll.scrollTo(0,bigOriginScroll));}
     private void bigScoreboardPage(){
-        content.addView(button("Close Big Scoreboard",false,this::exitBigScoreboard));gap(content,10);
-        title(content,"Big Scoreboard",liveConnected?"● Live scores":"Offline · saved scores");
+        LinearLayout heading=row();TextView name=text("Big Scoreboard",22,WHITE,true);heading.addView(name,new LinearLayout.LayoutParams(0,-2,1));
+        TextView close=button("×",false,this::exitBigScoreboard);close.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP,24);close.setContentDescription("Close Big Scoreboard");pad(close,4,4,4,4);heading.addView(close,lp(48,48));content.addView(heading);
+        LinearLayout status=row();TextView live=text(liveConnected?"● Live scores":"Offline · saved scores",11,liveConnected?GREEN:MUTED,false);status.addView(live,new LinearLayout.LayoutParams(0,-2,1));
+        TextView awake=button("Screen on · "+(bigKeepAwake?"On":"Off"),false,()->{bigKeepAwake=!bigKeepAwake;render(false);});awake.setTextSize(11);pad(awake,10,8,10,8);status.addView(awake,lp(-2,-2));content.addView(status);gap(content,10);
         scoreboardControls(content,true);
-        content.addView(button("Screen on · "+(bigKeepAwake?"On":"Off"),false,()->{bigKeepAwake=!bigKeepAwake;render(false);}));gap(content,14);
         if(!hasData){empty("No saved table is available yet.");return;}
         ScoreboardModel model=scoreboardModel(false);
         if(model.rows.isEmpty())empty("No players with rounds in this scope.");

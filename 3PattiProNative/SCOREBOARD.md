@@ -52,3 +52,13 @@ The animation anchors, continuity gate and Full/Reduced/Off behavior are retaine
 Additional emulator cases verify actual text layout bounds, compact podium height,
 profile access and long names/positive/negative 64-bit scores; preview fixtures
 are synthetic and never touch production.
+
+## Big Scoreboard presentation (2.6.2)
+
+Big mode uses a dedicated gold leader hero (including joint leaders), drawn crown,
+large exact signed total and two labelled personal-round/session metric cells.
+Other players use compact rank/score panels with their played count, personal last
+round, session and leader gap retained. Top controls use a labelled accessible
+48dp close control and a small screen-on action beside live/offline status.
+Long names and scores wrap, and font-scale/landscape text bounds are checked.
+Existing animation anchors, scope rules and save/sync behavior are unchanged.

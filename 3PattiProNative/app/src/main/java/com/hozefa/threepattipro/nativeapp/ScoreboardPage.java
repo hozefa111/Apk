@@ -76,7 +76,42 @@ final class ScoreboardPage {
             TextView more=text("+"+extra+" more tied at #"+model.rows.get(2).rank+" · View full ranking",13,DialogUi.GOLD,true);more.setMinHeight(DialogUi.dp(a,48));more.setOnClickListener(v->all.run());more.setFocusable(true);add(parent,more);
         }
     }
+    private String gapLabel(ScoreboardModel.Row r){return r.rank==1?(r.tied>1?"Joint leader":"Table leader"):model.gap(r)+" points behind leader";}
+    private void metric(LinearLayout container,String label,String value,int tint){
+        LinearLayout cell=DialogUi.column(a);cell.setPadding(DialogUi.dp(a,8),DialogUi.dp(a,8),DialogUi.dp(a,8),DialogUi.dp(a,8));
+        cell.setBackground(surface(0x30101010,0x30101010,0x404F4A40,10));
+        add(cell,text(label,10,DialogUi.MUTED,false));DialogUi.gap(cell,5);add(cell,text(value,14,tint,true));
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,-2,1);p.setMargins(DialogUi.dp(a,2),0,DialogUi.dp(a,2),0);container.addView(cell,p);
+    }
+    /** Big mode is a dedicated scoreboard, rather than enlarged profile cards. */
+    private void bigCards(int limit){
+        for(int i=0;i<Math.min(limit,model.rows.size());i++){
+            ScoreboardModel.Row r=model.rows.get(i);boolean leader=r.rank==1;int metal=color(r);
+            LinearLayout c=DialogUi.column(a);c.setPadding(DialogUi.dp(a,16),DialogUi.dp(a,16),DialogUi.dp(a,16),DialogUi.dp(a,16));
+            c.setBackground(surface(leader?0xFF46351C:0xFF252C37,leader?0xFF1D2025:0xFF171C24,leader?0xFFAB8441:r.rank==2?0xFF596477:r.rank==3?0xFF795344:0xFF343C49,leader?22:16));
+            c.setContentDescription("Scorecard "+r.name);c.setTag(new MotionEngine.Anchor("rank:"+context+":"+r.id));
+            LinearLayout heading=DialogUi.column(a);heading.setOrientation(LinearLayout.HORIZONTAL);heading.setGravity(Gravity.CENTER_VERTICAL);
+            if(leader){Crown crown=new Crown();if(model.leaders.size()==1)crown.setTag(new MotionEngine.Anchor("crown:"+context));heading.addView(crown,new LinearLayout.LayoutParams(DialogUi.dp(a,34),DialogUi.dp(a,26)));}
+            TextView badge=text(leader?(r.tied>1?"JOINT LEADER":"LEADING THE TABLE"):"#"+r.rank,leader?10:18,metal,true);badge.setPadding(DialogUi.dp(a,leader?8:0),0,0,0);heading.addView(badge,new LinearLayout.LayoutParams(0,-2,1));
+            TextView played=text(r.played+" played",11,DialogUi.MUTED,false);played.setGravity(Gravity.END);heading.addView(played,new LinearLayout.LayoutParams(-2,-2));add(c,heading);DialogUi.gap(c,leader?10:7);
+            add(c,text(r.name,leader?24:18,DialogUi.WHITE,true));DialogUi.gap(c,4);
+            TextView score=text(ScoreboardModel.points(r.points),leader?46:32,r.points<0?DialogUi.RED:leader?DialogUi.GOLD:DialogUi.GREEN,true);
+            score.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));score.setTag(new MotionEngine.Anchor("rank-score:"+context+":"+r.id,r.points,true));add(c,score);DialogUi.gap(c,leader?12:8);
+            if(leader){
+                LinearLayout metrics=DialogUi.column(a);metrics.setOrientation(LinearLayout.HORIZONTAL);metrics.setGravity(Gravity.TOP);
+                metric(metrics,"LAST PLAYED ROUND",r.hasLast?ScoreboardModel.points(r.last):"—",r.last<0?DialogUi.RED:DialogUi.GREEN);
+                metric(metrics,"CURRENT SESSION",session?ScoreboardModel.points(r.sessionPoints):"No active session",DialogUi.WHITE);add(c,metrics);
+            }else{
+                add(c,text("Last played round  "+(r.hasLast?ScoreboardModel.points(r.last):"—"),12,r.hasLast&&r.last<0?DialogUi.RED:DialogUi.WHITE,false));DialogUi.gap(c,4);
+                add(c,text("Current session  "+(session?ScoreboardModel.points(r.sessionPoints):"No active session"),11,DialogUi.MUTED,false));DialogUi.gap(c,7);
+                add(c,text(gapLabel(r),11,metal,false));
+            }
+            int move=moves.getOrDefault(r.id,0);if(move!=0){DialogUi.gap(c,6);add(c,text((move>0?"↑ ":"↓ ")+Math.abs(move)+" position"+(Math.abs(move)==1?"":"s"),13,move>0?DialogUi.GREEN:DialogUi.RED,true));}
+            attachProfile(c,r.id);add(parent,c);DialogUi.gap(parent,10);if(celebrate&&leader)motion.leader(c);
+        }
+    }
     void cards(boolean big,int limit){
+        if(big){bigCards(limit);return;}
         if(!big&&!model.rows.isEmpty()){DialogUi.gap(parent,6);add(parent,text("SCORE BREAKDOWN",12,DialogUi.MUTED,true));DialogUi.gap(parent,10);}
         for(int i=0;i<Math.min(limit,model.rows.size());i++){
             ScoreboardModel.Row r=model.rows.get(i);LinearLayout c=card();c.setPadding(DialogUi.dp(a,14),DialogUi.dp(a,12),DialogUi.dp(a,14),DialogUi.dp(a,12));
