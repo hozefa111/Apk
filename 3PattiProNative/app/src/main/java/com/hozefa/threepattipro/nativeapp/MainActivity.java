@@ -216,7 +216,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("scoreboardScope",scoreboardScope);state.putBoolean("bigKeepAwake",bigKeepAwake);state.putInt("bigOriginScroll",bigOriginScroll);if(voiceGuide!=null)voiceGuide.saveState(state);analyticsState.save(state);persistDraft();state.putInt("tab",tab);state.putInt("historyTab",historyTab);state.putString("rankFilter",rankFilter);state.putString("profileId",profileId);state.putLong("customStart",customStart);state.putLong("customEnd",customEnd);state.putString("searchQuery",searchQuery);}
     @Override protected void onResume(){
-        super.onResume();resumed=true;applyScoreboardWake();if(voiceGuide!=null)voiceGuide.resume();motion.resume();motionEvents.invalidate();if(api!=null)api.setForeground(true);
+        super.onResume();resumed=true;applyScoreboardWake();if(voiceGuide!=null)voiceGuide.resume();motion.resume();motionEvents.invalidate();if(hasData&&(tab==0||tab==3||tab==10))render(false);if(api!=null)api.setForeground(true);
         if(launchReveal){launchReveal=false;motion.enter(root,0);}
         if(deferredRoundResult!=null){Map<String,Object> result=deferredRoundResult;deferredRoundResult=null;showRoundSaved(result,false);}
         if(deferredSessionSummary!=null){Map<String,Object> result=deferredSessionSummary;deferredSessionSummary=null;showSessionSummary(result,false);}
@@ -933,7 +933,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         LinearLayout choices=row();
         choices.addView(button(("all".equals(scoreboardScope)?"✓ ":"")+"Lifetime",false,()->setScoreboardScope("all")),new LinearLayout.LayoutParams(0,-2,1));
         choices.addView(button(("current".equals(scoreboardScope)?"✓ ":"")+"Current Session",false,()->setScoreboardScope("current")),new LinearLayout.LayoutParams(0,-2,1));target.addView(choices);gap(target,10);
-        target.addView(text("current".equals(scoreboardScope)?activeSession()==null?"No active session":"Current session points":dates&&!"all".equals(rankFilter)?"Total points · "+rankFilter+" · all sessions":"Lifetime game points",13,MUTED,false));gap(target,12);
+        target.addView(text("current".equals(scoreboardScope)?activeSession()==null?"No active session":"Current session points"+(dates&&!"all".equals(rankFilter)?" · "+rankFilter:""):dates&&!"all".equals(rankFilter)?"Total points · "+rankFilter+" · all sessions":"Lifetime game points",13,MUTED,false));gap(target,12);
     }
     private void setScoreboardScope(String scope){scoreboardScope=scope;scoreboardMoves.clear();scoreboardLeaderChanged=false;scoreMotion=null;render(true);}
     private void ranksPage() {
