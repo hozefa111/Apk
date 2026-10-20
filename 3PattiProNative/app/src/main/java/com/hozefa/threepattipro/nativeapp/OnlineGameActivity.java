@@ -56,7 +56,11 @@ if(u.getPath()==null||!u.getPath().startsWith("/assets/kali/")){if("1".equals(u.
  private void exchange(){worker.execute(()->{try{
   if(auth.getCurrentUser()==null)Tasks.await(auth.signInAnonymously(),25,TimeUnit.SECONDS);
   String token=Tasks.await(auth.getCurrentUser().getIdToken(false),25,TimeUnit.SECONDS).getToken();
-  String endpoint=BuildConfig.USE_EMULATORS?"http://10.0.2.2:5001/demo-three-patti/asia-south1/kaliApi":"https://asia-south1-patti-pro-a61d8.cloudfunctions.net/kaliApi";
+  String endpoint;
+  if(BuildConfig.USE_EMULATORS)endpoint="http://10.0.2.2:5001/demo-three-patti/asia-south1/kaliApi";
+  else try(java.io.Reader reader=new java.io.InputStreamReader(getAssets().open("kali/config.js"),java.nio.charset.StandardCharsets.UTF_8)){
+   StringBuilder config=new StringBuilder();char[] buffer=new char[1024];int count;while((count=reader.read(buffer))!=-1)config.append(buffer,0,count);endpoint=OnlineEndpoint.api(config.toString());
+  }
   Request request=new Request.Builder().url(endpoint).header("Authorization","Bearer "+token).post(RequestBody.create("{\"operation\":\"exchange\"}",MediaType.get("application/json"))).build();
   try(Response response=http.newCall(request).execute()){
    JSONObject data=new JSONObject(response.body().string());if(!response.isSuccessful())throw new Exception(data.optString("error","Server unavailable"));
