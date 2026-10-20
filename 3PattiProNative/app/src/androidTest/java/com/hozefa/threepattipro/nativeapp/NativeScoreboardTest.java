@@ -58,8 +58,8 @@ public class NativeScoreboardTest {
             List<Map<String,Object>> p=Arrays.asList(FirebaseGateway.map("id","a","name","Abbas","active",true),FirebaseGateway.map("id","b","name","Shabbir","active",true),FirebaseGateway.map("id","c","name","Fatema","active",true));
             Map<String,Object> r=FirebaseGateway.map("id","podium-preview","timestamp","2026-10-20T10:00:00Z","sessionId","current","type","hukum","playerIds",Arrays.asList("a","b","c"),"scoreChanges",FirebaseGateway.map("a",40836,"b",31481,"c",24033));
             a.dataUpdated(p,new ArrayList<>(Arrays.asList(r)),new ArrayList<>((List<Map<String,Object>>)get(a,"sessions")));
-        });see("ROYAL TOP 3");capture("49-polished-podium");
-            s.onActivity(a->{for(String name:Arrays.asList("Abbas","Shabbir","Fatema")){View card=find(a.getWindow().getDecorView(),"Podium "+name);assertNotNull(card);textFits(card);assertTrue("Compact podium",card.getHeight()<DialogUi.dp(a,225));}});
+        });see("ROYAL TOP 3");onView(withContentDescription("Podium Abbas")).perform(scrollTo());capture("49-polished-podium");
+            s.onActivity(a->{for(String name:Arrays.asList("Abbas","Shabbir","Fatema")){View card=find(a.getWindow().getDecorView(),"Podium "+name);assertNotNull(card);assertEquals("Three-column podium on standard phones",android.widget.LinearLayout.HORIZONTAL,((android.widget.LinearLayout)card.getParent()).getOrientation());textFits(card);assertTrue("Compact podium",card.getHeight()<DialogUi.dp(a,225));}});
             onView(withContentDescription("Podium Shabbir")).perform(scrollTo(),click());s.onActivity(a->assertEquals("b",get(a,"profileId")));
         }
     }
@@ -68,7 +68,7 @@ public class NativeScoreboardTest {
             List<Map<String,Object>> p=Arrays.asList(FirebaseGateway.map("id","a","name","A very long player name","active",true),FirebaseGateway.map("id","b","name","Second long player name","active",true),FirebaseGateway.map("id","c","name","Negative score player","active",true));
             Map<String,Object> r=FirebaseGateway.map("id","long-preview","timestamp","2026-10-20T10:00:00Z","sessionId","current","type","hukum","playerIds",Arrays.asList("a","b","c"),"scoreChanges",FirebaseGateway.map("a",4000000000L,"b",3000000000L,"c",-4000000000L));
             a.dataUpdated(p,new ArrayList<>(Arrays.asList(r)),new ArrayList<>((List<Map<String,Object>>)get(a,"sessions")));
-        });see("ROYAL TOP 3");capture("50-polished-long-scores");
+        });see("ROYAL TOP 3");onView(withContentDescription("Podium A very long player name")).perform(scrollTo());capture("50-polished-long-scores");
             s.onActivity(a->{for(String name:Arrays.asList("A very long player name","Second long player name","Negative score player"))textFits(find(a.getWindow().getDecorView(),"Podium "+name));});
         }
     }
@@ -78,7 +78,7 @@ public class NativeScoreboardTest {
         try{
             shell("settings put system font_scale 2.0");Thread.sleep(1000);
             try(ActivityScenario<MainActivity> s=ActivityScenario.launch(MainActivity.class)){
-                await("Table Status");s.onActivity(a->seed(a,false,true));see("ROYAL TOP 3");capture("51-polished-large-text-podium");
+                await("Table Status");s.onActivity(a->seed(a,false,true));see("ROYAL TOP 3");onView(withContentDescription("Podium Score player a")).perform(scrollTo());capture("51-polished-large-text-podium");
                 s.onActivity(a->{for(String name:Arrays.asList("Score player a","Score player b","Score player c"))textFits(find(a.getWindow().getDecorView(),"Podium "+name));});see("Big Scoreboard");onView(withText("Big Scoreboard")).perform(click());await("Big Scoreboard");
                 s.onActivity(a->a.setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));Thread.sleep(1500);see("Screen on · Off");capture("48-big-scoreboard-large-text");
                 see("Close Big Scoreboard");onView(withText("Close Big Scoreboard")).perform(click());see("Leaderboard");

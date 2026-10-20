@@ -414,7 +414,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         toolbar.setGravity(largeText?Gravity.START:Gravity.CENTER_VERTICAL);
         LinearLayout heading=column();
         TextView appName=text("♠  3 PATTI PRO",21,GOLD,true);
-        if(largeText||compactShell()){appName.setMaxLines(1);appName.setAutoSizeTextTypeUniformWithConfiguration(16,21,1,android.util.TypedValue.COMPLEX_UNIT_SP);}
+        appName.setMaxLines(1);appName.setAutoSizeTextTypeUniformWithConfiguration(14,21,1,android.util.TypedValue.COMPLEX_UNIT_SP);
         heading.addView(appName);
         gap(heading,5);
         heading.addView(text(liveConnected?"●  LIVE SYNC":quotaPaused?"○  SYNC PAUSED · LIMIT REACHED":hasData?"○  OFFLINE · SAVED TABLE":"○  OFFLINE / CONNECTING",9,

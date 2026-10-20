@@ -41,7 +41,7 @@ final class ScoreboardPage {
     void podium(Runnable all){
         add(parent,text("ROYAL TOP 3",16,DialogUi.GOLD,true));DialogUi.gap(parent,10);
         if(model.rows.isEmpty()){add(parent,text("No players with rounds in this scope.",14,DialogUi.MUTED,false));return;}
-        boolean horizontal=a.getResources().getConfiguration().screenWidthDp>=340&&a.getResources().getConfiguration().fontScale<=1.3f;
+        boolean horizontal=a.getResources().getConfiguration().screenWidthDp>=320&&a.getResources().getConfiguration().fontScale<=1.3f;
         LinearLayout stage=DialogUi.column(a);stage.setPadding(DialogUi.dp(a,7),DialogUi.dp(a,14),DialogUi.dp(a,7),DialogUi.dp(a,8));
         stage.setBackground(surface(0xFF17191F,0xFF101115,0xFF303038,22));
         LinearLayout row=DialogUi.column(a);row.setGravity(Gravity.BOTTOM);if(horizontal)row.setOrientation(LinearLayout.HORIZONTAL);
@@ -82,7 +82,7 @@ final class ScoreboardPage {
             ScoreboardModel.Row r=model.rows.get(i);LinearLayout c=card();c.setPadding(DialogUi.dp(a,14),DialogUi.dp(a,12),DialogUi.dp(a,14),DialogUi.dp(a,12));
             c.setBackground(surface(0xFF22262E,0xFF191C23,r.rank==1?0xFF685334:0xFF343842,16));
             c.setContentDescription("Scorecard "+r.name);c.setTag(new MotionEngine.Anchor("rank:"+context+":"+r.id));
-            boolean stacked=big||a.getResources().getConfiguration().fontScale>1.3f||a.getResources().getConfiguration().screenWidthDp<340;
+            boolean stacked=big||a.getResources().getConfiguration().fontScale>1.3f||a.getResources().getConfiguration().screenWidthDp<320;
             LinearLayout head=DialogUi.column(a);if(!stacked){head.setOrientation(LinearLayout.HORIZONTAL);head.setGravity(Gravity.CENTER_VERTICAL);}
             TextView who=text(rank(r)+"   "+r.name,big?23:15,color(r),true);
             head.addView(who,stacked?new LinearLayout.LayoutParams(-1,-2):new LinearLayout.LayoutParams(0,-2,1));
