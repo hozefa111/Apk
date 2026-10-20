@@ -925,7 +925,12 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         return AdvancedAnalytics.scope(source,sessions,scoreboardScope);
     }
     private ScoreboardModel scoreboardModel(boolean home){return new ScoreboardModel(players,scoreboardSource(home),AdvancedAnalytics.scope(gameRounds(),sessions,"current"));}
-    private String scoreboardContext(boolean home){return ("current".equals(scoreboardScope)?"current:":"")+(home?"home":rankFilter+":"+customStart+":"+customEnd);}
+    private String scoreboardContext(boolean home){
+        Map<String,Object> session=activeSession();String scope="current".equals(scoreboardScope)?"current:"+(session==null?"none":id(session))+":":"";
+        String range=home?"home":rankFilter+":"+customStart+":"+customEnd;
+        if(!home&&!"all".equals(rankFilter))range+=":"+DateRange.of(rankFilter,Instant.now(),ZoneId.systemDefault(),customStart,customEnd).start;
+        return scope+range;
+    }
     private ScoreboardPage scoreboardPage(LinearLayout target,ScoreboardModel model,boolean home){
         String context=scoreboardContext(home);
         if(!context.equals(lastScoreboardContext)){scoreboardMoves.clear();scoreboardLeaderChanged=false;lastScoreboardContext=context;}
