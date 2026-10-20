@@ -54,6 +54,10 @@ public class NativeScoreboardTest {
         }
         if(v instanceof ViewGroup)for(int i=0;i<((ViewGroup)v).getChildCount();i++)textFits(((ViewGroup)v).getChildAt(i));
     }
+    private void oneLineScore(View v){
+        assertNotNull(v);if(v.getTag() instanceof MotionEngine.Anchor&&((MotionEngine.Anchor)v.getTag()).key.startsWith("rank-score:"))assertEquals("Keep the complete signed total on one line",1,((android.widget.TextView)v).getLineCount());
+        if(v instanceof ViewGroup)for(int i=0;i<((ViewGroup)v).getChildCount();i++)oneLineScore(((ViewGroup)v).getChildAt(i));
+    }
     @Test public void compactPodiumHasNoClippedNamesOrScoresAndOpensProfiles()throws Exception{
         try(ActivityScenario<MainActivity> s=ActivityScenario.launch(MainActivity.class)){await("Table Status");s.onActivity(a->{seed(a,false,true);
             List<Map<String,Object>> p=Arrays.asList(FirebaseGateway.map("id","a","name","Abbas","active",true),FirebaseGateway.map("id","b","name","Shabbir","active",true),FirebaseGateway.map("id","c","name","Fatema","active",true));
@@ -62,7 +66,7 @@ public class NativeScoreboardTest {
         });see("ROYAL TOP 3");onView(withContentDescription("Podium Abbas")).perform(scrollTo());capture("49-polished-podium");
             s.onActivity(a->{for(String name:Arrays.asList("Abbas","Shabbir","Fatema")){View card=find(a.getWindow().getDecorView(),"Podium "+name);assertNotNull(card);assertEquals("Three-column podium on standard phones",android.widget.LinearLayout.HORIZONTAL,((android.widget.LinearLayout)card.getParent()).getOrientation());textFits(card);assertTrue("Compact podium",card.getHeight()<DialogUi.dp(a,225));}});
             see("Big Scoreboard");onView(withText("Big Scoreboard")).perform(click());await("Big Scoreboard");see("LEADING THE TABLE");capture("52-premium-big-scoreboard");
-            s.onActivity(a->{for(String name:Arrays.asList("Abbas","Shabbir","Fatema"))textFits(find(a.getWindow().getDecorView(),"Scorecard "+name));});
+            s.onActivity(a->{for(String name:Arrays.asList("Abbas","Shabbir","Fatema")){View card=find(a.getWindow().getDecorView(),"Scorecard "+name);textFits(card);oneLineScore(card);}});
             onView(withContentDescription("Close Big Scoreboard")).perform(scrollTo(),click());NativeTestUi.awaitMotionIdle(s);
             onView(withContentDescription("Podium Shabbir")).perform(scrollTo(),click());s.onActivity(a->assertEquals("b",get(a,"profileId")));
         }
@@ -75,7 +79,7 @@ public class NativeScoreboardTest {
         });see("ROYAL TOP 3");onView(withContentDescription("Podium A very long player name")).perform(scrollTo());capture("50-polished-long-scores");
             s.onActivity(a->{for(String name:Arrays.asList("A very long player name","Second long player name","Negative score player"))textFits(find(a.getWindow().getDecorView(),"Podium "+name));});
             see("Big Scoreboard");onView(withText("Big Scoreboard")).perform(click());await("Big Scoreboard");capture("53-big-scoreboard-long-values");
-            s.onActivity(a->{for(String name:Arrays.asList("A very long player name","Second long player name","Negative score player"))textFits(find(a.getWindow().getDecorView(),"Scorecard "+name));});
+            s.onActivity(a->{for(String name:Arrays.asList("A very long player name","Second long player name","Negative score player")){View card=find(a.getWindow().getDecorView(),"Scorecard "+name);textFits(card);oneLineScore(card);}});
         }
     }
     private String shell(String cmd)throws Exception{android.os.ParcelFileDescriptor fd=InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand(cmd);try(java.io.InputStream in=new android.os.ParcelFileDescriptor.AutoCloseInputStream(fd);java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream()){byte[] b=new byte[4096];int n;while((n=in.read(b))!=-1)out.write(b,0,n);return out.toString("UTF-8").trim();}}
@@ -86,7 +90,7 @@ public class NativeScoreboardTest {
             try(ActivityScenario<MainActivity> s=ActivityScenario.launch(MainActivity.class)){
                 await("Table Status");s.onActivity(a->seed(a,false,true));see("ROYAL TOP 3");onView(withContentDescription("Podium Score player a")).perform(scrollTo());capture("51-polished-large-text-podium");
                 s.onActivity(a->{for(String name:Arrays.asList("Score player a","Score player b","Score player c"))textFits(find(a.getWindow().getDecorView(),"Podium "+name));});see("Big Scoreboard");onView(withText("Big Scoreboard")).perform(click());await("Big Scoreboard");
-                NativeTestUi.awaitMotionIdle(s);s.onActivity(a->{for(String name:Arrays.asList("Score player a","Score player b","Score player c"))textFits(find(a.getWindow().getDecorView(),"Scorecard "+name));});
+                NativeTestUi.awaitMotionIdle(s);s.onActivity(a->{for(String name:Arrays.asList("Score player a","Score player b","Score player c")){View card=find(a.getWindow().getDecorView(),"Scorecard "+name);textFits(card);oneLineScore(card);}});
                 s.onActivity(a->a.setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));Thread.sleep(1500);see("Screen on · Off");capture("48-big-scoreboard-large-text");
                 onView(withContentDescription("Close Big Scoreboard")).perform(scrollTo(),click());see("Leaderboard");
                 s.onActivity(a->a.setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT));Thread.sleep(1200);

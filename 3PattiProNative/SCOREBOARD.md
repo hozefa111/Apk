@@ -60,5 +60,7 @@ large exact signed total and two labelled personal-round/session metric cells.
 Other players use compact rank/score panels with their played count, personal last
 round, session and leader gap retained. Top controls use a labelled accessible
 48dp close control and a small screen-on action beside live/offline status.
-Long names and scores wrap, and font-scale/landscape text bounds are checked.
+Long names wrap; exact signed scores auto-fit on one line without abbreviation.
+The maximum score type size follows the system font scale. Font-scale/landscape
+text bounds and one-line totals are checked.
 Existing animation anchors, scope rules and save/sync behavior are unchanged.

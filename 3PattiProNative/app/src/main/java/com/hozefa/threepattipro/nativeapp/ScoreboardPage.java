@@ -96,7 +96,10 @@ final class ScoreboardPage {
             TextView played=text(r.played+" played",11,DialogUi.MUTED,false);played.setGravity(Gravity.END);heading.addView(played,new LinearLayout.LayoutParams(-2,-2));add(c,heading);DialogUi.gap(c,leader?10:7);
             add(c,text(r.name,leader?24:18,DialogUi.WHITE,true));DialogUi.gap(c,4);
             TextView score=text(ScoreboardModel.points(r.points),leader?46:32,r.points<0?DialogUi.RED:leader?DialogUi.GOLD:DialogUi.GREEN,true);
-            score.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));score.setTag(new MotionEngine.Anchor("rank-score:"+context+":"+r.id,r.points,true));add(c,score);DialogUi.gap(c,leader?12:8);
+            score.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));score.setTag(new MotionEngine.Anchor("rank-score:"+context+":"+r.id,r.points,true));
+            float fontScale=a.getResources().getConfiguration().fontScale;score.setMaxLines(1);
+            score.setAutoSizeTextTypeUniformWithConfiguration(10,Math.max(10,Math.round((leader?46:32)*fontScale)),1,android.util.TypedValue.COMPLEX_UNIT_DIP);
+            c.addView(score,new LinearLayout.LayoutParams(-1,DialogUi.dp(a,(leader?56:40)*fontScale)));DialogUi.gap(c,leader?12:8);
             if(leader){
                 LinearLayout metrics=DialogUi.column(a);metrics.setOrientation(LinearLayout.HORIZONTAL);metrics.setGravity(Gravity.TOP);
                 metric(metrics,"LAST PLAYED ROUND",r.hasLast?ScoreboardModel.points(r.last):"—",r.last<0?DialogUi.RED:DialogUi.GREEN);
