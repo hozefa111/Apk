@@ -78,7 +78,8 @@ public class NativeScoreboardTest {
         try{
             shell("settings put system font_scale 2.0");Thread.sleep(1000);
             try(ActivityScenario<MainActivity> s=ActivityScenario.launch(MainActivity.class)){
-                await("Table Status");s.onActivity(a->seed(a,false,true));see("Big Scoreboard");onView(withText("Big Scoreboard")).perform(click());await("Big Scoreboard");
+                await("Table Status");s.onActivity(a->seed(a,false,true));see("ROYAL TOP 3");capture("51-polished-large-text-podium");
+                s.onActivity(a->{for(String name:Arrays.asList("Score player a","Score player b","Score player c"))textFits(find(a.getWindow().getDecorView(),"Podium "+name));});see("Big Scoreboard");onView(withText("Big Scoreboard")).perform(click());await("Big Scoreboard");
                 s.onActivity(a->a.setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));Thread.sleep(1500);see("Screen on · Off");capture("48-big-scoreboard-large-text");
                 see("Close Big Scoreboard");onView(withText("Close Big Scoreboard")).perform(click());see("Leaderboard");
                 s.onActivity(a->a.setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT));Thread.sleep(1200);

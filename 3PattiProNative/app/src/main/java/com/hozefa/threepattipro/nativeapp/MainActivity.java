@@ -943,7 +943,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         for(String scope:new String[]{"all","current"}){
             boolean selected=scope.equals(scoreboardScope);TextView choice=text((selected?"✓ ":"")+("all".equals(scope)?"Lifetime":"Current Session"),13,selected?GOLD:MUTED,true);
             choice.setGravity(Gravity.CENTER);choice.setMinHeight(dp(48));choice.setPadding(dp(6),dp(8),dp(6),dp(8));choice.setFocusable(true);choice.setClickable(true);choice.setSelected(selected);
-            if(selected)choice.setBackground(DialogUi.background(this,0xFF393126,10));choice.setOnClickListener(v->setScoreboardScope(scope));
+            if(selected)choice.setBackground(DialogUi.background(this,0xFF393126,10));choice.setForeground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x35FFFFFF),null,null));choice.setOnClickListener(v->{if(settings.getBoolean("haptics",false))v.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP);motion.tap(v);setScoreboardScope(scope);});
             choices.addView(choice,new LinearLayout.LayoutParams(0,-2,1));
         }
         target.addView(choices);gap(target,8);

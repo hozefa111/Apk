@@ -27,10 +27,13 @@ final class ScoreboardPage {
     /** Drawn crown: consistent on every Android version, independent of emoji fonts. */
     private final class Crown extends View {
         private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
-        Crown(){super(a);setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);}
+        private final Shader gold=new LinearGradient(0,3,0,45,0xFFFFF1AF,0xFFD79B32,Shader.TileMode.CLAMP);
+        private final Path silhouette=new Path();
+        Crown(){super(a);setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            silhouette.moveTo(10,15);silhouette.lineTo(22,25);silhouette.lineTo(32,7);silhouette.lineTo(42,25);silhouette.lineTo(54,15);silhouette.lineTo(48,37);silhouette.lineTo(16,37);silhouette.close();
+        }
         @Override protected void onDraw(Canvas canvas){super.onDraw(canvas);canvas.save();canvas.scale(getWidth()/64f,getHeight()/48f);
-            paint.setShader(new LinearGradient(0,3,0,45,0xFFFFF1AF,0xFFD79B32,Shader.TileMode.CLAMP));
-            Path p=new Path();p.moveTo(10,15);p.lineTo(22,25);p.lineTo(32,7);p.lineTo(42,25);p.lineTo(54,15);p.lineTo(48,37);p.lineTo(16,37);p.close();canvas.drawPath(p,paint);
+            paint.setShader(gold);canvas.drawPath(silhouette,paint);
             canvas.drawRoundRect(16,40,48,45,2,2,paint);canvas.drawCircle(9,12,3,paint);canvas.drawCircle(32,4,3,paint);canvas.drawCircle(55,12,3,paint);
             paint.setShader(null);paint.setColor(0xFF77511D);canvas.drawCircle(32,30,2.5f,paint);canvas.restore();
         }
