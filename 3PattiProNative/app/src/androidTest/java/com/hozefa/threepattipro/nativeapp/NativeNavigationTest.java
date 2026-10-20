@@ -55,7 +55,8 @@ public class NativeNavigationTest {
         try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
             waitFor("Table Status");
             try{onView(withText("LOGIN")).perform(click());onView(withHint("Admin email")).perform(typeText("tester@example.test"));onView(withHint("Password")).perform(typeText("test-password-123"),androidx.test.espresso.action.ViewActions.closeSoftKeyboard());onView(withText("Login")).perform(click());waitFor("ADMIN");}catch(androidx.test.espresso.NoMatchingViewException signedIn){}
-            onView(withText("Round")).perform(click());capture("07-round-form");
+            waitFor("ADMIN");NativeTestUi.awaitMotionIdle(scenario);
+            onView(withContentDescription("Round")).perform(click());waitFor("New Hukum Round");capture("07-round-form");
             onView(withContentDescription("Hukum Player a")).perform(scrollTo(),click());
             onView(withContentDescription("Partner Player b")).perform(scrollTo(),click());
             onView(withText("✕   Hukum Lose")).perform(scrollTo(),click()).check((view,error)->{if(error!=null)throw error;org.junit.Assert.assertEquals("Loss selection must retain its red result feedback",0xFFE74C3C,((android.widget.TextView)view).getCurrentTextColor());});
