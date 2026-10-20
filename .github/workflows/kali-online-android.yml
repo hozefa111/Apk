@@ -7,6 +7,9 @@ on:
     branches: [kali-tidi-multiplayer]
 permissions:
   contents: read
+concurrency:
+  group: kali-online-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 jobs:
   android:
     runs-on: ubuntu-latest
@@ -29,6 +32,14 @@ jobs:
           gradle-version: '8.9'
       - run: npm ci --prefix 3PattiProNative/tests/online-backend/functions/online
       - run: npm install --global firebase-tools@14.17.0
+      - name: Provision Android platform with download retries
+        run: |
+          for attempt in 1 2 3; do
+            if sdkmanager --install "platforms;android-${{ matrix.api }}" "build-tools;35.0.0"; then
+              exit 0
+            fi
+          done
+          exit 1
       - name: Enable KVM
         run: sudo chmod 666 /dev/kvm
       - uses: reactivecircus/android-emulator-runner@v2
