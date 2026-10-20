@@ -705,7 +705,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         return result;
     }
 
-    private void dateFilterBar(LinearLayout target) {
+    private void dateFilterBar(LinearLayout target) { dateFilterBar(target,false); }
+    private void dateFilterBar(LinearLayout target,boolean compact) {
         HorizontalScrollView hsv=new HorizontalScrollView(this);
         hsv.setHorizontalScrollBarEnabled(false);
         LinearLayout items=row();
@@ -715,6 +716,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             TextView item=chip(opt[1],rankFilter.equals(opt[0]),true,()->{
                 rankFilter=opt[0];render(false);motion.enter(content,0);
             });
+            if(compact){item.setTextSize(12);item.setMinHeight(dp(48));item.setPadding(dp(13),dp(8),dp(13),dp(8));}
             LinearLayout.LayoutParams one=lp(-2,-2);one.rightMargin=dp(8);
             items.addView(item,one);
         }
@@ -937,14 +939,19 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         return new ScoreboardPage(this,motion,target,model,scoreboardContext(home),scoreboardMoves,activeSession()!=null,scoreboardLeaderChanged&&scoreMotion!=null,pid->{profileId=pid;tab=5;profileRoundVisible=20;render(true);});
     }
     private void scoreboardControls(LinearLayout target,boolean dates){
-        LinearLayout choices=row();
-        choices.addView(button(("all".equals(scoreboardScope)?"✓ ":"")+"Lifetime",false,()->setScoreboardScope("all")),new LinearLayout.LayoutParams(0,-2,1));
-        choices.addView(button(("current".equals(scoreboardScope)?"✓ ":"")+"Current Session",false,()->setScoreboardScope("current")),new LinearLayout.LayoutParams(0,-2,1));target.addView(choices);gap(target,10);
+        LinearLayout choices=row();choices.setPadding(dp(3),dp(3),dp(3),dp(3));choices.setBackground(DialogUi.background(this,0xFF17191F,13));
+        for(String scope:new String[]{"all","current"}){
+            boolean selected=scope.equals(scoreboardScope);TextView choice=text((selected?"✓ ":"")+("all".equals(scope)?"Lifetime":"Current Session"),13,selected?GOLD:MUTED,true);
+            choice.setGravity(Gravity.CENTER);choice.setMinHeight(dp(48));choice.setPadding(dp(6),dp(8),dp(6),dp(8));choice.setFocusable(true);choice.setClickable(true);choice.setSelected(selected);
+            if(selected)choice.setBackground(DialogUi.background(this,0xFF393126,10));choice.setOnClickListener(v->setScoreboardScope(scope));
+            choices.addView(choice,new LinearLayout.LayoutParams(0,-2,1));
+        }
+        target.addView(choices);gap(target,8);
         target.addView(text("current".equals(scoreboardScope)?activeSession()==null?"No active session":"Current session points"+(dates&&!"all".equals(rankFilter)?" · "+rankFilter:""):dates&&!"all".equals(rankFilter)?"Total points · "+rankFilter+" · all sessions":"Lifetime game points",13,MUTED,false));gap(target,12);
     }
     private void setScoreboardScope(String scope){scoreboardScope=scope;scoreboardMoves.clear();scoreboardLeaderChanged=false;scoreMotion=null;render(true);}
     private void ranksPage() {
-        title(content,"Leaderboard","Royal podium · Saved game points");dateFilterBar(content);scoreboardControls(content,true);
+        title(content,"Leaderboard","Every point. Every position.");scoreboardControls(content,true);dateFilterBar(content,true);
         List<Map<String,Object>> games=scoreboardSource(false);currentRankData=games;ScoreboardModel model=scoreboardModel(false);
         ScoreboardPage page=scoreboardPage(content,model,false);page.podium(()->{visibleRankCount=model.rows.size();render(false);});
         gap(content,10);content.addView(button("Big Scoreboard",true,()->{bigOriginScroll=scroll.getScrollY();bigKeepAwake=settings.getBoolean("keep_awake",false);tab=10;render(true);}));gap(content,15);

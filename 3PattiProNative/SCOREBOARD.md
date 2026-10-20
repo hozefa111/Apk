@@ -1,4 +1,4 @@
-# Royal Scoreboard — v2.6.0
+# Royal Scoreboard — v2.6.1
 
 Home has a Royal Top3 podium; Ranks adds the podium, detailed player cards and a
 Big Scoreboard view. Lifetime is the default. Current Session uses the existing
@@ -38,3 +38,17 @@ via reused analytics tests, practice exclusion, actual animation frames, full/
 reduced/off and reconnect suppression, native Home/Ranks, Big Scoreboard lifecycle,
 large-font landscape and screen-on cleanup. CI uses isolated Firebase emulators;
 physical handset/live-production behavior is outside those checks.
+
+## Visual refinement (2.6.1)
+
+The podium now sits on a connected dark stage, with metal-coloured gradient
+surfaces, initial badges and a drawn gold crown that does not depend on emoji
+fonts. Podium height follows its contents; there is no fixed empty column.
+Scope/date controls use compact typography while preserving 48dp touch targets.
+Score breakdown rows place name and total together, then separate personal last
+round, current session and leader gap. Large text and narrow screens stack rows.
+Exact signed totals auto-size within the podium, including 64-bit values.
+The animation anchors, continuity gate and Full/Reduced/Off behavior are retained.
+Additional emulator cases verify actual text layout bounds, compact podium height,
+profile access and long names/positive/negative 64-bit scores; preview fixtures
+are synthetic and never touch production.

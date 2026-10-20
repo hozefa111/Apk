@@ -95,6 +95,6 @@ See [ANALYTICS.md](ANALYTICS.md) for all analytics views, interactive charts, fi
 
 The original manual Round form remains available. See [VOICE_ROUNDS.md](VOICE_ROUNDS.md) for Hindi/Hinglish and English guided answers, number/name fallbacks, correction commands, score review, speech-provider requirements and save safety.
 
-## Royal Scoreboard (2.6.0)
+## Royal Scoreboard (2.6.1)
 
 See [SCOREBOARD.md](SCOREBOARD.md) for the Home/Ranks podium, joint ranks, detailed scorecards, fullscreen Big Scoreboard, animation policies and retained v2.5 rollback baseline.

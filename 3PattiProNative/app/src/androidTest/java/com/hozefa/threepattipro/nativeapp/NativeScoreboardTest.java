@@ -45,6 +45,33 @@ public class NativeScoreboardTest {
             s.onActivity(a->a.onBackPressed());Thread.sleep(700);s.onActivity(a->assertEquals(get(a,"bigOriginScroll"),((android.widget.ScrollView)get(a,"scroll")).getScrollY()));see("Leaderboard");
         }
     }
+    private View find(View v,String description){if(description.contentEquals(v.getContentDescription()==null?"":v.getContentDescription()))return v;if(v instanceof ViewGroup)for(int i=0;i<((ViewGroup)v).getChildCount();i++){View found=find(((ViewGroup)v).getChildAt(i),description);if(found!=null)return found;}return null;}
+    private void textFits(View v){
+        if(v instanceof android.widget.TextView){android.widget.TextView t=(android.widget.TextView)v;android.text.Layout l=t.getLayout();assertNotNull(l);assertEquals("No hidden lines: "+t.getText(),0,l.getEllipsisCount(l.getLineCount()-1));
+            assertTrue("Text height: "+t.getText(),l.getHeight()<=t.getHeight()-t.getCompoundPaddingTop()-t.getCompoundPaddingBottom()+1);
+            for(int n=0;n<l.getLineCount();n++)assertTrue("Text width: "+t.getText(),l.getLineWidth(n)<=t.getWidth()-t.getCompoundPaddingLeft()-t.getCompoundPaddingRight()+1);
+        }
+        if(v instanceof ViewGroup)for(int i=0;i<((ViewGroup)v).getChildCount();i++)textFits(((ViewGroup)v).getChildAt(i));
+    }
+    @Test public void compactPodiumHasNoClippedNamesOrScoresAndOpensProfiles()throws Exception{
+        try(ActivityScenario<MainActivity> s=ActivityScenario.launch(MainActivity.class)){await("Table Status");s.onActivity(a->{seed(a,false,true);
+            List<Map<String,Object>> p=Arrays.asList(FirebaseGateway.map("id","a","name","Abbas","active",true),FirebaseGateway.map("id","b","name","Shabbir","active",true),FirebaseGateway.map("id","c","name","Fatema","active",true));
+            Map<String,Object> r=FirebaseGateway.map("id","podium-preview","timestamp","2026-10-20T10:00:00Z","sessionId","current","type","hukum","playerIds",Arrays.asList("a","b","c"),"scoreChanges",FirebaseGateway.map("a",40836,"b",31481,"c",24033));
+            a.dataUpdated(p,new ArrayList<>(Arrays.asList(r)),new ArrayList<>((List<Map<String,Object>>)get(a,"sessions")));
+        });see("ROYAL TOP 3");capture("49-polished-podium");
+            s.onActivity(a->{for(String name:Arrays.asList("Abbas","Shabbir","Fatema")){View card=find(a.getWindow().getDecorView(),"Podium "+name);assertNotNull(card);textFits(card);assertTrue("Compact podium",card.getHeight()<DialogUi.dp(a,225));}});
+            onView(withContentDescription("Podium Shabbir")).perform(scrollTo(),click());s.onActivity(a->assertEquals("b",get(a,"profileId")));
+        }
+    }
+    @Test public void longNamesAndLongSignedScoresRemainReadable()throws Exception{
+        try(ActivityScenario<MainActivity> s=ActivityScenario.launch(MainActivity.class)){await("Table Status");s.onActivity(a->{seed(a,false,true);
+            List<Map<String,Object>> p=Arrays.asList(FirebaseGateway.map("id","a","name","A very long player name","active",true),FirebaseGateway.map("id","b","name","Second long player name","active",true),FirebaseGateway.map("id","c","name","Negative score player","active",true));
+            Map<String,Object> r=FirebaseGateway.map("id","long-preview","timestamp","2026-10-20T10:00:00Z","sessionId","current","type","hukum","playerIds",Arrays.asList("a","b","c"),"scoreChanges",FirebaseGateway.map("a",4000000000L,"b",3000000000L,"c",-4000000000L));
+            a.dataUpdated(p,new ArrayList<>(Arrays.asList(r)),new ArrayList<>((List<Map<String,Object>>)get(a,"sessions")));
+        });see("ROYAL TOP 3");capture("50-polished-long-scores");
+            s.onActivity(a->{for(String name:Arrays.asList("A very long player name","Second long player name","Negative score player"))textFits(find(a.getWindow().getDecorView(),"Podium "+name));});
+        }
+    }
     private String shell(String cmd)throws Exception{android.os.ParcelFileDescriptor fd=InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand(cmd);try(java.io.InputStream in=new android.os.ParcelFileDescriptor.AutoCloseInputStream(fd);java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream()){byte[] b=new byte[4096];int n;while((n=in.read(b))!=-1)out.write(b,0,n);return out.toString("UTF-8").trim();}}
     @Test public void largeTextLandscapeKeepsScoreboardControlsReachable()throws Exception{
         String original=shell("settings get system font_scale");
