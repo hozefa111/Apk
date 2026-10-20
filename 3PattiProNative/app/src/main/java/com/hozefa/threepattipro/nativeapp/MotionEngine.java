@@ -16,15 +16,15 @@ import java.util.*;
 final class MotionEngine {
     static final class Anchor {
         final String key;
-        final Integer number;
+        final Long number;
         final boolean signed;
         Anchor(String key) { this(key, null, false); }
-        Anchor(String key, Integer number, boolean signed) { this.key=key;this.number=number;this.signed=signed; }
+        Anchor(String key, Number number, boolean signed) { this.key=key;this.number=number==null?null:number.longValue();this.signed=signed; }
     }
     static final class Before {
-        final int y;
-        final Integer number;
-        Before(int y, Integer number) { this.y=y;this.number=number; }
+        final int x,y;
+        final Long number;
+        Before(int x,int y,Long number) { this.x=x;this.y=y;this.number=number; }
     }
     private final Activity activity;
     private final SharedPreferences preferences;
@@ -195,20 +195,20 @@ final class MotionEngine {
         if(had)tap(view);
     }
     void bid(TextView view,int target) {
-        Integer old=view.getTag() instanceof Anchor?((Anchor)view.getTag()).number:null;
+        Long old=view.getTag() instanceof Anchor?((Anchor)view.getTag()).number:null;
         if(old!=null&&old==target)return;
         cancelFor(view);view.setTag(new Anchor("bid",target,false));
         String end="Bid  "+target+"   ▾";view.setText(end);
         if(old==null||!enabled()||!full())return;
         ValueAnimator value=ValueAnimator.ofFloat(0,1);value.setDuration(180);
-        value.addUpdateListener(a->view.setText("Bid  "+MotionPolicy.interpolate(old,target,(float)a.getAnimatedValue())+"   ▾"));
+        value.addUpdateListener(a->view.setText("Bid  "+MotionPolicy.interpolate(old.intValue(),target,(float)a.getAnimatedValue())+"   ▾"));
         start(view,value,()->view.setText(end));
     }
-    void number(TextView view,int from,int to,boolean signed) {
-        if(!full()||from==to) { view.setText(MotionPolicy.points(to,signed));return; }
+    void number(TextView view,long from,long to,boolean signed) {
+        if(!full()||from==to) { view.setText(signed?ScoreboardModel.points(to):String.valueOf(to));return; }
         ValueAnimator value=ValueAnimator.ofFloat(0,1);value.setDuration(420);
-        value.addUpdateListener(a->view.setText(MotionPolicy.points(MotionPolicy.interpolate(from,to,(float)a.getAnimatedValue()),signed)));
-        start(view,value,()->view.setText(MotionPolicy.points(to,signed)));
+        value.addUpdateListener(a->view.setText(signed?ScoreboardModel.points(Math.round(from+(to-(double)from)*(float)a.getAnimatedValue())):String.valueOf(Math.round(from+(to-(double)from)*(float)a.getAnimatedValue()))));
+        start(view,value,()->view.setText(signed?ScoreboardModel.points(to):String.valueOf(to)));
     }
     Map<String,Before> capture(View root) {
         Map<String,Before> result=new HashMap<>();capture(root,result);return result;
@@ -216,7 +216,7 @@ final class MotionEngine {
     private void capture(View view,Map<String,Before> result) {
         if(view.getTag() instanceof Anchor&&visible(view)) {
             Anchor anchor=(Anchor)view.getTag();int[] xy=new int[2];view.getLocationInWindow(xy);
-            result.put(anchor.key,new Before(xy[1],anchor.number));
+            result.put(anchor.key,new Before(xy[0],xy[1],anchor.number));
         }
         if(view instanceof ViewGroup)for(int i=0;i<((ViewGroup)view).getChildCount();i++)capture(((ViewGroup)view).getChildAt(i),result);
     }
@@ -225,17 +225,18 @@ final class MotionEngine {
         if(view.getTag() instanceof Anchor&&visible(view)) {
             Anchor anchor=(Anchor)view.getTag();Before old=before.get(anchor.key);
             if(old!=null) {
-                if(anchor.number!=null&&old.number!=null&&view instanceof TextView&&anchor.number.intValue()!=old.number.intValue()) {
+                if(anchor.number!=null&&old.number!=null&&view instanceof TextView&&anchor.number.longValue()!=old.number.longValue()) {
                     number((TextView)view,old.number,anchor.number,anchor.signed);
+                    if(mode()==MotionPolicy.Mode.REDUCED){view.setAlpha(.65f);ObjectAnimator fade=ObjectAnimator.ofFloat(view,View.ALPHA,1f);fade.setDuration(120);start(view,fade,()->view.setAlpha(1));}
                     highlight(view,anchor.number>old.number?0xFF2ECD71:0xFFE74C3C);
                     delta(view,(long)anchor.number-old.number,anchor.number>old.number?0xFF2ECD71:0xFFE74C3C);
-                } else if(anchor.key.startsWith("rank:")&&full()) {
+                } else if((anchor.key.startsWith("rank:")||anchor.key.startsWith("crown:"))&&full()) {
                     int[] xy=new int[2];view.getLocationInWindow(xy);
-                    float offset=old.y-xy[1];float limit=activity.getResources().getDisplayMetrics().heightPixels*.6f;
-                    if(Math.abs(offset)>1&&Math.abs(offset)<=limit) {
-                        view.setTranslationY(offset);
-                        ObjectAnimator move=ObjectAnimator.ofFloat(view,View.TRANSLATION_Y,0);move.setDuration(300);
-                        start(view,move,()->view.setTranslationY(0));
+                    float dx=old.x-xy[0];float offset=old.y-xy[1];float limit=activity.getResources().getDisplayMetrics().heightPixels*.6f;
+                    if((Math.abs(offset)>1||Math.abs(dx)>1)&&Math.abs(offset)<=limit) {
+                        view.setTranslationY(offset);view.setTranslationX(dx);
+                        AnimatorSet move=new AnimatorSet();move.playTogether(ObjectAnimator.ofFloat(view,View.TRANSLATION_Y,0),ObjectAnimator.ofFloat(view,View.TRANSLATION_X,0));move.setDuration(300);
+                        start(view,move,()->{view.setTranslationY(0);view.setTranslationX(0);});
                     }
                 }
             }
