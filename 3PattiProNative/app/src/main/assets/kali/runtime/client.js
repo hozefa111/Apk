@@ -274,14 +274,14 @@ async function attachPresence(id) {
     }
   }
   function retry() {
-    if (!ctx.active || ctx.retry || !ctx.transport) return;
+    if (!ctx.active || ctx.retry || !ctx.transport && ctx.access) return;
     ctx.retry = setTimeout(() => {
       ctx.retry = null;
       repair();
     }, Math.min(1e4, 1e3 * 2 ** Math.min(ctx.failures++, 4)));
   }
   async function repair() {
-    if (!ctx.active || !ctx.transport || ctx.pending || !navigator.onLine) return;
+    if (!ctx.active || ctx.pending || !navigator.onLine || ctx.access && !ctx.transport) return;
     const epoch = ctx.epoch, ref = ctx.ref || ownConnections.push();
     ctx.ref = ref;
     ctx.pending = true;
@@ -300,6 +300,7 @@ async function attachPresence(id) {
           retry();
         }
       });
+      if (!ctx.transport) return;
       await ref.onDisconnect().remove();
       if (!valid(epoch)) return;
       await ref.set(true);
@@ -332,16 +333,20 @@ async function attachPresence(id) {
   }
   const onTransport = connected.on("value", (snapshot) => {
     if (!ctx.active) return;
+    const wasConnected = ctx.transport;
     ctx.transport = snapshot.val() === true;
     if (!ctx.transport) {
-      ctx.epoch++;
-      ctx.ref = null;
-      connection = null;
+      if (wasConnected) {
+        ctx.epoch++;
+        ctx.ref = null;
+        connection = null;
+      }
       connectionReady = false;
       render();
     } else repair();
   });
   presenceRecovery = repair;
+  repair();
   unsubs.push(() => {
     ctx.active = false;
     ctx.epoch++;

@@ -90,13 +90,14 @@ async function attachPresence(id){
  const valid=epoch=>ctx.active&&subscribedRoomId===id&&uid()===owner&&ctx.epoch===epoch;
  const connected=presence.ref('.info/connected'),ownConnections=presence.ref('onlinePresence/'+id+'/'+owner+'/connections');let onOwn=null;
  function watchOwn(snapshot){if(ctx.active&&ctx.ref&&!ctx.pending&&!snapshot.hasChild(ctx.ref.key)){connectionReady=false;render();retry();}}
- function retry(){if(!ctx.active||ctx.retry||!ctx.transport)return;ctx.retry=setTimeout(()=>{ctx.retry=null;repair();},Math.min(10000,1000*2**Math.min(ctx.failures++,4)));}
+ function retry(){if(!ctx.active||ctx.retry||(!ctx.transport&&ctx.access))return;ctx.retry=setTimeout(()=>{ctx.retry=null;repair();},Math.min(10000,1000*2**Math.min(ctx.failures++,4)));}
  async function repair(){
-  if(!ctx.active||!ctx.transport||ctx.pending||!navigator.onLine)return;
+  if(!ctx.active||ctx.pending||!navigator.onLine||ctx.access&&!ctx.transport)return;
   const epoch=ctx.epoch,ref=ctx.ref||ownConnections.push();ctx.ref=ref;ctx.pending=true;
   try{
    if(!ctx.access){await api({operation:'presenceAccess',roomId:id});if(!valid(epoch))return;ctx.access=true;}
    if(!onOwn)onOwn=ownConnections.on('value',watchOwn,()=>{if(ctx.active){onOwn=null;ctx.access=false;connectionReady=false;render();retry();}});
+   if(!ctx.transport)return;
    await ref.onDisconnect().remove();if(!valid(epoch))return;
    await ref.set(true);if(!valid(epoch))return;
    const result=await api({operation:'presenceSync',roomId:id});if(!valid(epoch))return;
@@ -109,12 +110,12 @@ async function attachPresence(id){
   }
  }
  const onTransport=connected.on('value',snapshot=>{
-  if(!ctx.active)return;ctx.transport=snapshot.val()===true;
-  if(!ctx.transport){ctx.epoch++;ctx.ref=null;connection=null;connectionReady=false;render();}
+  if(!ctx.active)return;const wasConnected=ctx.transport;ctx.transport=snapshot.val()===true;
+  if(!ctx.transport){if(wasConnected){ctx.epoch++;ctx.ref=null;connection=null;}connectionReady=false;render();}
   else repair();
  });
  // A real data subscription keeps the RTDB transport active and detects lost registrations.
- presenceRecovery=repair;
+ presenceRecovery=repair;repair();
  unsubs.push(()=>{ctx.active=false;ctx.epoch++;clearTimeout(ctx.retry);connected.off('value',onTransport);if(onOwn)ownConnections.off('value',onOwn);if(ctx.ref)ctx.ref.remove().catch(()=>{});if(presenceRecovery===repair)presenceRecovery=null;});
 }
 
