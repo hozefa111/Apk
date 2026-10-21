@@ -76,6 +76,6 @@ if(u.getPath()==null||!u.getPath().startsWith("/assets/kali/")){if("1".equals(u.
   });
  }
  @Override protected void onPause(){super.onPause();if(web!=null)web.onPause();}
- @Override protected void onResume(){super.onResume();if(web!=null)web.onResume();}
+ @Override protected void onResume(){super.onResume();if(web!=null){web.onResume();web.evaluateJavascript("window.kaliReconnect && window.kaliReconnect()",null);}}
  @Override protected void onDestroy(){ui.removeCallbacksAndMessages(null);if(web!=null){web.stopLoading();web.destroy();}worker.shutdownNow();super.onDestroy();}
 }
