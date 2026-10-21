@@ -1,0 +1,25 @@
+name: Publish verified 3 Patti PRO APK
+on:
+  push:
+    branches: [apk-download-v2.7.8]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check completed release gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh api repos/hozefa111/Apk/actions/runs/39627351435 --jq .conclusion)" = success
+          test "$(gh api repos/hozefa111/Apk/actions/runs/39627351435 --jq .head_sha)" = 061b2f6fb3f6c1ee89c31c74a53ee5273e1e11e0
+      - name: Verify tested APK checksum
+        run: sha256sum --check 3-Patti-PRO-v2.7.8.apk.sha256
+      - name: Publish downloadable APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create three-patti-pro-v2.7.8 3-Patti-PRO-v2.7.8.apk 3-Patti-PRO-v2.7.8.apk.sha256 3-Patti-PRO-v2.7.8-Verification.md 3-Patti-PRO-v2.7.8-Test-Report.zip --target 22fe2e290b29c9969b1f389c982e2a12435581f4 --title "3 Patti PRO v2.7.8" --notes-file 3-Patti-PRO-v2.7.8-Verification.md
