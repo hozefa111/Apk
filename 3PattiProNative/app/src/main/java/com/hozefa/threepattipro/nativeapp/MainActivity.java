@@ -1038,7 +1038,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         }
     }
     private void sessionActions(Map<String,Object> session) {
-        if(!loggedIn||"online".equals(str(session,"source"))){showSessionSummary(session);return;}
+        if(!loggedIn){showSessionSummary(session);return;}
         new MotionDialogBuilder(this,motion)
                 .setTitle(str(session,"sessionName"))
                 .setItems(new String[]{"View Summary","Share Summary Image","Edit Session Name","Delete Session"},
@@ -1419,14 +1419,15 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     private void editSessionDialog(Map<String,Object> session) {
         EditText field=new EditText(this);
-        field.setSingleLine(true);field.setText(str(session,"sessionName"));
+        field.setSingleLine(true);field.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(80)});field.setText(str(session,"sessionName"));
         pad(field,18,10,18,10);
         new MotionDialogBuilder(this,motion).setTitle("Edit Session Name")
                 .setView(field).setNegativeButton("Cancel",null)
                 .setPositiveButton("Save",(d,w)->{
                     String value=field.getText().toString().trim();
                     if(value.isEmpty())return;
-                    api.patchDocument("sessions",id(session),FirebaseGateway.map("sessionName",value),"Session updated",str(session,"_updateTime"),null);
+                    if("online".equals(str(session,"source")))api.onlineSessionHistory(session,"rename",value);
+                    else api.patchDocument("sessions",id(session),FirebaseGateway.map("sessionName",value),"Session updated",str(session,"_updateTime"),null);
                 }).show();
     }
     private void confirmRemove(String collection,Map<String,Object> record,String noun) {
@@ -1434,14 +1435,17 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         // Deliberately NEVER deletes without an explicit, named confirmation.
         new MotionDialogBuilder(this,motion)
                 .setTitle("Permanently delete "+noun+"?")
-                .setMessage("This will remove the selected "+noun+" from Firebase. A recovery backup is saved on this device before deletion. Export it from Settings.")
+                .setMessage(("session".equals(noun)?"Only the session summary will be removed. Saved rounds and lifetime scores will stay. ":"")+"This will remove the selected "+noun+" from Firebase. A recovery backup is saved on this device before deletion. Export it from Settings.")
                 .setNegativeButton("Cancel",null)
                 .setPositiveButton("Continue",(d,w)->new MotionDialogBuilder(this,motion)
                         .setTitle("Final confirmation")
                         .setMessage("Delete only this "+noun+"?\n"+("player".equals(noun)?str(record,"name"):
                                 "session".equals(noun)?str(record,"sessionName"):when(record.get("timestamp"))))
                         .setNegativeButton("Keep",null)
-                        .setPositiveButton("Delete",(dlg,which)->api.deleteDocument(collection,id(record),noun+" deleted",str(record,"_updateTime"))).show())
+                        .setPositiveButton("Delete",(dlg,which)->{
+                            if("sessions".equals(collection)&&"online".equals(str(record,"source")))api.onlineSessionHistory(record,"delete",null);
+                            else api.deleteDocument(collection,id(record),noun+" deleted",str(record,"_updateTime"));
+                        }).show())
                 .show();
     }
     private String sessionParticipantName(Map<String,Object> session,String pid){

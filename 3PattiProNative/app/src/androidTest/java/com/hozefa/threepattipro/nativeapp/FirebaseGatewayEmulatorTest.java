@@ -15,6 +15,7 @@ import static org.junit.Assert.*;
 public class FirebaseGatewayEmulatorTest {
     private FirebaseGateway gateway;
     private final AtomicBoolean live=new AtomicBoolean(),admin=new AtomicBoolean(),busy=new AtomicBoolean();
+    private final AtomicReference<List<Map<String,Object>>> sessions=new AtomicReference<>(Collections.emptyList());
     private final AtomicReference<List<Map<String,Object>>> rounds=new AtomicReference<>(Collections.emptyList());
     private final AtomicReference<List<Map<String,Object>>> players=new AtomicReference<>(Collections.emptyList());
     private final AtomicLong syncEvent=new AtomicLong();
@@ -55,7 +56,7 @@ public class FirebaseGatewayEmulatorTest {
         CountDownLatch started=new CountDownLatch(1);
         InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{
             gateway=new FirebaseGateway(context,new FirebaseGateway.Listener(){
-                public void dataUpdated(List<Map<String,Object>> p,List<Map<String,Object>> r,List<Map<String,Object>> s){players.set(p);rounds.set(r);}
+                public void dataUpdated(List<Map<String,Object>> p,List<Map<String,Object>> r,List<Map<String,Object>> s){players.set(p);rounds.set(r);sessions.set(s);}
                 public void authChanged(boolean value){admin.set(value);}
                 public void notice(String message){notice.set(message);android.util.Log.i("GatewayTest",message+"; live="+live.get()+" busy="+busy.get());}
                 public void busy(boolean value){busy.set(value);}
@@ -65,6 +66,21 @@ public class FirebaseGatewayEmulatorTest {
         gateway.signIn("tester@example.test","test-password-123");await(()->admin.get()&&live.get()&&!busy.get());ready(()->{});
     }
     @After public void cleanup()throws Exception{if(gateway!=null)InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.stop());}
+    @Test public void onlineSessionRenameAndDeleteUseAuthorityAndKeepRounds()throws Exception{
+        Assume.assumeTrue("true".equals(InstrumentationRegistry.getArguments().getString("kaliOnlineBackend")));
+        String id="online-meta-"+UUID.randomUUID();
+        Map<String,Object> fields=FirebaseGateway.map("source","online","sessionName","Online original","endTime",new com.google.firebase.Timestamp(1000,0),"startTime",new com.google.firebase.Timestamp(500,0),"totalRounds",0);
+        request("PATCH","/sessions/"+id,new JSONObject().put("fields",SdkDocuments.fields(fields)));
+        await(()->sessions.get().stream().anyMatch(s->id.equals(s.get("id")))&&live.get()&&!busy.get());
+        JSONObject baseline=request("GET","/rounds/fixture-round",null).getJSONObject("fields");
+        Map<String,Object> original=sessions.get().stream().filter(s->id.equals(s.get("id"))).findFirst().get();
+        ready(()->gateway.onlineSessionHistory(original,"rename","Family Friday"));
+        await(()->sessions.get().stream().anyMatch(s->id.equals(s.get("id"))&&"Family Friday".equals(s.get("sessionName")))&&live.get()&&!busy.get());
+        Map<String,Object> renamed=sessions.get().stream().filter(s->id.equals(s.get("id"))).findFirst().get();
+        ready(()->gateway.onlineSessionHistory(renamed,"delete",null));
+        await(()->sessions.get().stream().noneMatch(s->id.equals(s.get("id")))&&live.get()&&!busy.get());
+        assertTrue(BulkWritePlan.sameJson(baseline,request("GET","/rounds/fixture-round",null).getJSONObject("fields")));
+    }
     @Test public void roundRetryAndPayloadConflictAndVersionedDelete()throws Exception{
         String id="test-"+UUID.randomUUID();
         Map<String,Object> body=FirebaseGateway.map("type","hukum","timestamp",new FirebaseGateway.Stamp("2000-01-01T00:00:00Z"),"bid",155,"hukumId","a","hukumName","Player a","partnerIds",Arrays.asList("b"),"partnerNames",Arrays.asList("Player b"),"nonPartnerIds",Arrays.asList("c"),"nonPartnerNames",Arrays.asList("Player c"),"playerIds",Arrays.asList("a","b","c"),"result","win","scoreChanges",FirebaseGateway.map("a",310,"b",155,"c",0));
