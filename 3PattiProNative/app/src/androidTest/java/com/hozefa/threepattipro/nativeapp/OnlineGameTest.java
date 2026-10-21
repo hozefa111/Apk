@@ -38,6 +38,27 @@ public class OnlineGameTest {
    }
   }
  }
+ @Test public void liveUpdatesRetainTheBidControlsAndTable()throws Exception{
+  org.junit.Assume.assumeTrue("Full online emulator required", "true".equals(InstrumentationRegistry.getArguments().getString("kaliOnlineBackend")));
+  try(ActivityScenario<OnlineGameActivity> s=ActivityScenario.launch(OnlineGameActivity.class)){
+   long end=System.currentTimeMillis()+60000;while(System.currentTimeMillis()<end&&!"true".equals(js(s,"document.documentElement.dataset.nativeIdentity==='ready' && typeof renderNow==='function'")))Thread.sleep(300);
+   for(int mode:new int[]{4,6}){
+    String script="(()=>{let now=Date.now(),r=KaliRules.create({id:'smooth_native',code:'ABCDEFGH',uid:'owner',playerId:'po',name:'Owner',mode:"+mode+"},now);for(let seat=2;seat<="+mode+";seat++)r=KaliRules.command(r,'owner',{type:'bot',seat,botId:'bot_'+seat},++now,n=>n-1);r=KaliRules.command(r,'owner',{type:'ready'},++now,n=>n-1);const local=r.hand.turn;user={uid:local,getIdToken:async()=>''};room=KaliRules.publicState(r);own=KaliRules.privateState(r,local);busy=false;reduced=true;error='';screen='room';scoreOpen=false;historyOpen=false;renderNow();const form=document.getElementById('bid'),felt=document.querySelector('.felt'),card=document.querySelector('.hand-card');form.elements.bid.value='250';updateBidControls();for(let i=0;i<30;i++){room.revision++;own={...own,cards:own.cards.slice()};renderNow();}if(document.getElementById('bid')!==form||document.querySelector('.felt')!==felt||document.querySelector('.hand-card')!==card||form.elements.bid.value!=='250')return false;room.sessionName='Updated table';renderNow();if(document.querySelector('.felt')!==felt||document.querySelector('.room-head h1').textContent!=='Updated table')return false;room.hand.bid=180;room.hand.turnGeneration++;renderNow();return document.getElementById('bid')===form&&form.elements.bid.value==='185'&&form.querySelector('button.gold').textContent==='Bid 185';})()";
+    assertEquals("Persistent controls and stale bid reset for "+mode+" seats","true",js(s,script));
+   }
+  }
+ }
+ @Test public void stopDialogUsesButtonsAndAndroidBackCancelsIt()throws Exception{
+  org.junit.Assume.assumeTrue("Full online emulator required", "true".equals(InstrumentationRegistry.getArguments().getString("kaliOnlineBackend")));
+  try(ActivityScenario<OnlineGameActivity> s=ActivityScenario.launch(OnlineGameActivity.class)){
+   long end=System.currentTimeMillis()+60000;while(System.currentTimeMillis()<end&&!"true".equals(js(s,"document.documentElement.dataset.nativeIdentity==='ready' && typeof renderNow==='function'")))Thread.sleep(300);
+   String script="(()=>{let now=Date.now(),r=KaliRules.create({id:'stop_native',code:'ABCDEFGH',uid:'owner',playerId:'po',name:'Owner',mode:4},now);for(let seat=2;seat<=4;seat++)r=KaliRules.command(r,'owner',{type:'bot',seat,botId:'bot_'+seat},++now,n=>n-1);r=KaliRules.command(r,'owner',{type:'ready'},++now,n=>n-1);user={uid:'owner',getIdToken:async()=>''};room=KaliRules.publicState(r);own=KaliRules.privateState(r,'owner');busy=false;reduced=true;error='';screen='room';scoreOpen=false;historyOpen=false;renderNow();document.querySelector('[data-action=stop]').click();const dialog=document.querySelector('.game-dialog'),b=dialog.getBoundingClientRect();return !dialog.querySelector('input')&&!!dialog.querySelector('[data-choice=finish]')&&!!dialog.querySelector('[data-choice=void]')&&b.x>=0&&b.y>=0&&b.bottom<=innerHeight+1;})()";
+   assertEquals("Stop choices fit inside the same APK", "true",js(s,script));
+   androidx.test.espresso.Espresso.pressBack();
+   long dismissed=System.currentTimeMillis()+10000;while(System.currentTimeMillis()<dismissed&&!"true".equals(js(s,"!document.querySelector('.game-dialog')")))Thread.sleep(100);
+   assertEquals("Back closes the dialog without ending the session","true",js(s,"!document.querySelector('.game-dialog') && room.status!=='stopped' && room.completed===0"));
+  }
+ }
  @Test public void onlineAndManualHistoryExposeTheSameFourActions()throws Exception{
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    for(String source:new String[]{"manual","online"}){
