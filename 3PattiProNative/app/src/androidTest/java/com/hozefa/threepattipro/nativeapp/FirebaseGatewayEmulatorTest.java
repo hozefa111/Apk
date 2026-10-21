@@ -66,7 +66,7 @@ public class FirebaseGatewayEmulatorTest {
         gateway.signIn("tester@example.test","test-password-123");await(()->admin.get()&&live.get()&&!busy.get());ready(()->{});
     }
     @After public void cleanup()throws Exception{if(gateway!=null)InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.stop());}
-    @Test public void onlineSessionRenameAndDeleteUseAuthorityAndKeepRounds()throws Exception{
+    @Test public void onlineSessionCascadeRemovesLinkedRoundsAndKeepsOtherScores()throws Exception{
         Assume.assumeTrue("true".equals(InstrumentationRegistry.getArguments().getString("kaliOnlineBackend")));
         String id="online-meta-"+UUID.randomUUID();
         Map<String,Object> fields=FirebaseGateway.map("source","online","sessionName","Online original","endTime",new com.google.firebase.Timestamp(1000,0),"startTime",new com.google.firebase.Timestamp(500,0),"totalRounds",0);
@@ -77,9 +77,14 @@ public class FirebaseGatewayEmulatorTest {
         ready(()->gateway.onlineSessionHistory(original,"rename","Family Friday"));
         await(()->sessions.get().stream().anyMatch(s->id.equals(s.get("id"))&&"Family Friday".equals(s.get("sessionName")))&&live.get()&&!busy.get());
         Map<String,Object> renamed=sessions.get().stream().filter(s->id.equals(s.get("id"))).findFirst().get();
-        ready(()->gateway.onlineSessionHistory(renamed,"delete",null));
+        String linkedId="cascade-"+UUID.randomUUID();
+        request("PATCH","/rounds/"+linkedId,new JSONObject().put("fields",SdkDocuments.fields(FirebaseGateway.map("source","online","sessionId",id,"scoreChanges",FirebaseGateway.map("a",-155),"timestamp",new com.google.firebase.Timestamp(1500,0)))));
+        CountDownLatch inspected=new CountDownLatch(1);AtomicReference<JSONObject> preview=new AtomicReference<>();
+        ready(()->gateway.previewSessionDeletion(renamed,p->{preview.set(p);inspected.countDown();}));completed(inspected,"session deletion preview");assertEquals(1,preview.get().getInt("roundCount"));
+        ready(()->gateway.deleteSessionRounds(renamed,preview.get()));
         await(()->sessions.get().stream().noneMatch(s->id.equals(s.get("id")))&&live.get()&&!busy.get());
         assertTrue(BulkWritePlan.sameJson(baseline,request("GET","/rounds/fixture-round",null).getJSONObject("fields")));
+        assertTrue(rounds.get().stream().noneMatch(r->linkedId.equals(r.get("id"))));
     }
     @Test public void roundRetryAndPayloadConflictAndVersionedDelete()throws Exception{
         String id="test-"+UUID.randomUUID();
