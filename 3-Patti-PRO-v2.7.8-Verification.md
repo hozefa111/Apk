@@ -14,7 +14,7 @@ Same Android application, package `com.hozefa.threepattipro.nativeapp`, version 
 
 ## Verification
 
-The signed Release build and lint completed successfully. Release JVM tests: **192 passed**, zero failures/errors/skips. Lint: zero errors, 38 existing warnings. All 15 shared game source assets match the APK bundle; the generated asset manifest is verified separately.
+The signed Release build and lint completed successfully. Release JVM tests: **192 passed**, zero failures/errors/skips. Lint: zero errors, 38 warnings. All 15 shared game source assets match the APK bundle; the generated asset manifest is verified separately.
 
 Package: `com.hozefa.threepattipro.nativeapp` · version **2.7.8** · code **29**.
 

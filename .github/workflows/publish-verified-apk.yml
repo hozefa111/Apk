@@ -22,4 +22,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create three-patti-pro-v2.7.8 3-Patti-PRO-v2.7.8.apk 3-Patti-PRO-v2.7.8.apk.sha256 3-Patti-PRO-v2.7.8-Verification.md 3-Patti-PRO-v2.7.8-Test-Report.zip --target 22fe2e290b29c9969b1f389c982e2a12435581f4 --title "3 Patti PRO v2.7.8" --notes-file 3-Patti-PRO-v2.7.8-Verification.md
+          if gh release view three-patti-pro-v2.7.8 >/dev/null 2>&1; then
+            gh release edit three-patti-pro-v2.7.8 --notes-file 3-Patti-PRO-v2.7.8-Verification.md
+            gh release upload three-patti-pro-v2.7.8 3-Patti-PRO-v2.7.8-Verification.md 3-Patti-PRO-v2.7.8-Test-Report.zip --clobber
+          else
+            gh release create three-patti-pro-v2.7.8 3-Patti-PRO-v2.7.8.apk 3-Patti-PRO-v2.7.8.apk.sha256 3-Patti-PRO-v2.7.8-Verification.md 3-Patti-PRO-v2.7.8-Test-Report.zip --target 22fe2e290b29c9969b1f389c982e2a12435581f4 --title "3 Patti PRO v2.7.8" --notes-file 3-Patti-PRO-v2.7.8-Verification.md
+          fi
