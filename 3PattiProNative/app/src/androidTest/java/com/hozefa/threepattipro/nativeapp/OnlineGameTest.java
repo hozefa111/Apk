@@ -9,6 +9,9 @@ public class OnlineGameTest {
  @Test public void onlineAndManualHistoryExposeTheSameFourActions()throws Exception{
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    for(String source:new String[]{"manual","online"}){
+    long until=System.currentTimeMillis()+20000;java.util.concurrent.atomic.AtomicBoolean focused=new java.util.concurrent.atomic.AtomicBoolean();
+    while(System.currentTimeMillis()<until){scenario.onActivity(a->focused.set(a.getWindow().getDecorView().hasWindowFocus()));if(focused.get())break;Thread.sleep(100);}
+    assertTrue("History Activity has window focus before opening actions",focused.get());
     scenario.onActivity(a->{try{
      java.lang.reflect.Field gateway=MainActivity.class.getDeclaredField("api");gateway.setAccessible(true);((FirebaseGateway)gateway.get(a)).stop();
      java.lang.reflect.Field role=MainActivity.class.getDeclaredField("loggedIn");role.setAccessible(true);role.setBoolean(a,true);
