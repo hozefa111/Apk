@@ -1432,19 +1432,30 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     private void confirmRemove(String collection,Map<String,Object> record,String noun) {
         if(!loggedIn)return;
+        if("sessions".equals(collection)){
+            api.previewSessionDeletion(record,preview->{
+                StringBuilder message=new StringBuilder("Delete ").append(str(record,"sessionName")).append(" and ALL ").append(preview.optInt("roundCount")).append(" rounds?\n\nTheir points will be removed from lifetime totals and rankings. Other sessions stay unchanged.\n");
+                org.json.JSONArray impacts=preview.optJSONArray("impacts");
+                if(impacts!=null)for(int i=0;i<impacts.length();i++){org.json.JSONObject item=impacts.optJSONObject(i);if(item!=null){int change=item.optInt("lifetimeChange");message.append("\n").append(item.optString("name")).append(": ").append(change>0?"+":"").append(change);}}
+                message.append("\n\nA device backup is saved before deletion.");
+                new MotionDialogBuilder(this,motion).setTitle("Delete session & rounds?").setMessage(message.toString())
+                    .setNegativeButton("Keep",null).setPositiveButton("Continue",(d,w)->new MotionDialogBuilder(this,motion)
+                    .setTitle("Final confirmation").setMessage("Permanently delete this session and its "+preview.optInt("roundCount")+" rounds and points?")
+                    .setNegativeButton("Cancel",null).setPositiveButton("Delete all",(dialog,which)->api.deleteSessionRounds(record,preview)).show()).show();
+            });return;
+        }
         // Deliberately NEVER deletes without an explicit, named confirmation.
         new MotionDialogBuilder(this,motion)
                 .setTitle("Permanently delete "+noun+"?")
-                .setMessage(("session".equals(noun)?"Only the session summary will be removed. Saved rounds and lifetime scores will stay. ":"")+"This will remove the selected "+noun+" from Firebase. A recovery backup is saved on this device before deletion. Export it from Settings.")
+                .setMessage("This will remove the selected "+noun+" from Firebase. A recovery backup is saved on this device before deletion. Export it from Settings.")
                 .setNegativeButton("Cancel",null)
                 .setPositiveButton("Continue",(d,w)->new MotionDialogBuilder(this,motion)
                         .setTitle("Final confirmation")
                         .setMessage("Delete only this "+noun+"?\n"+("player".equals(noun)?str(record,"name"):
-                                "session".equals(noun)?str(record,"sessionName"):when(record.get("timestamp"))))
+                                when(record.get("timestamp"))))
                         .setNegativeButton("Keep",null)
                         .setPositiveButton("Delete",(dlg,which)->{
-                            if("sessions".equals(collection)&&"online".equals(str(record,"source")))api.onlineSessionHistory(record,"delete",null);
-                            else api.deleteDocument(collection,id(record),noun+" deleted",str(record,"_updateTime"));
+                            api.deleteDocument(collection,id(record),noun+" deleted",str(record,"_updateTime"));
                         }).show())
                 .show();
     }

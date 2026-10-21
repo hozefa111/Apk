@@ -556,27 +556,34 @@ public final class FirebaseGateway {
             commit(new JSONArray().put(deletion));
         });
     }
-    /** Online session metadata goes through the authority; scored rounds stay immutable. */
+    /** Metadata and destructive session actions share server-side authority. */
+    private JSONObject sessionRequest(Map<String,Object> session,String action,String name,String token,JSONObject preview)throws Exception{
+        String endpoint;
+        if(BuildConfig.USE_EMULATORS)endpoint="http://10.0.2.2:5001/demo-three-patti/asia-south1/kaliApi";
+        else try(Reader reader=new InputStreamReader(context.getAssets().open("kali/config.js"),StandardCharsets.UTF_8)){
+            StringBuilder config=new StringBuilder();char[] buffer=new char[1024];int count;
+            while((count=reader.read(buffer))!=-1)config.append(buffer,0,count);endpoint=OnlineEndpoint.api(config.toString());
+        }
+        JSONObject payload=new JSONObject().put("operation","sessionHistory").put("sessionId",String.valueOf(session.get("id")))
+                .put("action",action).put("name",name==null?JSONObject.NULL:name).put("expectedName",session.get("sessionName")).put("commandId",UUID.randomUUID().toString());
+        if(preview!=null)payload.put("deleteRounds",true).put("previewToken",preview.getString("previewToken"));
+        okhttp3.OkHttpClient http=new okhttp3.OkHttpClient.Builder().callTimeout(25,TimeUnit.SECONDS).build();
+        okhttp3.Request request=new okhttp3.Request.Builder().url(endpoint).header("Authorization","Bearer "+token)
+                .post(okhttp3.RequestBody.create(payload.toString(),okhttp3.MediaType.get("application/json"))).build();
+        try(okhttp3.Response response=http.newCall(request).execute()){
+            JSONObject result=new JSONObject(response.body().string());if(!response.isSuccessful())throw new IOException(result.optString("error","Session update failed"));return result;
+        }
+    }
     public void onlineSessionHistory(Map<String,Object> session,String action,String name){
-        write("rename".equals(action)?"Session updated":"Session deleted",token->{
-            String endpoint;
-            if(BuildConfig.USE_EMULATORS)endpoint="http://10.0.2.2:5001/demo-three-patti/asia-south1/kaliApi";
-            else try(Reader reader=new InputStreamReader(context.getAssets().open("kali/config.js"),StandardCharsets.UTF_8)){
-                StringBuilder config=new StringBuilder();char[] buffer=new char[1024];int count;
-                while((count=reader.read(buffer))!=-1)config.append(buffer,0,count);
-                endpoint=OnlineEndpoint.api(config.toString());
-            }
-            JSONObject payload=new JSONObject().put("operation","sessionHistory").put("sessionId",String.valueOf(session.get("id")))
-                    .put("action",action).put("name",name==null?JSONObject.NULL:name).put("expectedName",session.get("sessionName"))
-                    .put("commandId",UUID.randomUUID().toString());
-            if("delete".equals(action))preserveBackup();
-            okhttp3.OkHttpClient http=new okhttp3.OkHttpClient.Builder().callTimeout(25,TimeUnit.SECONDS).build();
-            okhttp3.Request request=new okhttp3.Request.Builder().url(endpoint).header("Authorization","Bearer "+token)
-                    .post(okhttp3.RequestBody.create(payload.toString(),okhttp3.MediaType.get("application/json"))).build();
-            try(okhttp3.Response response=http.newCall(request).execute()){
-                JSONObject result=new JSONObject(response.body().string());
-                if(!response.isSuccessful())throw new IOException(result.optString("error","Online session update failed"));
-            }
+        write("Session updated",token->sessionRequest(session,action,name,token,null));
+    }
+    public void previewSessionDeletion(Map<String,Object> session,java.util.function.Consumer<JSONObject> ready){
+        write(null,token->{JSONObject preview=sessionRequest(session,"previewDelete",null,token,null);ui.post(()->{if(running)ready.accept(preview);});});
+    }
+    public void deleteSessionRounds(Map<String,Object> session,JSONObject preview){
+        write("Session, rounds and their points deleted",token->{
+            preserveBackup();JSONObject result;
+            do{ensureIdToken();result=sessionRequest(session,"delete",null,idToken,preview);if(result.optBoolean("pending"))Thread.sleep(1000);}while(result.optBoolean("pending"));
         });
     }
     public interface Action { void run(String token) throws Exception; }
@@ -611,7 +618,7 @@ public final class FirebaseGateway {
                 if(!freshSnapshot)throw new IOException("Data changed. Refresh and retry.");
                 if(hasPendingBulkOperation()&&!resumeBulk)throw new IOException("An interrupted data operation needs attention in Settings before other changes");
                 action.run(idToken);
-                notify(success);
+                if(success!=null&&!success.isEmpty())notify(success);
                 onUi(onSuccess);
                 load();
             }catch(Exception error){
