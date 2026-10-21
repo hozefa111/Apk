@@ -28,6 +28,16 @@ public class OnlineGameTest {
    }
   }
  }
+ @Test public void emptySeatsCanBeChosenWithoutAdminApproval()throws Exception{
+  org.junit.Assume.assumeTrue("Full online emulator required", "true".equals(InstrumentationRegistry.getArguments().getString("kaliOnlineBackend")));
+  try(ActivityScenario<OnlineGameActivity> s=ActivityScenario.launch(OnlineGameActivity.class)){
+   long end=System.currentTimeMillis()+60000;while(System.currentTimeMillis()<end&&!"true".equals(js(s,"document.documentElement.dataset.nativeIdentity==='ready' && typeof renderNow==='function'")))Thread.sleep(300);
+   for(int mode:new int[]{4,6}){
+    String script="(()=>{let now=1000,r=KaliRules.create({id:'selfseat',code:'ABCDEFGH',uid:'owner',playerId:'owner_profile',name:'Owner',mode:"+mode+"},now);r=KaliRules.command(r,'guest',{type:'join',playerId:'guest_profile',name:'Guest'},++now,n=>n-1);user={uid:'guest',getIdToken:async()=>''};room=KaliRules.publicState(r);own=KaliRules.privateState(r,'guest');busy=false;reduced=true;renderNow();const button=document.querySelector('[data-action=\"claim-seat:2\"]'),saved=command;if(!button||room.members.guest.approved!==true||document.querySelector('[data-action=stop]'))return false;let chosen=false;try{command=async action=>{r=KaliRules.command(r,'guest',action,++now,n=>n-1);room=KaliRules.publicState(r);renderNow();chosen=r.members.guest.seat===2;};button.click();return chosen&&!!document.querySelector('[data-action=ready]')&&!document.querySelector('[data-action=\"claim-seat:2\"]');}finally{command=saved;}})()";
+    assertEquals("Self-service seat UI for "+mode+" seats","true",js(s,script));
+   }
+  }
+ }
  @Test public void onlineAndManualHistoryExposeTheSameFourActions()throws Exception{
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    for(String source:new String[]{"manual","online"}){
