@@ -18,4 +18,4 @@ collect_online_diagnostics() {
 trap collect_online_diagnostics EXIT
 firebase emulators:exec --project demo-three-patti --only auth,firestore,database,functions \
     --config tests/online-backend/firebase.json \
-    'python3 "$KALI_PROJECT/scripts/seed_emulator.py" && gradle -p "$KALI_PROJECT" --max-workers=2 testSandboxUnitTest -Pandroid.testInstrumentationRunnerArguments.kaliOnlineBackend=true -Pandroid.testInstrumentationRunnerArguments.timeout_msec=180000 connectedSandboxAndroidTest'
+    'python3 "$KALI_PROJECT/scripts/seed_emulator.py" && gradle -p "$KALI_PROJECT" --max-workers=2 -Dorg.gradle.jvmargs="-Xmx1024m -Dfile.encoding=UTF-8" testSandboxUnitTest -Pandroid.testInstrumentationRunnerArguments.kaliOnlineBackend=true -Pandroid.testInstrumentationRunnerArguments.timeout_msec=180000 connectedSandboxAndroidTest'

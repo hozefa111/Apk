@@ -18,12 +18,14 @@ import org.json.JSONObject;
 /** Bundled shared table inside the existing APK. No unrestricted Javascript bridge. */
 public final class OnlineGameActivity extends Activity {
  private WebView web;private TextView status;private Button back;private final android.os.Handler ui=new android.os.Handler(android.os.Looper.getMainLooper());private FirebaseAuth auth;private final ExecutorService worker=Executors.newSingleThreadExecutor();
+ private android.window.OnBackInvokedCallback systemBack;
  private static final String ORIGIN="https://appassets.androidplatform.net";
  private static final String PAGE=ORIGIN+"/assets/kali/index.html";
  private final OkHttpClient http=new OkHttpClient.Builder().callTimeout(25,TimeUnit.SECONDS).build();
  @Override public void onCreate(Bundle saved){super.onCreate(saved);
   LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);layout.setBackgroundColor(Color.rgb(8,20,15));
-  back=new Button(this);back.setText("‹  3 Patti PRO");back.setOnClickListener(v->finish());layout.addView(back);
+  back=new Button(this);back.setText("‹  3 Patti PRO");back.setOnClickListener(v->handleTableBack());layout.addView(back);
+  if(android.os.Build.VERSION.SDK_INT>=33){systemBack=this::handleTableBack;getOnBackInvokedDispatcher().registerOnBackInvokedCallback(0,systemBack);}
   status=new TextView(this);status.setTextColor(Color.WHITE);status.setPadding(20,8,20,8);status.setText("Connecting securely…");layout.addView(status);
   web=new WebView(this);layout.addView(web,new LinearLayout.LayoutParams(-1,0,1));setContentView(layout);
   FirebaseApp app;try{app=FirebaseApp.getInstance("three-patti-native");}catch(IllegalStateException absent){
@@ -77,5 +79,7 @@ if(u.getPath()==null||!u.getPath().startsWith("/assets/kali/")){if("1".equals(u.
  }
  @Override protected void onPause(){super.onPause();if(web!=null)web.onPause();}
  @Override protected void onResume(){super.onResume();if(web!=null){web.onResume();web.evaluateJavascript("window.kaliReconnect && window.kaliReconnect()",null);}}
- @Override protected void onDestroy(){ui.removeCallbacksAndMessages(null);if(web!=null){web.stopLoading();web.destroy();}worker.shutdownNow();super.onDestroy();}
+ private void handleTableBack(){if(isFinishing()||isDestroyed())return;if(web==null){finish();return;}web.evaluateJavascript("!!(window.kaliDismissDialog && window.kaliDismissDialog())",closed->{if(!"true".equals(closed))finish();});}
+ @Override public void onBackPressed(){handleTableBack();}
+ @Override protected void onDestroy(){if(android.os.Build.VERSION.SDK_INT>=33&&systemBack!=null)getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(systemBack);ui.removeCallbacksAndMessages(null);if(web!=null){web.stopLoading();web.destroy();}worker.shutdownNow();super.onDestroy();}
 }
