@@ -6,6 +6,17 @@ public class OnlineGameTest {
  private String js(ActivityScenario<OnlineGameActivity> s,String script)throws Exception{CountDownLatch latch=new CountDownLatch(1);AtomicReference<String> value=new AtomicReference<>();s.onActivity(a->web(a.getWindow().getDecorView()).evaluateJavascript(script,v->{value.set(v);latch.countDown();}));assertTrue("Javascript result",latch.await(15,TimeUnit.SECONDS));return value.get();}
  @Test public void existingNativeHomeContainsOnlineEntry()throws Exception{try(ActivityScenario<MainActivity> s=ActivityScenario.launch(MainActivity.class)){long until=System.currentTimeMillis()+20000;AtomicReference<View> entry=new AtomicReference<>();while(System.currentTimeMillis()<until){s.onActivity(a->entry.set(described(a.getWindow().getDecorView(),"Play Online Kali Ki Tidi")));if(entry.get()!=null)break;Thread.sleep(200);}assertNotNull(entry.get());assertTrue(entry.get().isClickable());}}
  @Test public void sharedTableLoadsInsideSamePackageWithSafeWebSettings()throws Exception{try(ActivityScenario<OnlineGameActivity> s=ActivityScenario.launch(OnlineGameActivity.class)){long until=System.currentTimeMillis()+45000;boolean loaded=false;while(System.currentTimeMillis()<until){if("true".equals(js(s,"typeof KaliRules!=='undefined' && !!document.getElementById('join')"))){loaded=true;break;}Thread.sleep(300);}assertTrue("Bundled table loaded",loaded);assertEquals("true",js(s,"!!document.querySelector('#join select[name=playerId]') && !document.querySelector('#join input[name=name]')"));assertEquals("[40,42,30]",js(s,"[KaliRules.deck(4).length,KaliRules.deck(6).length,KaliRules.points('3S')]"));js(s,"window.resumeRepairs=0;window.kaliReconnect=()=>window.resumeRepairs++");s.moveToState(androidx.lifecycle.Lifecycle.State.CREATED);s.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED);assertEquals("true",js(s,"window.resumeRepairs>0"));s.onActivity(a->{WebView w=web(a.getWindow().getDecorView());assertFalse(w.getSettings().getAllowFileAccess());assertFalse(w.getSettings().getAllowContentAccess());assertTrue(w.getUrl().startsWith("https://appassets.androidplatform.net/assets/kali/"));});}}
+ @Test public void rotationKeepsTheOnlineWebViewAndJavascriptState()throws Exception{
+  try(ActivityScenario<OnlineGameActivity> s=ActivityScenario.launch(OnlineGameActivity.class)){
+   long end=System.currentTimeMillis()+45000;while(System.currentTimeMillis()<end&&!"true".equals(js(s,"typeof KaliRules!=='undefined'")))Thread.sleep(300);
+   assertEquals("true",js(s,"typeof KaliRules!=='undefined'"));js(s,"window.rotationSentinel='same-table'");
+   try{
+    s.onActivity(a->a.setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
+    java.util.concurrent.atomic.AtomicBoolean landscape=new java.util.concurrent.atomic.AtomicBoolean();end=System.currentTimeMillis()+15000;
+    while(System.currentTimeMillis()<end){s.onActivity(a->landscape.set(a.getResources().getConfiguration().orientation==android.content.res.Configuration.ORIENTATION_LANDSCAPE));if(landscape.get())break;Thread.sleep(100);}assertTrue("Landscape configuration",landscape.get());assertEquals("\"same-table\"",js(s,"window.rotationSentinel"));
+   }finally{s.onActivity(a->a.setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT));}
+  }
+ }
  @Test public void onlineAndManualHistoryExposeTheSameFourActions()throws Exception{
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    for(String source:new String[]{"manual","online"}){
