@@ -12,7 +12,7 @@ if (emulator) {
 const host = emulator ? "http://" + (window.KALI_HOST || location.hostname) + ":5001/" + config.projectId + "/asia-south1/" : window.KALI_API_BASE || "https://asia-south1-" + config.projectId + ".cloudfunctions.net/";
 let subscribedRoomId = null, loadingRoom = false, connectionReady = false;
 let user = null, admin = false, room = null, own = { cards: [] }, profiles = [], memberships = [], unsubs = [], connection = null, clockAnchor = { server: Date.now(), mono: performance.now() }, busy = false, selected = null, previous = null, scoreOpen = false, historyOpen = false, historyMore = true, records = [], error = "", screen = "home";
-let renderFrame = null, motionQueue = [], collectionUntil = 0, collectionTimer = null;
+let renderFrame = null, motionQueue = [], collectionUntil = 0, collectionTimer = null, pendingCollection = null;
 let reduced = localStorage.getItem("kaliReducedMotion") === "true" || matchMedia("(prefers-reduced-motion: reduce)").matches;
 const esc = (v) => String(v != null ? v : "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const uid = () => user == null ? void 0 : user.uid, name = (id) => {
@@ -97,7 +97,7 @@ function table() {
   return `<section class="game-meta"><span>HUKUM <b>${suit(h.trump)} ${h.trump ? R.NAMES[h.trump] : "Choosing"}</b></span><span>CONTRACT <b>${h.bid} \xB7 ${esc(name(h.bidder))}</b></span><span>CALLED <b>${h.called ? esc(h.called.slice(0, -1)) + suit(h.called.slice(-1)) : "\u2014"}</b></span></section>${partnerStatus(h)}<div class="table-wrap"><div class="felt"><div class="table-mark">3 PATTI <b>PRO</b><small>HAND ${h.number} \xB7 TRICK ${Math.min(h.tricks.length + 1, h.mode === 4 ? 10 : 7)}</small></div>${h.seatMap.map((p) => {
     const angle = (p.seat - mySeat + room.mode) % room.mode * 2 * Math.PI / room.mode, x = 50 - Math.sin(angle) * 40, y = 50 + Math.cos(angle) * 39;
     return `<div data-player="${esc(p.uid)}" class="table-seat ${h.turn === p.uid ? "current" : ""} ${p.uid === uid() ? "self" : ""} ${(last == null ? void 0 : last.winner) === p.uid ? "trick-winner" : ""}" style="left:${x}%;top:${y}%"><div class="avatar">${p.kind === "bot" ? "\u265F" : esc(p.name.slice(0, 1).toUpperCase())}</div><strong>${esc(p.name)}</strong><small>#${p.seat} \xB7 ${p.kind === "bot" ? "BOT \xB7 " : ""}${h.counts[p.uid]} cards \xB7 ${h.tricks.filter((t) => t.winner === p.uid).length} tricks</small><span>${room.members[p.uid].connected ? "" : "\u25CB Offline \xB7 "}${h.bidder === p.uid ? "\u265B Bidder" : h.direct === p.uid ? "Direct partner" : h.revealed && h.secret === p.uid ? "\u2726 Called partner" : ""}</span></div>`;
-  }).join("")}<div class="centre-trick" data-trick="${h.tricks.length}">${trick.map((p) => `<div data-player="${esc(p.uid)}" class="played-card ${p.automatic ? "automatic" : ""}">${cardHTML(p.card)}<small>${esc(name(p.uid))}${p.reason === "timeout" ? " \xB7 Timeout" : p.reason === "bot" ? " \xB7 Bot" : p.automatic ? " \xB7 Auto" : ""}</small></div>`).join("")}</div></div></div>${last ? `<p class="last-trick" role="status">\u2713 ${esc(name(last.winner))} won trick ${h.tricks.length} \xB7 +${last.points} captured points</p>` : ""}<section class="turn-bar"><span class="turn-label">${room.paused ? "Paused" : collecting ? "Collecting trick\u2026" : turn ? "Your turn" : esc(name(h.turn)) + "\u2019s turn"}</span><strong>${esc(h.phase.toUpperCase())}</strong><span id="countdown" class="timer" aria-label="Turn time remaining">\u2014</span></section><p class="hand-hint">Your cards \xB7 Swipe \u2194 to see all \xB7 Glowing cards are playable</p><section class="my-hand" aria-label="Your cards"><div class="hand-fan">${localCards.map((c, i) => `<button class="hand-card ${legal.includes(c) ? "legal" : canPlay ? "dim" : "waiting"} ${selected === c ? "selected" : ""}" style="--i:${i};--count:${localCards.length}" data-action="card:${c}" ${!legal.includes(c) ? "disabled" : ""} aria-label="${esc(R.card(c).rank + " " + R.NAMES[R.card(c).suit])}">${cardHTML(c)}</button>`).join("")}</div></section>${selected && canPlay ? `<div class="play-confirm">${btn("Play " + esc(selected), "confirm-card", false, "gold")}${btn("Cancel", "cancel-card")}</div>` : ""}${turn && connectionReady && !room.paused && own.handId === h.id ? phaseControls(h) : ""}<details class="panel auction"><summary>Bidding history \xB7 ${h.bid}</summary>${h.auction.map((a) => `<p>${esc(name(a.uid))} <b>${a.pass ? "PASS" : a.bid}</b> ${a.reason === "timeout" ? "\xB7 timeout PASS" : a.reason === "bot" ? "\xB7 computer" : a.automatic ? "\xB7 automatic" : ""}</p>`).join("")}<p>Passed: ${h.passed.map(name).map(esc).join(", ") || "None"}</p></details>`;
+  }).join("")}<div class="centre-trick" data-players="${room.mode}" data-trick="${h.tricks.length}">${trick.map((p) => `<div data-player="${esc(p.uid)}" class="played-card ${p.automatic ? "automatic" : ""}">${cardHTML(p.card)}<small>${esc(name(p.uid))}${p.reason === "timeout" ? " \xB7 Timeout" : p.reason === "bot" ? " \xB7 Bot" : p.automatic ? " \xB7 Auto" : ""}</small></div>`).join("")}</div></div></div>${last ? `<p class="last-trick" role="status">\u2713 ${esc(name(last.winner))} won trick ${h.tricks.length} \xB7 +${last.points} captured points</p>` : ""}<section class="turn-bar"><span class="turn-label">${room.paused ? "Paused" : collecting ? "Collecting trick\u2026" : turn ? "Your turn" : esc(name(h.turn)) + "\u2019s turn"}</span><strong>${esc(h.phase.toUpperCase())}</strong><span id="countdown" class="timer" aria-label="Turn time remaining">\u2014</span></section><p class="hand-hint">Your cards \xB7 Swipe \u2194 to see all \xB7 Glowing cards are playable</p><section class="my-hand" aria-label="Your cards"><div class="hand-fan">${localCards.map((c, i) => `<button class="hand-card ${legal.includes(c) ? "legal" : canPlay ? "dim" : "waiting"} ${selected === c ? "selected" : ""}" style="--i:${i};--count:${localCards.length}" data-action="card:${c}" ${!legal.includes(c) ? "disabled" : ""} aria-label="${esc(R.card(c).rank + " " + R.NAMES[R.card(c).suit])}">${cardHTML(c)}</button>`).join("")}</div></section>${selected && canPlay ? `<div class="play-confirm">${btn("Play " + esc(selected), "confirm-card", false, "gold")}${btn("Cancel", "cancel-card")}</div>` : ""}${turn && connectionReady && !room.paused && own.handId === h.id ? phaseControls(h) : ""}<details class="panel auction"><summary>Bidding history \xB7 ${h.bid}</summary>${h.auction.map((a) => `<p>${esc(name(a.uid))} <b>${a.pass ? "PASS" : a.bid}</b> ${a.reason === "timeout" ? "\xB7 timeout PASS" : a.reason === "bot" ? "\xB7 computer" : a.automatic ? "\xB7 automatic" : ""}</p>`).join("")}<p>Passed: ${h.passed.map(name).map(esc).join(", ") || "None"}</p></details>`;
 }
 function partnerStatus(h) {
   if (!h.called) return "";
@@ -108,6 +108,7 @@ function partnerStatus(h) {
 function clearCollection() {
   clearTimeout(collectionTimer);
   collectionTimer = null;
+  pendingCollection = null;
   collectionUntil = 0;
   document.querySelectorAll(".trick-flight,.trick-announcement").forEach((el) => el.remove());
 }
@@ -123,10 +124,23 @@ function collectTrick(trick) {
   announcement.setAttribute("role", "status");
   announcement.textContent = name(trick.winner) + " won the trick \xB7 +" + trick.points + " captured points";
   document.body.appendChild(announcement);
+  pendingCollection = { trick, area, target };
+  collectionTimer = setTimeout(() => {
+    clearCollection();
+    render();
+  }, duration);
+}
+function animateCollection() {
+  var _a, _b;
+  if (!pendingCollection) return;
+  const { trick, area: oldArea, target: oldTarget } = pendingCollection;
+  pendingCollection = null;
+  const area = ((_a = document.querySelector(".felt")) == null ? void 0 : _a.getBoundingClientRect()) || oldArea, target = ((_b = document.querySelector('.table-seat[data-player="' + CSS.escape(trick.winner) + '"]')) == null ? void 0 : _b.getBoundingClientRect()) || oldTarget;
   if (!reduced) {
     const flight = document.createElement("div");
     flight.className = "trick-flight";
     flight.dataset.winner = trick.winner;
+    flight.style.setProperty("--flight-cols", trick.cards.length === 6 ? 3 : 2);
     flight.style.left = area.x + area.width / 2 + "px";
     flight.style.top = area.y + area.height / 2 + "px";
     flight.innerHTML = trick.cards.map((p, i) => `<div class="flight-card" style="--flight-index:${i};--flight-count:${trick.cards.length}">${cardHTML(p.card)}</div>`).join("");
@@ -134,10 +148,6 @@ function collectTrick(trick) {
     const dx = target.x + target.width / 2 - area.x - area.width / 2, dy = target.y + target.height / 2 - area.y - area.height / 2;
     flight.animate([{ transform: "translate(-50%,-50%) scale(1)", opacity: 1 }, { transform: "translate(-50%,-50%) scale(1.05)", opacity: 1, offset: 0.22 }, { transform: "translate(calc(-50% + " + dx + "px),calc(-50% + " + dy + "px)) scale(.2)", opacity: 0 }], { duration: 800, easing: "ease-in-out", fill: "forwards" });
   }
-  collectionTimer = setTimeout(() => {
-    clearCollection();
-    render();
-  }, duration);
 }
 function phaseControls(h) {
   if (h.phase === "auction") return `<form id="bid" class="action-bar"><label>Raise<select name="bid">${Array.from({ length: Math.max(0, (250 - h.bid) / 5) }, (_, i) => h.bid + 5 + i * 5).map((n) => `<option>${n}</option>`).join("")}</select></label><button class="gold" ${h.bid >= 250 || busy ? "disabled" : ""}>Raise</button>${btn("PASS", "pass")}</form>`;
@@ -199,6 +209,7 @@ function renderNow() {
   const hand = root.querySelector(".my-hand");
   if (hand) hand.scrollLeft = handScroll;
   tick();
+  animateCollection();
   if (!reduced) for (const kind of motionQueue.splice(0)) {
     if (kind === "deal" && !document.querySelector(".hand-card") && ((_d = room == null ? void 0 : room.hand) == null ? void 0 : _d.seatMap.some((p) => p.uid === uid()))) {
       motionQueue.push("deal");
