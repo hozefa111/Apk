@@ -1,0 +1,18 @@
+name: Publish verified 3 Patti PRO APK
+on:
+  push:
+    branches: [apk-download-v2.7.6]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify tested APK checksum
+        run: sha256sum --check 3-Patti-PRO-v2.7.6.apk.sha256
+      - name: Publish downloadable APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create three-patti-pro-v2.7.6 3-Patti-PRO-v2.7.6.apk 3-Patti-PRO-v2.7.6.apk.sha256 3-Patti-PRO-v2.7.6-Verification.md --target 27f3033babda3992020efb5a115911a439191423 --title "3 Patti PRO v2.7.6" --notes-file 3-Patti-PRO-v2.7.6-Verification.md
