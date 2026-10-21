@@ -14,7 +14,11 @@ public final class AdvancedAnalytics {
     public static long delta(Map<String,Object> r,String pid){Object scores=r.get("scoreChanges");return scores instanceof Map?number(((Map<?,?>)scores).get(pid)):0;}
     public static String role(Map<String,Object> r,String pid){if(!ids(r.get("playerIds")).contains(pid))return "";if(pid.equals(text(r,"hukumId")))return "Hukum";return ids(r.get("partnerIds")).contains(pid)?"Partner":"Opponent";}
     /** 1 win, -1 loss, 0 unknown result. Points alone never identify a win. */
-    public static int result(Map<String,Object> r,String pid){if(role(r,pid).isEmpty()||!ids(r.get("playerIds")).contains(text(r,"hukumId")))return 0;String result=text(r,"result");if(!"win".equals(result)&&!"loss".equals(result))return 0;boolean team=!"Opponent".equals(role(r,pid));return ("win".equals(result)==team)?1:-1;}
+    private static boolean onlineBotBidder(Map<String,Object> r){
+        if(!"online".equals(r.get("source"))||!(r.get("participants") instanceof List))return false;
+        for(Object p:(List<?>)r.get("participants"))if(p instanceof Map){Map<?,?> m=(Map<?,?>)p;if("bot".equals(m.get("kind"))&&text(r,"hukumId").equals(String.valueOf(m.get("playerId"))))return true;}return false;
+    }
+    public static int result(Map<String,Object> r,String pid){if(role(r,pid).isEmpty()||!ids(r.get("playerIds")).contains(text(r,"hukumId"))&&!onlineBotBidder(r))return 0;String result=text(r,"result");if(!"win".equals(result)&&!"loss".equals(result))return 0;boolean team=!"Opponent".equals(role(r,pid));return ("win".equals(result)==team)?1:-1;}
     public static List<Map<String,Object>> games(List<Map<String,Object>> source){List<Map<String,Object>> out=new ArrayList<>();for(Map<String,Object> r:source)if(eligible(r))out.add(r);out.sort(GameOrder.ROUNDS.reversed());return out;}
     public static List<Map<String,Object>> dates(List<Map<String,Object>> source,String filter,Instant now,ZoneId zone,long customStart,long customEnd){
         LocalDate today=now.atZone(zone).toLocalDate(),start=null,end=null;
@@ -35,7 +39,7 @@ public final class AdvancedAnalytics {
         String target=scope.startsWith("session:")?scope.substring(8):"";
         if("unassigned".equals(scope))target="@local/unassigned";
         if("current".equals(scope)||"previous".equals(scope)){
-            long latest=Long.MIN_VALUE;for(Map<String,Object> s:metadata){boolean active=s.get("endTime")==null;if(active!="current".equals(scope))continue;long t=time(s.get(active?"startTime":"endTime"));if(t>latest&&!text(s,"id").isEmpty()){latest=t;target=text(s,"id");}}
+            long latest=Long.MIN_VALUE;for(Map<String,Object> s:metadata){boolean active=s.get("endTime")==null;if("current".equals(scope)&&"online".equals(text(s,"source")))continue;if(active!="current".equals(scope))continue;long t=time(s.get(active?"startTime":"endTime"));if(t>latest&&!text(s,"id").isEmpty()){latest=t;target=text(s,"id");}}
         }
         for(Session session:groupSessions(rounds,metadata))if(session.id.equals(target))return new ArrayList<>(session.rounds);
         return new ArrayList<>();
@@ -127,12 +131,12 @@ public final class AdvancedAnalytics {
             out.add("Past results describe these saved rounds; they do not predict the next game.");return out;
         }
     }
-    private static String historicalName(Map<String,Object> r,String pid){if(pid.equals(text(r,"hukumId"))&&!text(r,"hukumName").isEmpty())return text(r,"hukumName");for(String key:new String[]{"partner","nonPartner"}){Object ids=r.get(key+"Ids"),names=r.get(key+"Names");if(ids instanceof List&&names instanceof List){int i=((List<?>)ids).indexOf(pid);if(i>=0&&i<((List<?>)names).size()&&((List<?>)names).get(i)!=null)return String.valueOf(((List<?>)names).get(i));}}return "Former player · "+pid;}
+    public static String historicalName(Map<String,Object> r,String pid){if(pid.equals(text(r,"hukumId"))&&!text(r,"hukumName").isEmpty())return text(r,"hukumName");for(String key:new String[]{"partner","nonPartner"}){Object ids=r.get(key+"Ids"),names=r.get(key+"Names");if(ids instanceof List&&names instanceof List){int i=((List<?>)ids).indexOf(pid);if(i>=0&&i<((List<?>)names).size()&&((List<?>)names).get(i)!=null)return String.valueOf(((List<?>)names).get(i));}}return "Former player · "+pid;}
     public static List<Session> groupSessions(List<Map<String,Object>> rounds,List<Map<String,Object>> metadata){
         List<Map<String,Object>> sorted=new ArrayList<>(metadata);sorted.sort((a,b)->Long.compare(time(b.get("startTime")),time(a.get("startTime"))));Map<String,Session> groups=new LinkedHashMap<>();
         for(Map<String,Object> s:sorted){String id=text(s,"id");if(!id.isEmpty())groups.put(id,new Session(id,text(s,"sessionName").isEmpty()?"Game Session":text(s,"sessionName"),s.get("endTime")==null));}
         for(Map<String,Object> r:games(rounds)){String id=text(r,"sessionId");if(id.isEmpty()){
-            long t=time(r.get("timestamp"));for(Map<String,Object> s:sorted){if(text(s,"id").isEmpty())continue;long start=time(s.get("startTime")),end=s.get("endTime")==null?Long.MAX_VALUE:time(s.get("endTime"));if(t!=Long.MIN_VALUE&&start!=Long.MIN_VALUE&&t>=start&&t<end){id=text(s,"id");break;}}
+            long t=time(r.get("timestamp"));for(Map<String,Object> s:sorted){if(text(s,"id").isEmpty()||"online".equals(text(s,"source"))||"online".equals(text(r,"source")))continue;long start=time(s.get("startTime")),end=s.get("endTime")==null?Long.MAX_VALUE:time(s.get("endTime"));if(t!=Long.MIN_VALUE&&start!=Long.MIN_VALUE&&t>=start&&t<end){id=text(s,"id");break;}}
         }
             if(id.isEmpty())id="@local/unassigned";Session session=groups.get(id);if(session==null){session=new Session(id,"@local/unassigned".equals(id)?"Unassigned rounds":"Session · "+id,false);groups.put(id,session);}session.rounds.add(r);
         }
