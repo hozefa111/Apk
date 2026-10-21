@@ -17,6 +17,17 @@ public class OnlineGameTest {
    }finally{s.onActivity(a->a.setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT));}
   }
  }
+ @Test public void amountBasedBiddingAndMaximumStateWorkInsideTheSameApk()throws Exception{
+  org.junit.Assume.assumeTrue("Full online emulator required", "true".equals(InstrumentationRegistry.getArguments().getString("kaliOnlineBackend")));
+  try(ActivityScenario<OnlineGameActivity> s=ActivityScenario.launch(OnlineGameActivity.class)){
+   long end=System.currentTimeMillis()+60000;while(System.currentTimeMillis()<end&&!"true".equals(js(s,"document.documentElement.dataset.nativeIdentity==='ready' && typeof renderNow==='function'")))Thread.sleep(300);
+   assertEquals("true",js(s,"document.documentElement.dataset.nativeIdentity==='ready'"));
+   for(int mode:new int[]{4,6}){
+    String script="(()=>{let serial=0,now=1000,r=KaliRules.create({id:'android_bid_fixture',code:'ABCDEFGH',uid:'owner',playerId:'profile',name:'Hozefa',mode:"+mode+"},now);for(let seat=2;seat<="+mode+";seat++)r=KaliRules.command(r,'owner',{type:'bot',seat,botId:'bot_'+seat},++now,n=>(serial++)%n);r=KaliRules.command(r,'owner',{type:'ready'},++now,n=>(serial++)%n);const local=r.hand.turn;user={uid:local,getIdToken:async()=>''};room=KaliRules.publicState(r);own=KaliRules.privateState(r,local);connectionReady=true;busy=false;reduced=true;error='';renderNow();const first=document.querySelector('#bid select').value,down=document.querySelector('[data-action=bid-down]').disabled;document.querySelector('[data-action=bid-max]').click();const max=document.querySelector('#bid button.gold').textContent==='Bid 250'&&document.querySelector('[data-action=bid-up]').disabled&&room.hand.bid===155;room.hand.bid=250;renderNow();return first==='160'&&down&&max&&!document.querySelector('#bid select')&&document.querySelector('.max-bid-state').textContent.includes('Maximum bid reached')&&!!document.querySelector('[data-action=pass]')&&document.documentElement.scrollWidth<=innerWidth+1&&document.documentElement.scrollHeight<=innerHeight+1;})()";
+    assertEquals("Bundled bidding controls for "+mode+" seats","true",js(s,script));
+   }
+  }
+ }
  @Test public void onlineAndManualHistoryExposeTheSameFourActions()throws Exception{
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    for(String source:new String[]{"manual","online"}){
