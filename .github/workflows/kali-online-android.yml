@@ -14,6 +14,11 @@ jobs:
   android:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      # Firestore, Gradle and the Android 15 VM share the hosted runner.
+      # Unbounded JVM ergonomics can otherwise evict the emulator mid-suite.
+      JAVA_TOOL_OPTIONS: -Xmx768m
+      NODE_OPTIONS: --max-old-space-size=512
     strategy:
       fail-fast: false
       matrix:
@@ -50,7 +55,14 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -feature -Vulkan
           script: bash 3PattiProNative/scripts/verify_online_android.sh
+      - name: Collect host resource diagnostics
+        if: always()
+        run: |
+          mkdir -p 3PattiProNative/app/build/verification
+          free -m > 3PattiProNative/app/build/verification/host-memory.txt
+          sudo dmesg -T | tail -n 160 > 3PattiProNative/app/build/verification/host-kernel.txt || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
