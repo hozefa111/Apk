@@ -16,8 +16,8 @@ public class OnlineGameTest {
      menu.invoke(a,FirebaseGateway.map("id","fixture-menu","source",source,"sessionName","Fixture session","endTime","2026-10-20T10:00:00Z"));
     }catch(Exception e){throw new AssertionError(e);}});
     for(String action:new String[]{"View Summary","Share Summary Image","Edit Session Name","Delete Session"})
-     androidx.test.espresso.Espresso.onView(androidx.test.espresso.matcher.ViewMatchers.withText(action)).check(androidx.test.espresso.assertion.ViewAssertions.matches(androidx.test.espresso.matcher.ViewMatchers.isDisplayed()));
-    androidx.test.espresso.Espresso.onView(androidx.test.espresso.matcher.ViewMatchers.withText("Close")).perform(androidx.test.espresso.action.ViewActions.click());
+     androidx.test.espresso.Espresso.onView(androidx.test.espresso.matcher.ViewMatchers.withText(action)).inRoot(androidx.test.espresso.matcher.RootMatchers.isDialog()).check(androidx.test.espresso.assertion.ViewAssertions.matches(androidx.test.espresso.matcher.ViewMatchers.isDisplayed()));
+    androidx.test.espresso.Espresso.onView(androidx.test.espresso.matcher.ViewMatchers.withText("Close")).inRoot(androidx.test.espresso.matcher.RootMatchers.isDialog()).perform(androidx.test.espresso.action.ViewActions.click());
    }
   }
  }
