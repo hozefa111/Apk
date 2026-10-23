@@ -11,6 +11,7 @@ import java.util.*;
  */
 final class TrackerCache extends SQLiteOpenHelper {
     private Map<String,String> persisted;
+    private long persistedRevision=-1;
     TrackerCache(Context context){this(context,"3patti_tracker_cache_v1.db");}
     TrackerCache(Context context,String name){super(context,name,null,1);}
     @Override public void onCreate(SQLiteDatabase db){
@@ -22,13 +23,24 @@ final class TrackerCache extends SQLiteOpenHelper {
     Map<String,String> read(){
         SQLiteDatabase db=getReadableDatabase();
         try(Cursor marker=db.rawQuery("SELECT value FROM metadata WHERE key='complete'",null)){
-            if(!marker.moveToFirst()){persisted=new LinkedHashMap<>();return null;}
+            if(!marker.moveToFirst()){persisted=new LinkedHashMap<>();persistedRevision=-1;return null;}
+            persistedRevision=marker.getLong(0);
         }
+        persisted=rows(db);return new LinkedHashMap<>(persisted);
+    }
+    private Map<String,String> rows(SQLiteDatabase db){
         Map<String,String> result=new LinkedHashMap<>();
-        try(Cursor rows=db.rawQuery("SELECT path,payload FROM records ORDER BY path",null)){
-            while(rows.moveToNext())result.put(rows.getString(0),rows.getString(1));
+        try(Cursor cursor=db.rawQuery("SELECT path,payload FROM records ORDER BY path",null)){
+            while(cursor.moveToNext())result.put(cursor.getString(0),cursor.getString(1));
         }
-        persisted=result;return new LinkedHashMap<>(result);
+        return result;
+    }
+    private long marker(SQLiteDatabase db,String key,long fallback){
+        try(Cursor cursor=db.rawQuery("SELECT value FROM metadata WHERE key=?",new String[]{key})){return cursor.moveToFirst()?cursor.getLong(0):fallback;}
+    }
+    private void marker(SQLiteDatabase db,String key,long value){
+        ContentValues row=new ContentValues();row.put("key",key);row.put("value",value);
+        if(db.insertWithOnConflict("metadata",null,row,SQLiteDatabase.CONFLICT_REPLACE)<0)throw new SQLiteException("Cache marker rejected");
     }
     Map<String,List<String>> boundaries(){
         Map<String,List<String>> result=new HashMap<>();
@@ -42,11 +54,17 @@ final class TrackerCache extends SQLiteOpenHelper {
     }
     /** Returns exactly how many individual record rows were changed. */
     int write(Map<String,String> next){return write(next,Collections.emptyMap());}
-    int write(Map<String,String> next,Map<String,List<String>> boundaries){
+    int write(Map<String,String> next,Map<String,List<String>> boundaries){return write(next,boundaries,System.currentTimeMillis());}
+    int write(Map<String,String> next,Map<String,List<String>> boundaries,long snapshotAt){
         if(persisted==null)read();
         SQLiteDatabase db=getWritableDatabase();int changed=0;
-        db.beginTransaction();
+        db.beginTransaction();long revision;
         try{
+            // Activity replacement can leave an older worker finishing its cache
+            // flush. It may not overwrite a newer complete cache or mix row sets.
+            if(snapshotAt<marker(db,"snapshot_time",Long.MIN_VALUE))return 0;
+            revision=marker(db,"complete",-1);
+            if(revision!=persistedRevision){persisted=rows(db);persistedRevision=revision;}
             for(Map.Entry<String,String> row:next.entrySet())if(!Objects.equals(persisted.get(row.getKey()),row.getValue())){
                 ContentValues value=new ContentValues();value.put("path",row.getKey());value.put("payload",row.getValue());
                 if(db.insertWithOnConflict("records",null,value,SQLiteDatabase.CONFLICT_REPLACE)<0)throw new SQLiteException("Cache row rejected");changed++;
@@ -57,10 +75,9 @@ final class TrackerCache extends SQLiteOpenHelper {
                 ContentValues value=new ContentValues();value.put("name",range.getKey());value.put("boundaries",new org.json.JSONArray(range.getValue()).toString());
                 if(db.insertWithOnConflict("partitions",null,value,SQLiteDatabase.CONFLICT_REPLACE)<0)throw new SQLiteException("Cache boundaries rejected");
             }
-            ContentValues marker=new ContentValues();marker.put("key","complete");marker.put("value",System.currentTimeMillis());
-            if(db.insertWithOnConflict("metadata",null,marker,SQLiteDatabase.CONFLICT_REPLACE)<0)throw new SQLiteException("Cache marker rejected");
+            marker(db,"complete",revision+1);marker(db,"snapshot_time",snapshotAt);
             db.setTransactionSuccessful();
         }finally{db.endTransaction();}
-        persisted=new LinkedHashMap<>(next);return changed;
+        persisted=new LinkedHashMap<>(next);persistedRevision=revision+1;return changed;
     }
 }

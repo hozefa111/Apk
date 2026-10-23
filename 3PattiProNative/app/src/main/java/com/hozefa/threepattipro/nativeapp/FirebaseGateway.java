@@ -62,6 +62,7 @@ public final class FirebaseGateway {
     private long contentRevision;
     private final Runnable cacheFlush=()->this.executor.execute(this::flushCache);
     private volatile Map<String,String> cacheRows;
+    private long cacheSnapshotAt;
     private final TrackerCache trackerCache;
     private volatile long decodedCount,metadataReuses,cacheWrites,queryStarts,maxPageDocuments,cacheRecordWrites;
     private volatile long decodeNanos;
@@ -386,7 +387,7 @@ public final class FirebaseGateway {
                 Map<String,String> pending=new LinkedHashMap<>();
                 for(Map.Entry<String,Map<String,CachedDocument>> collection:decodedDocuments.entrySet())
                     for(Map.Entry<String,CachedDocument> doc:collection.getValue().entrySet())pending.put(collection.getKey()+"/"+doc.getKey(),doc.getValue().cachedRow);
-                cacheRows=pending;cacheBoundaries=bounds;
+                cacheRows=pending;cacheBoundaries=bounds;cacheSnapshotAt=snapshotAt;
                 ui.removeCallbacks(cacheFlush);ui.postDelayed(cacheFlush,1000);
             }
             final boolean online=true;
@@ -506,7 +507,7 @@ public final class FirebaseGateway {
         long revision=lastPublishedRevision;
         if(cacheRevision==revision)return;
         try{
-            cacheRecordWrites+=trackerCache.write(cacheRows,cacheBoundaries);cacheRevision=revision;cacheWrites++;
+            cacheRecordWrites+=trackerCache.write(cacheRows,cacheBoundaries,cacheSnapshotAt);cacheRevision=revision;cacheWrites++;
         }catch(Exception ignored){/* Cache remains disposable; never block a live save. */}
     }
     /** Numeric, local-only counters for emulator validation; contains no user data. */

@@ -30,6 +30,16 @@ public class TrackerCacheTest {
         assertEquals(old,cache.read());
         Map<String,String> valid=new LinkedHashMap<>();valid.put("rounds/a","{\"score\":-155}");assertEquals(1,cache.write(valid));
     }
+    @Test public void activityReplacementCannotFlushAnOlderOrMixedCache(){
+        Map<String,String> old=Collections.singletonMap("rounds/old","{}");
+        cache.write(old,Collections.emptyMap(),100);
+        try(TrackerCache replacement=new TrackerCache(context,name)){
+            Map<String,String> current=Collections.singletonMap("rounds/new","{\"score\":310}");
+            replacement.write(current,Collections.emptyMap(),200);
+            assertEquals(0,cache.write(old,Collections.emptyMap(),150));assertEquals(current,replacement.read());
+            assertEquals(2,cache.write(old,Collections.emptyMap(),300));assertEquals(old,replacement.read());
+        }
+    }
     @Test public void completedEmptyCacheDoesNotResurrectClearedHistory(){
         Map<String,String> data=new HashMap<>();data.put("rounds/old","{}");cache.write(data);
         assertEquals(1,cache.write(Collections.emptyMap()));cache.close();cache=new TrackerCache(context,name);
