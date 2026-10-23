@@ -10,7 +10,8 @@ final class DocumentVersion {
     static String of(JSONObject fields)throws Exception {
         byte[] digest=MessageDigest.getInstance("SHA-256").digest(canonical(fields).getBytes(StandardCharsets.UTF_8));
         StringBuilder out=new StringBuilder("sdk1:");
-        for(byte b:digest)out.append(String.format(Locale.ROOT,"%02x",b&255));
+        final char[] hex="0123456789abcdef".toCharArray();
+        for(byte b:digest){int v=b&255;out.append(hex[v>>>4]).append(hex[v&15]);}
         return out.toString();
     }
     private static String canonical(Object value)throws Exception {

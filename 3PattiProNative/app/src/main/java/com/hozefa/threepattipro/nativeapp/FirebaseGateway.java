@@ -34,6 +34,8 @@ public final class FirebaseGateway {
         void syncState(boolean online);
         /** Presentation only: false seeds a new animation baseline after cache/reconnect. */
         default void snapshotContinuity(boolean continuous) {}
+        /** Bounded initial sync progress; partial history never authorizes scores/writes. */
+        default void dataLoading(String collection,int loaded) {}
         /** A read-only connection problem; retryAt is a wall-clock deadline, not a write queue. */
         default void syncProblem(String message,long retryAt,boolean quota) {}
     }
@@ -45,7 +47,22 @@ public final class FirebaseGateway {
     private final Context context;
     private final Listener listener;
     private final Object snapshotLock=new Object();
-    private final Map<String,QuerySnapshot> liveCollections=new HashMap<>();
+    private final Map<String,List<QuerySnapshot>> liveCollections=new HashMap<>();
+    private final Map<String,Boolean> collectionComplete=new HashMap<>();
+    private final Map<String,Map<String,CachedDocument>> decodedDocuments=new HashMap<>();
+    private final ExecutorService snapshotExecutor=Executors.newSingleThreadExecutor();
+    private final int pageSize;
+    private long lastPublishedRevision=-1,cacheRevision=-1;
+    private long lastDeliveredContent=-1;
+    private long contentRevision;
+    private final Runnable cacheFlush=()->this.executor.execute(this::flushCache);
+    private volatile List<Map<String,Object>> cachePlayers,cacheRounds,cacheSessions;
+    private volatile long decodedCount,metadataReuses,cacheWrites,queryStarts,maxPageDocuments;
+    private volatile long decodeNanos;
+    private static final class CachedDocument {
+        final DocumentSnapshot source;final Map<String,Object> row;final JSONObject raw;final String token;
+        CachedDocument(DocumentSnapshot source,Map<String,Object> row,JSONObject raw,String token){this.source=source;this.row=row;this.raw=raw;this.token=token;}
+    }
     private int subscriptionGeneration;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -60,7 +77,7 @@ public final class FirebaseGateway {
     private final FirebaseAuth auth;
     private FirebaseAuth.AuthStateListener authObserver;
     private final FirebaseFirestore firestore;
-    private final List<ListenerRegistration> subscriptions=new ArrayList<>();
+    private final List<PagedFirestoreCollection> subscriptions=new ArrayList<>();
     private volatile Map<String,String> versions=Collections.emptyMap();
     private volatile Map<String,JSONObject> rawDocuments=Collections.emptyMap();
     private static final class CollectionSnapshot {
@@ -86,6 +103,11 @@ public final class FirebaseGateway {
         this(c,l,key,System::currentTimeMillis);
     }
     FirebaseGateway(Context c,Listener l,String key,LongSupplier clock) {
+        this(c,l,key,clock,BuildConfig.FIRESTORE_PAGE_SIZE);
+    }
+    FirebaseGateway(Context c,Listener l,String key,LongSupplier clock,int batchSize) {
+        if(batchSize<2||batchSize>500)throw new IllegalArgumentException("Invalid Firestore page size");
+        pageSize=batchSize;
         retryClock=clock;
         context = c.getApplicationContext();
         listener = l;
@@ -122,21 +144,37 @@ public final class FirebaseGateway {
         auth.addAuthStateListener(authObserver);
         readQueued.set(true);
         executor.execute(()->{try{readCachedSnapshot();load();}finally{finishQueuedRead();}});
-        startSubscriptions();
+        // AuthStateListener always emits its initial state; it owns initial attach,
+        // avoiding an attach/remove/attach race and duplicate cold-start queries.
     }
     private void startSubscriptions(){
         if(!running||!foreground||!subscriptions.isEmpty()||retry.remaining(retryClock.getAsLong())>0)return;
         final int generation=subscriptionGeneration;
         for(String collection:Arrays.asList("players","rounds","sessions")){
-            subscriptions.add(firestore.collection(collection).addSnapshotListener(MetadataChanges.INCLUDE,(snapshot,error)->{
-                if(!running||generation!=subscriptionGeneration)return;
-                if(error!=null){onListenFailure(error);return;}
-                if(snapshot==null)return;
-                synchronized(snapshotLock){liveCollections.put(collection,snapshot);liveRevision.incrementAndGet();freshSnapshot=false;}
-                // Pending local writes/cache events never enable another mutation.
-                freshSnapshot=false;listener.syncState(false);
-                ui.removeCallbacks(liveRefresh);ui.postDelayed(liveRefresh,150);
-            }));
+            PagedFirestoreCollection stream=new PagedFirestoreCollection(firestore.collection(collection),pageSize,snapshotExecutor,new PagedFirestoreCollection.Observer(){
+                public void requested(){queryStarts++;}
+                public void changed(List<QuerySnapshot> pages,boolean complete,int loaded){
+                    for(QuerySnapshot page:pages)maxPageDocuments=Math.max(maxPageDocuments,page.size());
+                    final boolean invalidates;
+                    synchronized(snapshotLock){
+                        if(!running||generation!=subscriptionGeneration)return;
+                        List<QuerySnapshot> previous=liveCollections.get(collection);
+                        boolean dataChanged=previous==null||previous.size()!=pages.size();
+                        if(!dataChanged)for(int i=0;i<pages.size();i++)if(previous.get(i)!=pages.get(i)&&!pages.get(i).getDocumentChanges().isEmpty()){dataChanged=true;break;}
+                        invalidates=!complete||dataChanged;
+                        liveCollections.put(collection,pages);collectionComplete.put(collection,complete);
+                        liveRevision.incrementAndGet();if(invalidates)freshSnapshot=false;
+                    }
+                    ui.post(()->{
+                        if(!running||generation!=subscriptionGeneration)return;
+                        if(invalidates)listener.syncState(false);
+                        if(!complete)listener.dataLoading(collection,loaded);
+                        ui.removeCallbacks(liveRefresh);ui.postDelayed(liveRefresh,150);
+                    });
+                }
+                public void failed(FirebaseFirestoreException error){ui.post(()->{if(running&&generation==subscriptionGeneration)onListenFailure(error);});}
+            });
+            subscriptions.add(stream);snapshotExecutor.execute(stream::start);
         }
         scheduleNext();
     }
@@ -153,9 +191,9 @@ public final class FirebaseGateway {
     }
     private void removeSubscriptions(){
         subscriptionGeneration++;
-        for(ListenerRegistration registration:subscriptions)registration.remove();
+        for(PagedFirestoreCollection registration:subscriptions)snapshotExecutor.execute(registration::close);
         subscriptions.clear();
-        synchronized(snapshotLock){liveCollections.clear();liveRevision.incrementAndGet();}
+        synchronized(snapshotLock){liveCollections.clear();collectionComplete.clear();liveRevision.incrementAndGet();}
         freshSnapshot=false;
     }
     public void setForeground(boolean visible){
@@ -178,7 +216,7 @@ public final class FirebaseGateway {
     public void stop() { running=false;
         if(authObserver!=null)auth.removeAuthStateListener(authObserver);
         removeSubscriptions();ui.removeCallbacksAndMessages(null);
-        executor.shutdownNow();
+        snapshotExecutor.shutdown();executor.execute(this::flushCache);executor.shutdown();
     }
     private void notify(String msg) { ui.post(() -> { if (running) listener.notice(msg); }); }
     private void setBusy(boolean b) { ui.post(() -> { if (running) listener.busy(b); }); }
@@ -305,15 +343,15 @@ public final class FirebaseGateway {
         if(!running)return;
         if(retry.remaining(retryClock.getAsLong())>0){publishProblem(retry.quota()?quotaMessage():"Connection unavailable. Automatic retry is scheduled.");scheduleNext();return;}
         try{
-            Map<String,QuerySnapshot> collections;long revision;
-            synchronized(snapshotLock){collections=new HashMap<>(liveCollections);revision=liveRevision.get();}
-            if(collections.size()!=3){scheduleNext();return;}
+            Map<String,List<QuerySnapshot>> collections;Map<String,Boolean> complete;long revision;
+            synchronized(snapshotLock){collections=new HashMap<>(liveCollections);complete=new HashMap<>(collectionComplete);revision=liveRevision.get();}
+            if(collections.size()!=3||complete.size()!=3||complete.containsValue(false)){scheduleNext();return;}
             boolean server=true;
             List<CollectionSnapshot> decoded=new ArrayList<>();
             for(String name:Arrays.asList("players","rounds","sessions")){
-                QuerySnapshot snapshot=collections.get(name);
-                server&=!snapshot.getMetadata().isFromCache()&&!snapshot.getMetadata().hasPendingWrites();
-                decoded.add(decodeSnapshot(name,snapshot));
+                List<QuerySnapshot> pages=collections.get(name);
+                for(QuerySnapshot snapshot:pages)server&=!snapshot.getMetadata().isFromCache()&&!snapshot.getMetadata().hasPendingWrites();
+                decoded.add(decodeSnapshots(name,pages));
             }
             if(!server){
                 freshSnapshot=false;animationContinuity=false;
@@ -333,12 +371,21 @@ public final class FirebaseGateway {
                 animationContinuity=true;animationSnapshotAt=snapshotAt;
                 retry.succeeded();retryStore.edit().clear().apply();
             }
-            saveCachedSnapshot(ps.rows,rs.rows,ss.rows);
+            if(contentRevision!=lastPublishedRevision){
+                lastPublishedRevision=contentRevision;
+                cachePlayers=new ArrayList<>(ps.rows);cacheRounds=new ArrayList<>(rs.rows);cacheSessions=new ArrayList<>(ss.rows);
+                ui.removeCallbacks(cacheFlush);ui.postDelayed(cacheFlush,1000);
+            }
             final boolean online=true;
+            final long deliveredContent=contentRevision;
             ui.post(()->{
                 if(!running||revision!=liveRevision.get())return;
                 if(online)listener.syncProblem(null,0,false);
-                listener.snapshotContinuity(continuous);listener.dataUpdated(ps.rows,rs.rows,ss.rows);listener.syncState(online);
+                listener.snapshotContinuity(continuous);
+                if(lastDeliveredContent!=deliveredContent||!continuous){
+                    lastDeliveredContent=deliveredContent;listener.dataUpdated(ps.rows,rs.rows,ss.rows);
+                }
+                listener.syncState(online);
             });
             scheduleNext();
         }catch(Exception error){freshSnapshot=false;animationContinuity=false;retry.unavailable(retryClock.getAsLong());publishProblem("Cannot read the shared table. Saved data remains available; retry is automatic.");scheduleNext();}
@@ -418,17 +465,41 @@ public final class FirebaseGateway {
         }
         return value;
     }
-    private CollectionSnapshot decodeSnapshot(String name,QuerySnapshot snapshot)throws Exception {
+    private CollectionSnapshot decodeSnapshots(String name,List<QuerySnapshot> pages)throws Exception {
+        long started=System.nanoTime();
         CollectionSnapshot out=new CollectionSnapshot();
-        for(DocumentSnapshot doc:snapshot.getDocuments()){
-            JSONObject fields=SdkDocuments.fields(doc.getData());String token=DocumentVersion.of(fields);
-            Map<String,Object> row=decodeFields(fields);row.put("id",doc.getId());row.put("_updateTime",token);
-            String path=name+"/"+doc.getId();
-            out.rows.add(row);out.versions.put(path,token);
-            out.documents.put(path,new JSONObject().put("name",documentRoot+"/"+path).put("fields",fields).put("updateTime",token));
+        Map<String,CachedDocument> previous=decodedDocuments.getOrDefault(name,Collections.emptyMap());
+        Map<String,CachedDocument> next=new LinkedHashMap<>();
+        for(QuerySnapshot snapshot:pages)for(DocumentSnapshot doc:snapshot.getDocuments()){
+            CachedDocument entry=previous.get(doc.getId());
+            // SDK equality includes data + metadata, so compare immutable data to reuse
+            // both server-confirmation events and unchanged documents in a changed page.
+            if(entry==null||!Objects.equals(entry.source.getData(),doc.getData())){
+                JSONObject fields=SdkDocuments.fields(doc.getData());String token=DocumentVersion.of(fields);
+                Map<String,Object> row=decodeFields(fields);row.put("id",doc.getId());row.put("_updateTime",token);
+                String path=name+"/"+doc.getId();
+                entry=new CachedDocument(doc,row,new JSONObject().put("name",documentRoot+"/"+path).put("fields",fields).put("updateTime",token),token);
+                decodedCount++;contentRevision++;
+            }else metadataReuses++;
+            next.put(doc.getId(),entry);
         }
+        if(!previous.keySet().equals(next.keySet()))contentRevision++;
+        decodedDocuments.put(name,next);
+        for(Map.Entry<String,CachedDocument> item:next.entrySet()){
+            String path=name+"/"+item.getKey();CachedDocument entry=item.getValue();
+            out.rows.add(entry.row);out.versions.put(path,entry.token);out.documents.put(path,entry.raw);
+        }
+        decodeNanos+=System.nanoTime()-started;
         return out;
     }
+    private void flushCache(){
+        if(cachePlayers==null)return;
+        long revision=lastPublishedRevision;
+        if(cacheRevision==revision)return;
+        saveCachedSnapshot(cachePlayers,cacheRounds,cacheSessions);cacheRevision=revision;cacheWrites++;
+    }
+    /** Numeric, local-only counters for emulator validation; contains no user data. */
+    long[] performanceCounters(){return new long[]{decodedCount,metadataReuses,cacheWrites,queryStarts,maxPageDocuments,decodeNanos};}
     private Map<String,Object> decodeFields(JSONObject fields) throws Exception {
         Map<String,Object> result=new HashMap<>();
         if(fields==null) return result;
