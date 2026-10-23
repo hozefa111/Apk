@@ -173,7 +173,7 @@ public final class FirebaseGateway {
                         if(!dataChanged)for(int i=0;i<pages.size();i++)if(previous.get(i)!=pages.get(i)&&!pages.get(i).getDocumentChanges().isEmpty()){dataChanged=true;break;}
                         invalidates=!complete||dataChanged;
                         liveCollections.put(collection,pages);collectionComplete.put(collection,complete);liveBoundaries.put(collection,boundaries);
-                        liveRevision.incrementAndGet();if(invalidates)freshSnapshot=false;
+                        if(invalidates){liveRevision.incrementAndGet();freshSnapshot=false;}
                     }
                     ui.post(()->{
                         if(!running||generation!=subscriptionGeneration)return;
