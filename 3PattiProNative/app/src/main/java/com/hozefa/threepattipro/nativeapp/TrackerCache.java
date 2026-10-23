@@ -65,7 +65,7 @@ final class TrackerCache extends SQLiteOpenHelper {
             if(snapshotAt<marker(db,"snapshot_time",Long.MIN_VALUE))return 0;
             revision=marker(db,"complete",-1);
             if(revision!=persistedRevision){persisted=rows(db);persistedRevision=revision;}
-            for(Map.Entry<String,String> row:next.entrySet())if(!Objects.equals(persisted.get(row.getKey()),row.getValue())){
+            for(Map.Entry<String,String> row:next.entrySet())if(!persisted.containsKey(row.getKey())||!Objects.equals(persisted.get(row.getKey()),row.getValue())){
                 ContentValues value=new ContentValues();value.put("path",row.getKey());value.put("payload",row.getValue());
                 if(db.insertWithOnConflict("records",null,value,SQLiteDatabase.CONFLICT_REPLACE)<0)throw new SQLiteException("Cache row rejected");changed++;
             }
