@@ -18,8 +18,10 @@ public class TrackerCacheTest {
         Map<String,String> data=new LinkedHashMap<>();for(int i=0;i<500;i++)data.put("rounds/"+i,"{\"score\":"+i+"}");
         assertNull(cache.read());assertEquals(500,cache.write(data));assertEquals(0,cache.write(data));
         data.put("rounds/250","{\"score\":-78}");assertEquals(1,cache.write(data));
-        data.remove("rounds/0");data.put("sessions/new","{\"endTime\":null}");assertEquals(2,cache.write(data));
-        cache.close();cache=new TrackerCache(context,name);assertEquals(data,cache.read());
+        data.remove("rounds/0");data.put("sessions/new","{\"endTime\":null}");
+        Map<String,List<String>> ranges=Collections.singletonMap("rounds",Arrays.asList("049","099"));
+        assertEquals(2,cache.write(data,ranges));
+        cache.close();cache=new TrackerCache(context,name);assertEquals(data,cache.read());assertEquals(ranges,cache.boundaries());
     }
     @Test public void failedTransactionKeepsPreviousCompleteSnapshot(){
         Map<String,String> old=new LinkedHashMap<>();old.put("rounds/a","{\"score\":310}");cache.write(old);

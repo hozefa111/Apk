@@ -47,10 +47,15 @@ public final class FirebaseGateway {
     private final Context context;
     private final Listener listener;
     private final Object snapshotLock=new Object();
-    private final Map<String,List<QuerySnapshot>> liveCollections=new HashMap<>();
+    private final Map<String,List<PagedFirestoreCollection.Snapshot>> liveCollections=new HashMap<>();
     private final Map<String,Boolean> collectionComplete=new HashMap<>();
+    private final Map<String,List<String>> liveBoundaries=new HashMap<>();
+    private volatile Map<String,List<String>> cacheBoundaries=Collections.emptyMap();
     private final Map<String,Map<String,CachedDocument>> decodedDocuments=new HashMap<>();
     private final ExecutorService snapshotExecutor=Executors.newSingleThreadExecutor();
+    private final java.util.concurrent.Executor snapshotDispatch=task->{
+        try{snapshotExecutor.execute(task);}catch(java.util.concurrent.RejectedExecutionException stopped){/* Removed SDK listeners can race lifecycle shutdown. */}
+    };
     private final int pageSize;
     private long lastPublishedRevision=-1,cacheRevision=-1;
     private long lastDeliveredContent=-1;
@@ -138,6 +143,8 @@ public final class FirebaseGateway {
         if(running||stopped.get())return;
         running=true;lastRefreshRequestAt=retryClock.getAsLong();
         ui.post(() -> listener.authChanged(false));
+        readQueued.set(true);
+        executor.execute(()->{try{readCachedSnapshot();load();}finally{finishQueuedRead();}});
         authObserver=state->{
             if(!running)return;
             animationContinuity=false;liveRevision.incrementAndGet();freshSnapshot=false;listener.syncState(false);
@@ -146,8 +153,6 @@ public final class FirebaseGateway {
             removeSubscriptions();startSubscriptions();scheduleNext();
         };
         auth.addAuthStateListener(authObserver);
-        readQueued.set(true);
-        executor.execute(()->{try{readCachedSnapshot();load();}finally{finishQueuedRead();}});
         // AuthStateListener always emits its initial state; it owns initial attach,
         // avoiding an attach/remove/attach race and duplicate cold-start queries.
     }
@@ -155,19 +160,19 @@ public final class FirebaseGateway {
         if(!running||!foreground||!subscriptions.isEmpty()||retry.remaining(retryClock.getAsLong())>0)return;
         final int generation=subscriptionGeneration;
         for(String collection:Arrays.asList("players","rounds","sessions")){
-            PagedFirestoreCollection stream=new PagedFirestoreCollection(firestore.collection(collection),pageSize,snapshotExecutor,new PagedFirestoreCollection.Observer(){
+            PagedFirestoreCollection stream=new PagedFirestoreCollection(firestore.collection(collection),pageSize,snapshotDispatch,new PagedFirestoreCollection.Observer(){
                 public void requested(){queryStarts++;}
                 public void response(long nanos){synchronized(snapshotLock){if(pageLatencies.size()==200)pageLatencies.removeFirst();pageLatencies.addLast(nanos/1_000_000);}}
-                public void changed(List<QuerySnapshot> pages,boolean complete,int loaded){
-                    for(QuerySnapshot page:pages)maxPageDocuments=Math.max(maxPageDocuments,page.size());
+                public void changed(List<PagedFirestoreCollection.Snapshot> pages,boolean complete,int loaded,List<String> boundaries){
+                    for(PagedFirestoreCollection.Snapshot page:pages)maxPageDocuments=Math.max(maxPageDocuments,page.size());
                     final boolean invalidates;
                     synchronized(snapshotLock){
                         if(!running||generation!=subscriptionGeneration)return;
-                        List<QuerySnapshot> previous=liveCollections.get(collection);
+                        List<PagedFirestoreCollection.Snapshot> previous=liveCollections.get(collection);
                         boolean dataChanged=previous==null||previous.size()!=pages.size();
                         if(!dataChanged)for(int i=0;i<pages.size();i++)if(previous.get(i)!=pages.get(i)&&!pages.get(i).getDocumentChanges().isEmpty()){dataChanged=true;break;}
                         invalidates=!complete||dataChanged;
-                        liveCollections.put(collection,pages);collectionComplete.put(collection,complete);
+                        liveCollections.put(collection,pages);collectionComplete.put(collection,complete);liveBoundaries.put(collection,boundaries);
                         liveRevision.incrementAndGet();if(invalidates)freshSnapshot=false;
                     }
                     ui.post(()->{
@@ -179,7 +184,7 @@ public final class FirebaseGateway {
                 }
                 public void failed(FirebaseFirestoreException error){ui.post(()->{if(running&&generation==subscriptionGeneration)onListenFailure(error);});}
             });
-            subscriptions.add(stream);snapshotExecutor.execute(stream::start);
+            subscriptions.add(stream);executor.execute(()->{if(running&&generation==subscriptionGeneration)snapshotDispatch.execute(()->stream.start(cacheBoundaries.get(collection)));});
         }
         scheduleNext();
     }
@@ -196,9 +201,9 @@ public final class FirebaseGateway {
     }
     private void removeSubscriptions(){
         subscriptionGeneration++;
-        for(PagedFirestoreCollection registration:subscriptions)snapshotExecutor.execute(registration::close);
+        for(PagedFirestoreCollection registration:subscriptions)snapshotDispatch.execute(registration::close);
         subscriptions.clear();
-        synchronized(snapshotLock){liveCollections.clear();collectionComplete.clear();liveRevision.incrementAndGet();}
+        synchronized(snapshotLock){liveCollections.clear();collectionComplete.clear();liveBoundaries.clear();liveRevision.incrementAndGet();}
         freshSnapshot=false;
     }
     public void setForeground(boolean visible){
@@ -348,14 +353,14 @@ public final class FirebaseGateway {
         if(!running)return;
         if(retry.remaining(retryClock.getAsLong())>0){publishProblem(retry.quota()?quotaMessage():"Connection unavailable. Automatic retry is scheduled.");scheduleNext();return;}
         try{
-            Map<String,List<QuerySnapshot>> collections;Map<String,Boolean> complete;long revision;
-            synchronized(snapshotLock){collections=new HashMap<>(liveCollections);complete=new HashMap<>(collectionComplete);revision=liveRevision.get();}
+            Map<String,List<PagedFirestoreCollection.Snapshot>> collections;Map<String,Boolean> complete;Map<String,List<String>> bounds;long revision;
+            synchronized(snapshotLock){collections=new HashMap<>(liveCollections);complete=new HashMap<>(collectionComplete);bounds=new HashMap<>(liveBoundaries);revision=liveRevision.get();}
             if(collections.size()!=3||complete.size()!=3||complete.containsValue(false)){scheduleNext();return;}
             boolean server=true;
             List<CollectionSnapshot> decoded=new ArrayList<>();
             for(String name:Arrays.asList("players","rounds","sessions")){
-                List<QuerySnapshot> pages=collections.get(name);
-                for(QuerySnapshot snapshot:pages)server&=!snapshot.getMetadata().isFromCache()&&!snapshot.getMetadata().hasPendingWrites();
+                List<PagedFirestoreCollection.Snapshot> pages=collections.get(name);
+                for(PagedFirestoreCollection.Snapshot snapshot:pages)server&=!snapshot.getMetadata().isFromCache()&&!snapshot.getMetadata().hasPendingWrites();
                 decoded.add(decodeSnapshots(name,pages));
             }
             if(!server){
@@ -381,7 +386,7 @@ public final class FirebaseGateway {
                 Map<String,String> pending=new LinkedHashMap<>();
                 for(Map.Entry<String,Map<String,CachedDocument>> collection:decodedDocuments.entrySet())
                     for(Map.Entry<String,CachedDocument> doc:collection.getValue().entrySet())pending.put(collection.getKey()+"/"+doc.getKey(),doc.getValue().cachedRow);
-                cacheRows=pending;
+                cacheRows=pending;cacheBoundaries=bounds;
                 ui.removeCallbacks(cacheFlush);ui.postDelayed(cacheFlush,1000);
             }
             final boolean online=true;
@@ -402,7 +407,7 @@ public final class FirebaseGateway {
     private File snapshotFile(){return new File(context.getFilesDir(),"3patti_snapshot.json");}
     private void readCachedSnapshot(){
         try{
-            Map<String,String> cached=trackerCache.read();
+            Map<String,String> cached=trackerCache.read();cacheBoundaries=trackerCache.boundaries();
             if(cached!=null){
                 Map<String,List<Map<String,Object>>> rows=new HashMap<>();
                 for(String name:Arrays.asList("players","rounds","sessions"))rows.put(name,new ArrayList<>());
@@ -469,12 +474,12 @@ public final class FirebaseGateway {
         }
         return value;
     }
-    private CollectionSnapshot decodeSnapshots(String name,List<QuerySnapshot> pages)throws Exception {
+    private CollectionSnapshot decodeSnapshots(String name,List<PagedFirestoreCollection.Snapshot> pages)throws Exception {
         long started=System.nanoTime();
         CollectionSnapshot out=new CollectionSnapshot();
         Map<String,CachedDocument> previous=decodedDocuments.getOrDefault(name,Collections.emptyMap());
         Map<String,CachedDocument> next=new LinkedHashMap<>();
-        for(QuerySnapshot snapshot:pages)for(DocumentSnapshot doc:snapshot.getDocuments()){
+        for(PagedFirestoreCollection.Snapshot snapshot:pages)for(DocumentSnapshot doc:snapshot.getDocuments()){
             CachedDocument entry=previous.get(doc.getId());
             // SDK equality includes data + metadata, so compare immutable data to reuse
             // both server-confirmation events and unchanged documents in a changed page.
@@ -501,7 +506,7 @@ public final class FirebaseGateway {
         long revision=lastPublishedRevision;
         if(cacheRevision==revision)return;
         try{
-            cacheRecordWrites+=trackerCache.write(cacheRows);cacheRevision=revision;cacheWrites++;
+            cacheRecordWrites+=trackerCache.write(cacheRows,cacheBoundaries);cacheRevision=revision;cacheWrites++;
         }catch(Exception ignored){/* Cache remains disposable; never block a live save. */}
     }
     /** Numeric, local-only counters for emulator validation; contains no user data. */

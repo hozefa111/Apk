@@ -98,10 +98,12 @@ public class FirebaseGatewayEmulatorTest {
             assertNotNull("Fixture spans a real cursor boundary",boundary);final String removed=boundary;
             request("DELETE","/rounds/"+removed,null);
             await(()->live.get()&&rounds.get().stream().noneMatch(r->removed.equals(r.get("id")))&&rounds.get().stream().filter(r->String.valueOf(r.get("id")).startsWith(prefix)).count()==51);
+            long beforeInsertQueries=gateway.performanceCounters()[3];
             String inserted=prefix+"000a";created.add(inserted);
             request("PATCH","/rounds/"+inserted,new JSONObject().put("fields",SdkDocuments.fields(FirebaseGateway.map("type","hukum","scoreChanges",FirebaseGateway.map("a",123),"playerIds",Arrays.asList("a")))));
             // Missing timestamp must not exclude a legacy record from score totals.
             await(()->live.get()&&rounds.get().stream().filter(r->String.valueOf(r.get("id")).startsWith(prefix)).count()==52);
+            assertTrue("An insert splits only its affected range, not every later page",gateway.performanceCounters()[3]-beforeInsertQueries<=2);
             Set<String> unique=new HashSet<>();long actual=0;
             for(Map<String,Object> row:rounds.get()){
                 assertTrue("No duplicate records across cursors",unique.add(String.valueOf(row.get("id"))));
