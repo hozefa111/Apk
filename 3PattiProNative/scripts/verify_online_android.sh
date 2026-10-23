@@ -18,9 +18,9 @@ KALI_LOGCAT_PID=$!
 (
     while true; do
         date -u
-        ps -eo pid,rss,comm --sort=-rss | head -n 12
-        timeout 5s adb shell dumpsys power | sed -n '/mWakefulness=/p;/mIsPowered=/p;/mStayOn=/p'
-        timeout 5s adb shell dumpsys window | sed -n '/mCurrentFocus=/p;/mFocusedApp=/p;/mDreamingLockscreen=/p'
+        ps -eo pid,rss,comm --sort=-rss | sed -n '1,12p'
+        timeout 5s adb shell dumpsys power | sed -n '/mWakefulness=/p;/mIsPowered=/p;/mStayOn=/p' || true
+        timeout 5s adb shell dumpsys window | sed -n '/mCurrentFocus=/p;/mFocusedApp=/p;/mDreamingLockscreen=/p' || true
         sleep 30
     done
 ) > app/build/verification/device-host-status.log 2>&1 &
