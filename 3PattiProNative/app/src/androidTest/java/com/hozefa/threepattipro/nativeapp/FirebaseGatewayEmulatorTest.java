@@ -67,6 +67,18 @@ public class FirebaseGatewayEmulatorTest {
         gateway.signIn("tester@example.test","test-password-123");await(()->admin.get()&&live.get()&&!busy.get());ready(()->{});
     }
     @After public void cleanup()throws Exception{if(gateway!=null)InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.stop());}
+    @Test public void delayedCacheCallbackAfterShutdownCannotCrashOrRestartQueries()throws Exception{
+        java.lang.reflect.Field field=FirebaseGateway.class.getDeclaredField("cacheFlush");field.setAccessible(true);
+        Runnable delayed=(Runnable)field.get(gateway);long queries=gateway.performanceCounters()[3];
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{
+            gateway.stop();
+            // Reproduce a callback posted by a worker after Activity destruction
+            // removed older UI callbacks. Its executor is already shutting down.
+            for(int i=0;i<10;i++)delayed.run();
+            gateway.setForeground(true);assertFalse(gateway.refresh());gateway.stop();
+        });
+        Thread.sleep(300);assertEquals(queries,gateway.performanceCounters()[3]);
+    }
     @Test public void boundedCursorsPreserveScoresAcrossBoundaryInsertDeleteAndSingleEdit()throws Exception{
         final String prefix="paged-"+UUID.randomUUID()+"-";
         List<String> created=new ArrayList<>();

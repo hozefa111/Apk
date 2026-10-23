@@ -19,10 +19,17 @@ jobs:
       # Unbounded JVM ergonomics can otherwise evict the emulator mid-suite.
       JAVA_TOOL_OPTIONS: -Xmx768m
       NODE_OPTIONS: --max-old-space-size=512
+      KALI_TEST_SHARD: ${{ matrix.shard }}
     strategy:
       fail-fast: false
       matrix:
-        api: [30, 35]
+        include:
+          - api: 30
+            shard: all
+          - api: 35
+            shard: 0
+          - api: 35
+            shard: 1
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -68,7 +75,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: kali-android-api-${{ matrix.api }}
+          name: kali-android-api-${{ matrix.api }}-${{ matrix.shard }}
           path: |
             3PattiProNative/app/build/reports/
             3PattiProNative/app/build/test-results/

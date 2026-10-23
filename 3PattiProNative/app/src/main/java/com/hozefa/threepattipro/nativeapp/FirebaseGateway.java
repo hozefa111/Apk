@@ -60,7 +60,7 @@ public final class FirebaseGateway {
     private long lastPublishedRevision=-1,cacheRevision=-1;
     private long lastDeliveredContent=-1;
     private long contentRevision;
-    private final Runnable cacheFlush=()->this.executor.execute(this::flushCache);
+    private final Runnable cacheFlush=()->dispatch(this::flushCache);
     private volatile Map<String,String> cacheRows;
     private long cacheSnapshotAt;
     private final TrackerCache trackerCache;
@@ -145,12 +145,12 @@ public final class FirebaseGateway {
         running=true;lastRefreshRequestAt=retryClock.getAsLong();
         ui.post(() -> listener.authChanged(false));
         readQueued.set(true);
-        executor.execute(()->{try{readCachedSnapshot();load();}finally{finishQueuedRead();}});
+        dispatch(()->{try{readCachedSnapshot();load();}finally{finishQueuedRead();}});
         authObserver=state->{
             if(!running)return;
             animationContinuity=false;liveRevision.incrementAndGet();freshSnapshot=false;listener.syncState(false);
             if(state.getCurrentUser()==null){idToken=null;listener.authChanged(false);}
-            else executor.execute(()->{try{ensureIdToken();}catch(Exception expired){idToken=null;ui.post(()->{if(running)listener.authChanged(false);});}});
+            else dispatch(()->{try{ensureIdToken();}catch(Exception expired){idToken=null;ui.post(()->{if(running)listener.authChanged(false);});}});
             removeSubscriptions();startSubscriptions();scheduleNext();
         };
         auth.addAuthStateListener(authObserver);
@@ -185,7 +185,7 @@ public final class FirebaseGateway {
                 }
                 public void failed(FirebaseFirestoreException error){ui.post(()->{if(running&&generation==subscriptionGeneration)onListenFailure(error);});}
             });
-            subscriptions.add(stream);executor.execute(()->{if(running&&generation==subscriptionGeneration)snapshotDispatch.execute(()->stream.start(cacheBoundaries.get(collection)));});
+            subscriptions.add(stream);dispatch(()->{if(running&&generation==subscriptionGeneration)snapshotDispatch.execute(()->stream.start(cacheBoundaries.get(collection)));});
         }
         scheduleNext();
     }
@@ -218,7 +218,7 @@ public final class FirebaseGateway {
     private void queueLoad(boolean followUp){
         if(!running||!foreground)return;
         if(!readQueued.compareAndSet(false,true)){if(followUp)readAgain.set(true);return;}
-        executor.execute(()->{try{if(running&&foreground)load();}finally{finishQueuedRead();}});
+        dispatch(()->{try{if(running&&foreground)load();}finally{finishQueuedRead();}});
     }
     private void finishQueuedRead(){
         readQueued.set(false);
@@ -228,6 +228,11 @@ public final class FirebaseGateway {
         if(authObserver!=null)auth.removeAuthStateListener(authObserver);
         removeSubscriptions();ui.removeCallbacksAndMessages(null);
         snapshotExecutor.shutdown();executor.execute(()->{flushCache();trackerCache.close();});executor.shutdown();
+    }
+    private boolean dispatch(Runnable task){
+        if(!running||stopped.get())return false;
+        try{executor.execute(()->{if(running&&!stopped.get())task.run();});return true;}
+        catch(java.util.concurrent.RejectedExecutionException closing){return false;}
     }
     private void notify(String msg) { ui.post(() -> { if (running) listener.notice(msg); }); }
     private void setBusy(boolean b) { ui.post(() -> { if (running) listener.busy(b); }); }
@@ -306,7 +311,7 @@ public final class FirebaseGateway {
     public boolean loggedIn(){return !signingOut && auth.getCurrentUser()!=null && idToken!=null && administrator;}
     public void signIn(String email,String password){
         setBusy(true);
-        executor.execute(()->{
+        dispatch(()->{
             try{
                 Tasks.await(auth.signInWithEmailAndPassword(email,password),25,TimeUnit.SECONDS);
                 signingOut=false;ensureIdToken();if(!loggedIn())throw new IOException("This account has no administrator role. Contact the existing app administrator.");load();notify("Admin login successful");
@@ -318,7 +323,7 @@ public final class FirebaseGateway {
         // Block new mutations immediately, before the serialized work queue runs.
         signingOut=true;freshSnapshot=false;
         ui.post(()->{if(running)listener.authChanged(false);});
-        executor.execute(()->{auth.signOut();idToken=null;signingOut=false;load();notify("Logged out");});
+        dispatch(()->{auth.signOut();idToken=null;signingOut=false;load();notify("Logged out");});
     }
     public boolean refresh() {
         if(!running)return false;
@@ -705,7 +710,7 @@ public final class FirebaseGateway {
             return;
         }
         setBusy(true);
-        executor.execute(() -> {
+        dispatch(() -> {
             try {
                 ensureIdToken();
                 if(idToken==null || signingOut){throw new IOException("Login expired");}
@@ -734,7 +739,7 @@ public final class FirebaseGateway {
     public interface BackupCallback{void ready(byte[] bytes);}
     public void exportBackup(BackupCallback callback){
         setBusy(true);
-        executor.execute(()->{
+        dispatch(()->{
             try{
                 load();if(!freshSnapshot)throw new IOException("A live snapshot is required for backup");
                 JSONObject backup=new JSONObject().put("format","3patti-firestore-v1").put("project",project)
@@ -747,7 +752,7 @@ public final class FirebaseGateway {
         });
     }
     public void exportRecoveryBackup(BackupCallback callback){
-        executor.execute(()->{
+        dispatch(()->{
             try{
                 File[] files=new File(context.getFilesDir(),"recovery").listFiles((dir,name)->name.endsWith(".json"));
                 if(files==null||files.length==0)throw new IOException("No recovery backup on this device");
