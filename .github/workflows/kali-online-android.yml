@@ -65,14 +65,15 @@ jobs:
           target: google_apis
           disable-animations: true
           # Current emulator builds deprecate swiftshader_indirect. Let the
-          # supported software mode select a compatible GLES/Vulkan backend.
-          emulator-options: -no-window -gpu software -no-snapshot -noaudio -no-boot-anim
+          # supported Mesa software backend avoids the failing SwiftShader path.
+          emulator-options: -no-window -gpu lavapipe -no-snapshot -noaudio -no-boot-anim
           script: bash 3PattiProNative/scripts/verify_online_android.sh
       - name: Collect host resource diagnostics
         if: always()
         run: |
           mkdir -p 3PattiProNative/app/build/verification
           free -m > 3PattiProNative/app/build/verification/host-memory.txt
+          python3 3PattiProNative/scripts/emulator_crash_summary.py > 3PattiProNative/app/build/verification/emulator-crash-summary.json || true
           sudo dmesg -T | tail -n 160 > 3PattiProNative/app/build/verification/host-kernel.txt || true
       - uses: actions/upload-artifact@v4
         if: always()
