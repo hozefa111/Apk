@@ -95,6 +95,7 @@ public final class FirebaseGateway {
     private volatile String idToken;
     private volatile boolean administrator;
     private volatile boolean running;
+    private final AtomicBoolean stopped=new AtomicBoolean();
     private volatile boolean freshSnapshot=false;
     private final AtomicBoolean writeInFlight=new AtomicBoolean(false);
     private final Runnable refreshLoop=()->{startSubscriptions();queueLoad(true);};
@@ -132,7 +133,7 @@ public final class FirebaseGateway {
         context.getSharedPreferences("firebase_sync_retry",Context.MODE_PRIVATE).edit().clear().apply();
     }
     public void start() {
-        if(running)return;
+        if(running||stopped.get())return;
         running=true;lastRefreshRequestAt=retryClock.getAsLong();
         ui.post(() -> listener.authChanged(false));
         authObserver=state->{
@@ -215,7 +216,7 @@ public final class FirebaseGateway {
         readQueued.set(false);
         if(readAgain.getAndSet(false)&&running&&foreground&&retry.remaining(retryClock.getAsLong())==0)queueLoad(false);
     }
-    public void stop() { running=false;
+    public void stop() { if(!stopped.compareAndSet(false,true))return;running=false;
         if(authObserver!=null)auth.removeAuthStateListener(authObserver);
         removeSubscriptions();ui.removeCallbacksAndMessages(null);
         snapshotExecutor.shutdown();executor.execute(this::flushCache);executor.shutdown();
