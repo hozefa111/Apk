@@ -13,7 +13,7 @@ concurrency:
 jobs:
   android:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
       # Firestore, Gradle and the Android 15 VM share the hosted runner.
       # Unbounded JVM ergonomics can otherwise evict the emulator mid-suite.
@@ -35,8 +35,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - run: npm ci --prefix 3PattiProNative/tests/online-backend/functions/online
-      - run: npm install --global firebase-tools@15.34.0
+      - run: npm ci --prefix 3PattiProNative/tests/online-backend/functions/online --no-audit --no-fund --fetch-timeout=30000 --fetch-retries=2
+        timeout-minutes: 6
+      - run: npm install --global firebase-tools@15.34.0 --no-audit --no-fund --fetch-timeout=30000 --fetch-retries=2
+        timeout-minutes: 6
       - name: Provision Android platform with download retries
         run: |
           KALI_SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
