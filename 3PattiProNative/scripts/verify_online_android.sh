@@ -4,6 +4,10 @@ KALI_PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
 export KALI_PROJECT
 export KALI_ONLINE_BACKEND=1
 export KALI_SHARD_ARGS=""
+if [[ -n "${KALI_TEST_CLASS:-}" ]]; then
+    [[ "$KALI_TEST_CLASS" =~ ^com\.hozefa\.threepattipro\.nativeapp\.[A-Za-z]+Test$ ]] || exit 2
+    KALI_SHARD_ARGS="-Pandroid.testInstrumentationRunnerArguments.class=$KALI_TEST_CLASS"
+fi
 case "${KALI_TEST_SHARD:-all}" in
     all) ;;
     0|1) export KALI_SHARD_ARGS="-Pandroid.testInstrumentationRunnerArguments.numShards=2 -Pandroid.testInstrumentationRunnerArguments.shardIndex=$KALI_TEST_SHARD" ;;
