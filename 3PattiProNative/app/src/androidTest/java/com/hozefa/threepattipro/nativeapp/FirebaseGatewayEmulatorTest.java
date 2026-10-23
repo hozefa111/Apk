@@ -83,7 +83,7 @@ public class FirebaseGatewayEmulatorTest {
             await(()->live.get()&&rounds.get().stream().filter(r->String.valueOf(r.get("id")).startsWith(prefix)).count()==52);
             assertTrue("Every query bounded",gateway.performanceCounters()[4]<=7);
             assertTrue("Dataset spanned multiple cursor queries",gateway.performanceCounters()[3]>3);
-            Thread.sleep(1500);long decodedBefore=gateway.performanceCounters()[0],queriesBefore=gateway.performanceCounters()[3];
+            Thread.sleep(1500);long decodedBefore=gateway.performanceCounters()[0],queriesBefore=gateway.performanceCounters()[3],cacheRowsBefore=gateway.performanceCounters()[6];
             String edited=created.get(15);
             JSONObject fields=request("GET","/rounds/"+edited,null).getJSONObject("fields");
             fields.put("scoreChanges",new JSONObject().put("mapValue",new JSONObject().put("fields",new JSONObject().put("a",new JSONObject().put("integerValue","999")))));
@@ -91,6 +91,8 @@ public class FirebaseGatewayEmulatorTest {
             await(()->live.get()&&rounds.get().stream().anyMatch(r->edited.equals(r.get("id"))&&((Number)((Map<?,?>)r.get("scoreChanges")).get("a")).intValue()==999));
             assertEquals("Single edit decodes one document",1,gateway.performanceCounters()[0]-decodedBefore);
             assertEquals("Non-boundary edit reuses subscriptions",queriesBefore,gateway.performanceCounters()[3]);
+            Thread.sleep(1600);
+            assertEquals("Single edit writes one cached row",1,gateway.performanceCounters()[6]-cacheRowsBefore);
             List<String> ids=new ArrayList<>();for(Map<String,Object> row:rounds.get())ids.add(String.valueOf(row.get("id")));Collections.sort(ids);
             String boundary=null;for(int i=6;i<ids.size()-1;i+=7)if(ids.get(i).startsWith(prefix)&&!ids.get(i).equals(edited)){boundary=ids.get(i);break;}
             assertNotNull("Fixture spans a real cursor boundary",boundary);final String removed=boundary;

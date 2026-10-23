@@ -56,13 +56,14 @@ public final class FirebaseGateway {
     private long lastDeliveredContent=-1;
     private long contentRevision;
     private final Runnable cacheFlush=()->this.executor.execute(this::flushCache);
-    private volatile List<Map<String,Object>> cachePlayers,cacheRounds,cacheSessions;
-    private volatile long decodedCount,metadataReuses,cacheWrites,queryStarts,maxPageDocuments;
+    private volatile Map<String,String> cacheRows;
+    private final TrackerCache trackerCache;
+    private volatile long decodedCount,metadataReuses,cacheWrites,queryStarts,maxPageDocuments,cacheRecordWrites;
     private volatile long decodeNanos;
     private final ArrayDeque<Long> pageLatencies=new ArrayDeque<>();
     private static final class CachedDocument {
-        final DocumentSnapshot source;final Map<String,Object> row;final JSONObject raw;final String token;
-        CachedDocument(DocumentSnapshot source,Map<String,Object> row,JSONObject raw,String token){this.source=source;this.row=row;this.raw=raw;this.token=token;}
+        final DocumentSnapshot source;final Map<String,Object> row;final JSONObject raw;final String token;final String cachedRow;
+        CachedDocument(DocumentSnapshot source,Map<String,Object> row,JSONObject raw,String token){this.source=source;this.row=row;this.raw=raw;this.token=token;this.cachedRow=new JSONObject(row).toString();}
     }
     private int subscriptionGeneration;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -112,6 +113,7 @@ public final class FirebaseGateway {
         pageSize=batchSize;
         retryClock=clock;
         context = c.getApplicationContext();
+        trackerCache=new TrackerCache(context);
         listener = l;
         retryStore=context.getSharedPreferences("firebase_sdk_retry_v1",Context.MODE_PRIVATE);
         retry=new SyncRetryPolicy(retryClock.getAsLong(),retryStore.getLong("quota_until",0),retryStore.getInt("quota_failures",0));
@@ -219,7 +221,7 @@ public final class FirebaseGateway {
     public void stop() { if(!stopped.compareAndSet(false,true))return;running=false;
         if(authObserver!=null)auth.removeAuthStateListener(authObserver);
         removeSubscriptions();ui.removeCallbacksAndMessages(null);
-        snapshotExecutor.shutdown();executor.execute(this::flushCache);executor.shutdown();
+        snapshotExecutor.shutdown();executor.execute(()->{flushCache();trackerCache.close();});executor.shutdown();
     }
     private void notify(String msg) { ui.post(() -> { if (running) listener.notice(msg); }); }
     private void setBusy(boolean b) { ui.post(() -> { if (running) listener.busy(b); }); }
@@ -376,7 +378,10 @@ public final class FirebaseGateway {
             }
             if(contentRevision!=lastPublishedRevision){
                 lastPublishedRevision=contentRevision;
-                cachePlayers=new ArrayList<>(ps.rows);cacheRounds=new ArrayList<>(rs.rows);cacheSessions=new ArrayList<>(ss.rows);
+                Map<String,String> pending=new LinkedHashMap<>();
+                for(Map.Entry<String,Map<String,CachedDocument>> collection:decodedDocuments.entrySet())
+                    for(Map.Entry<String,CachedDocument> doc:collection.getValue().entrySet())pending.put(collection.getKey()+"/"+doc.getKey(),doc.getValue().cachedRow);
+                cacheRows=pending;
                 ui.removeCallbacks(cacheFlush);ui.postDelayed(cacheFlush,1000);
             }
             final boolean online=true;
@@ -395,29 +400,25 @@ public final class FirebaseGateway {
     }
     // A private read-only offline snapshot. It NEVER queues or replays mutations.
     private File snapshotFile(){return new File(context.getFilesDir(),"3patti_snapshot.json");}
-    private void saveCachedSnapshot(List<Map<String,Object>> players,
-                                    List<Map<String,Object>> rounds,
-                                    List<Map<String,Object>> sessions) {
-        File temp=new File(context.getFilesDir(),"3patti_snapshot.tmp");
-        try{
-            JSONObject all=new JSONObject();
-            all.put("players",new JSONArray(players));
-            all.put("rounds",new JSONArray(rounds));
-            all.put("sessions",new JSONArray(sessions));
-            all.put("savedAt",System.currentTimeMillis());
-            byte[] bytes=all.toString().getBytes(StandardCharsets.UTF_8);
-            if(bytes.length>8_000_000)return; // keep app startup fast on very large histories
-            try(FileOutputStream stream=new FileOutputStream(temp)){
-                stream.write(bytes);
-                stream.getFD().sync();
-            }
-            Files.move(temp.toPath(),snapshotFile().toPath(),StandardCopyOption.REPLACE_EXISTING);
-        }catch(Exception ex){
-            // Cache failure never prevents a successful live Firebase load.
-            temp.delete();
-        }
-    }
     private void readCachedSnapshot(){
+        try{
+            Map<String,String> cached=trackerCache.read();
+            if(cached!=null){
+                Map<String,List<Map<String,Object>>> rows=new HashMap<>();
+                for(String name:Arrays.asList("players","rounds","sessions"))rows.put(name,new ArrayList<>());
+                for(Map.Entry<String,String> item:cached.entrySet()){
+                    String name=item.getKey().substring(0,item.getKey().indexOf('/'));
+                    if(!rows.containsKey(name))throw new IOException("Invalid local cache collection");
+                    Object value=unwrapCached(new JSONObject(item.getValue()));
+                    if(!(value instanceof Map))throw new IOException("Invalid local cache row");
+                    @SuppressWarnings("unchecked") Map<String,Object> row=(Map<String,Object>)value;rows.get(name).add(row);
+                }
+                ui.post(()->{if(running){listener.syncState(false);listener.dataUpdated(rows.get("players"),rows.get("rounds"),rows.get("sessions"));}});
+                return;
+            }
+        }catch(Exception ignored){/* A disposable cache failure never changes server data. */}
+        // Existing installs can show their prior JSON cache until a full live sync
+        // commits the new SQLite cache. No remote migration or write replay occurs.
         File file=snapshotFile();
         if(!file.isFile()||file.length()>8_000_000||file.length()==0)return;
         try{
@@ -496,13 +497,15 @@ public final class FirebaseGateway {
         return out;
     }
     private void flushCache(){
-        if(cachePlayers==null)return;
+        if(cacheRows==null)return;
         long revision=lastPublishedRevision;
         if(cacheRevision==revision)return;
-        saveCachedSnapshot(cachePlayers,cacheRounds,cacheSessions);cacheRevision=revision;cacheWrites++;
+        try{
+            cacheRecordWrites+=trackerCache.write(cacheRows);cacheRevision=revision;cacheWrites++;
+        }catch(Exception ignored){/* Cache remains disposable; never block a live save. */}
     }
     /** Numeric, local-only counters for emulator validation; contains no user data. */
-    long[] performanceCounters(){return new long[]{decodedCount,metadataReuses,cacheWrites,queryStarts,maxPageDocuments,decodeNanos};}
+    long[] performanceCounters(){return new long[]{decodedCount,metadataReuses,cacheWrites,queryStarts,maxPageDocuments,decodeNanos,cacheRecordWrites};}
     public String performanceSummary(){
         List<Long> samples;synchronized(snapshotLock){samples=new ArrayList<>(pageLatencies);}Collections.sort(samples);
         String timing=samples.isEmpty()?"Waiting for a confirmed page response":
@@ -510,7 +513,7 @@ public final class FirebaseGateway {
         return "Cloud Firestore · "+(freshSnapshot?"Live and complete":"Loading / read-only")+
             "\nConfigured batch: "+pageSize+" documents\nLargest received batch: "+maxPageDocuments+
             "\nPage queries attached: "+queryStarts+"\nDecoded records: "+decodedCount+
-            "\nUnchanged record reuse: "+metadataReuses+"\nOffline cache writes: "+cacheWrites+
+            "\nUnchanged record reuse: "+metadataReuses+"\nOffline cache transactions: "+cacheWrites+"\nIndividual cached rows changed: "+cacheRecordWrites+
             "\nDecode work: "+(decodeNanos/1_000_000)+" ms\n\nFirst confirmed page response\n"+timing+
             "\n\nIncludes Firebase SDK, cache confirmation and network time; not database execution time alone. Up to 200 numeric samples stay in this app process. No names, IDs, cards or tokens are recorded. Complete history is required for lifetime totals; it loads in bounded pages before changes are enabled.";
     }
@@ -609,7 +612,7 @@ public final class FirebaseGateway {
                 update.put("name",documentRoot+"/rounds/"+rid);
                 update.put("fields",encodeFields(edits));
                 JSONArray fields=new JSONArray();
-                for(String field:edits.keySet())fields.put(field);
+                for(String field:edits.keySet()){fields.put(field);}
                 operations.put(new JSONObject()
                         .put("update",update)
                         .put("updateMask",new JSONObject().put("fieldPaths",fields))
@@ -698,8 +701,8 @@ public final class FirebaseGateway {
         executor.execute(() -> {
             try {
                 ensureIdToken();
-                if(idToken==null || signingOut)throw new IOException("Login expired");
-                if(!freshSnapshot || System.currentTimeMillis()-snapshotAt>60000)load();
+                if(idToken==null || signingOut){throw new IOException("Login expired");}
+                if(!freshSnapshot || System.currentTimeMillis()-snapshotAt>60000){load();}
                 if(!freshSnapshot)throw new IOException("Data changed. Refresh and retry.");
                 if(hasPendingBulkOperation()&&!resumeBulk)throw new IOException("An interrupted data operation needs attention in Settings before other changes");
                 action.run(idToken);
