@@ -26,21 +26,48 @@ public class LobbyScrollTest {
   js(s,"document.querySelector('#create input[name=sessionName]').value='Touch lobby "+mode+"';document.querySelector('#create select[name=playerId]').value='a';document.querySelector('#create select[name=mode]').value='"+mode+"';document.querySelector('#create button.gold').scrollIntoView({block:'center'});");Thread.sleep(250);tap(s,"#create button.gold");await(s,"room?.mode==="+mode+" && room.status==='lobby' && !!document.querySelector('.lobby-seats') && !busy");
   js(s,"window._scrollCalls=0;window._originalScrollTo=window.scrollTo;window.scrollTo=function(){window._scrollCalls++;return window._originalScrollTo.apply(this,arguments)};window._seatNode=document.querySelector('.lobby-seats');window._updates=setInterval(()=>{if(room&&room.status==='lobby'){room.revision++;room.sessionName='Touch lobby '+room.revision;renderNow();}},40)");
  }
- @Test public void sixSeatLobbyFingerScrollSurvivesLiveUpdates()throws Exception{
+ private void checkScroll(ActivityScenario<OnlineGameActivity> s,int mode)throws Exception{
+  js(s,"window._scrollCalls=0;window._originalScrollTo=window.scrollTo;window.scrollTo=function(){window._scrollCalls++;return window._originalScrollTo.apply(this,arguments)};window._seatNode=document.querySelector('.lobby-seats');window._updates=setInterval(()=>{if(room&&room.status==='lobby'){room.revision++;room.sessionName='Touch lobby '+room.revision;renderNow();}},40);window._originalScrollTo(0,0)");Thread.sleep(250);
+  for(int i=0;i<3;i++)swipe(s,true);
+  android.util.Log.i("LobbyTouch",js(s,"JSON.stringify({mode:room.mode,scrollY,calls:_scrollCalls,height:innerHeight,content:document.documentElement.scrollHeight,body:document.body.className,same:document.querySelector('.lobby-seats')===_seatNode})"));
+  assertEquals("Finger swipe must scroll the lobby","true",js(s,"scrollY>100"));
+  assertEquals("Refresh must not cancel finger scroll","0",js(s,"_scrollCalls"));
+  assertEquals("Last seat remains reachable","true",js(s,"(()=>{const r=document.querySelector('.seat-card:last-child').getBoundingClientRect(),dock=document.querySelector('.lobby-ready').getBoundingClientRect();return r.top<dock.top&&r.bottom>0})()"));
+  assertEquals("Lobby never gets the live-table lock","true",js(s,"!document.body.classList.contains('live-game') && !document.body.classList.contains('bidding') && document.documentElement.scrollWidth<=innerWidth+1"));
+  for(int i=0;i<3;i++)swipe(s,false);
+  assertEquals("Can swipe back up","true",js(s,"scrollY<100"));
+  js(s,"clearInterval(_updates);window.scrollTo=_originalScrollTo");
+ }
+ private void visible(ActivityScenario<OnlineGameActivity> s,String selector)throws Exception{
+  for(int i=0;i<10;i++){
+   String where=js(s,"(()=>{const el=document.querySelector("+JSONObject.quote(selector)+");if(!el)return 'missing';const r=el.getBoundingClientRect(),top=document.querySelector('header').getBoundingClientRect().bottom,bottom=document.querySelector('.lobby-ready')?.getBoundingClientRect().top||innerHeight;return r.top<top?'up':r.bottom>bottom?'down':'visible'})()");
+   if("\"visible\"".equals(where))return;assertNotEquals("Missing control "+selector,"\"missing\"",where);swipe(s,"\"down\"".equals(where));
+  }fail("Could not reach "+selector);
+ }
+ private void flow(int mode)throws Exception{
+  String roomId;
   try(ActivityScenario<OnlineGameActivity> s=ActivityScenario.launch(OnlineGameActivity.class)){
-   create(s,6);js(s,"window._originalScrollTo(0,0)");Thread.sleep(250);
-   for(int i=0;i<3;i++)swipe(s,true);
-   android.util.Log.i("LobbyTouch",js(s,"JSON.stringify({scrollY,calls:_scrollCalls,height:innerHeight,content:document.documentElement.scrollHeight,body:document.body.className,same:document.querySelector('.lobby-seats')===_seatNode})"));
-   assertEquals("Finger swipe must scroll the lobby","true",js(s,"scrollY>150"));
-   assertEquals("Live updates must not imperatively reset finger scroll","0",js(s,"_scrollCalls"));
-   assertEquals("All six seats remain reachable","true",js(s,"(()=>{const r=document.querySelector('.seat-card:last-child').getBoundingClientRect();return r.top<innerHeight&&r.bottom>0})()"));
-   for(int i=0;i<3;i++)swipe(s,false);assertEquals("Can swipe back up","true",js(s,"scrollY<100"));
-   js(s,"clearInterval(_updates);window.scrollTo=_originalScrollTo");
+   create(s,mode);js(s,"clearInterval(_updates);window.scrollTo=_originalScrollTo");
+   assertEquals("New lobby public state omits hand","false",js(s,"Object.prototype.hasOwnProperty.call(room,'hand')"));
+   assertEquals("Ready visible without scrolling","true",js(s,"(()=>{const b=document.querySelector('[data-action=ready]'),r=b.getBoundingClientRect();return document.querySelectorAll('[data-action=ready]').length===1&&r.top>=0&&r.bottom<=innerHeight&&b.disabled})()"));
+   checkScroll(s,mode);roomId=js(s,"room.id");
+  }
+  // Close the Activity/WebView, then open a new instance with persisted Auth and room.
+  try(ActivityScenario<OnlineGameActivity> s=ActivityScenario.launch(OnlineGameActivity.class)){
+   await(s,"document.documentElement.dataset.nativeIdentity==='ready' && room?.id==="+roomId+" && !!document.querySelector('.lobby-seats')");checkScroll(s,mode);
+   for(int seat=2;seat<=mode;seat++){
+    String selector="[data-action=\"bot:"+seat+"\"]";visible(s,selector);tap(s,selector);
+    await(s,"!busy && Object.values(room.members).some(p=>p.kind==='bot'&&p.seat==="+seat+")");
+   }
+   await(s,"!document.querySelector('[data-action=ready]').disabled");
+   assertEquals("Exactly one unobstructed Ready button","true",js(s,"(()=>{const b=document.querySelector('[data-action=ready]'),r=b.getBoundingClientRect();return document.querySelectorAll('[data-action=ready]').length===1&&r.top>=0&&r.bottom<=innerHeight&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2).closest('[data-action=ready]')===b})()"));
+   tap(s,"[data-action=ready]");await(s,"!!KaliRules.active(room) && !!document.querySelector('.live-main') && own.cards.length==="+(mode==6?7:10));
+   assertEquals("Correct UI revision in actual WebView","\"scroll-dock-v1\"",js(s,"document.documentElement.dataset.lobbyUi"));
+   assertEquals("No stale service worker controls bundled assets","true",js(s,"!navigator.serviceWorker || !navigator.serviceWorker.controller"));
+   tap(s,"[data-action=stop]");await(s,"!!document.querySelector('[data-choice=void]')");tap(s,"[data-choice=void]");await(s,"room.status==='stopped'");
+   tap(s,"[data-action=home]");await(s,"!room && !!document.querySelector('#create') && !document.body.classList.contains('live-game') && !document.querySelector('.lobby-ready')");
   }
  }
- @Test public void primaryReadyIsVisibleWithoutScrolling()throws Exception{
-  try(ActivityScenario<OnlineGameActivity> s=ActivityScenario.launch(OnlineGameActivity.class)){
-   create(s,6);assertEquals("Ready must be in the visible action area","true",js(s,"(()=>{const r=document.querySelector('[data-action=ready]').getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight})()"));js(s,"clearInterval(_updates)");
-  }
- }
+ @Test public void sixSeatLobbyFingerScrollSurvivesLiveUpdates()throws Exception{flow(6);}
+ @Test public void fourSeatLobbyFingerScrollAndReadyAfterReopen()throws Exception{flow(4);}
 }
