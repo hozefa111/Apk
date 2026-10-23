@@ -58,7 +58,13 @@ public class LobbyScrollTest {
   }
   // Close the Activity/WebView, then open a new instance with persisted Auth and room.
   try(ActivityScenario<OnlineGameActivity> s=ActivityScenario.launch(OnlineGameActivity.class)){
-   await(s,"document.documentElement.dataset.nativeIdentity==='ready' && room?.id==="+roomId+" && !!document.querySelector('.lobby-seats')");checkScroll(s,mode);
+   await(s,"document.documentElement.dataset.nativeIdentity==='ready'");
+   // The app intentionally opens its room list on relaunch; resume via its card.
+   if(!"true".equals(js(s,"room?.id==="+roomId))){
+    String id=new JSONArray("["+roomId+"]").getString(0),resume="[data-action=\"room:"+id+"\"]";
+    await(s,"!!document.querySelector("+JSONObject.quote(resume)+")");visible(s,resume);tap(s,resume);
+   }
+   await(s,"room?.id==="+roomId+" && !!document.querySelector('.lobby-seats')");checkScroll(s,mode);
    for(int seat=2;seat<=mode;seat++){
     String selector="[data-action=\"bot:"+seat+"\"]";visible(s,selector);tap(s,selector);
     await(s,"!busy && Object.values(room.members).some(p=>p.kind==='bot'&&p.seat==="+seat+")");
