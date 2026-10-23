@@ -3,6 +3,9 @@ import org.json.*;
 import org.junit.Test;
 import static org.junit.Assert.*;
 public class DocumentVersionTest {
+    @Test public void optimizedEncodingRetainsExistingConflictTokens()throws Exception {
+        assertEquals("sdk1:5ab05e4d4be927c6a7b2136c0eee10c0763a16b8150a793183dcc29c4139b861",DocumentVersion.of(new JSONObject("{\"b\":[true,\"x\",null],\"a\":1}")));
+    }
     @Test public void mapOrderDoesNotCauseFalseConflicts()throws Exception {
         assertEquals(DocumentVersion.of(new JSONObject("{\"b\":{\"z\":2,\"a\":1},\"a\":1}")),DocumentVersion.of(new JSONObject("{\"a\":1,\"b\":{\"a\":1,\"z\":2}}")));
     }

@@ -59,6 +59,7 @@ public final class FirebaseGateway {
     private volatile List<Map<String,Object>> cachePlayers,cacheRounds,cacheSessions;
     private volatile long decodedCount,metadataReuses,cacheWrites,queryStarts,maxPageDocuments;
     private volatile long decodeNanos;
+    private final ArrayDeque<Long> pageLatencies=new ArrayDeque<>();
     private static final class CachedDocument {
         final DocumentSnapshot source;final Map<String,Object> row;final JSONObject raw;final String token;
         CachedDocument(DocumentSnapshot source,Map<String,Object> row,JSONObject raw,String token){this.source=source;this.row=row;this.raw=raw;this.token=token;}
@@ -153,6 +154,7 @@ public final class FirebaseGateway {
         for(String collection:Arrays.asList("players","rounds","sessions")){
             PagedFirestoreCollection stream=new PagedFirestoreCollection(firestore.collection(collection),pageSize,snapshotExecutor,new PagedFirestoreCollection.Observer(){
                 public void requested(){queryStarts++;}
+                public void response(long nanos){synchronized(snapshotLock){if(pageLatencies.size()==200)pageLatencies.removeFirst();pageLatencies.addLast(nanos/1_000_000);}}
                 public void changed(List<QuerySnapshot> pages,boolean complete,int loaded){
                     for(QuerySnapshot page:pages)maxPageDocuments=Math.max(maxPageDocuments,page.size());
                     final boolean invalidates;
@@ -500,6 +502,17 @@ public final class FirebaseGateway {
     }
     /** Numeric, local-only counters for emulator validation; contains no user data. */
     long[] performanceCounters(){return new long[]{decodedCount,metadataReuses,cacheWrites,queryStarts,maxPageDocuments,decodeNanos};}
+    public String performanceSummary(){
+        List<Long> samples;synchronized(snapshotLock){samples=new ArrayList<>(pageLatencies);}Collections.sort(samples);
+        String timing=samples.isEmpty()?"Waiting for a confirmed page response":
+            "Median "+samples.get((samples.size()-1)/2)+" ms · p95 "+samples.get((int)Math.ceil(samples.size()*.95)-1)+" ms ("+samples.size()+" samples)";
+        return "Cloud Firestore · "+(freshSnapshot?"Live and complete":"Loading / read-only")+
+            "\nConfigured batch: "+pageSize+" documents\nLargest received batch: "+maxPageDocuments+
+            "\nPage queries attached: "+queryStarts+"\nDecoded records: "+decodedCount+
+            "\nUnchanged record reuse: "+metadataReuses+"\nOffline cache writes: "+cacheWrites+
+            "\nDecode work: "+(decodeNanos/1_000_000)+" ms\n\nFirst confirmed page response\n"+timing+
+            "\n\nIncludes Firebase SDK, cache confirmation and network time; not database execution time alone. Up to 200 numeric samples stay in this app process. No names, IDs, cards or tokens are recorded. Complete history is required for lifetime totals; it loads in bounded pages before changes are enabled.";
+    }
     private Map<String,Object> decodeFields(JSONObject fields) throws Exception {
         Map<String,Object> result=new HashMap<>();
         if(fields==null) return result;

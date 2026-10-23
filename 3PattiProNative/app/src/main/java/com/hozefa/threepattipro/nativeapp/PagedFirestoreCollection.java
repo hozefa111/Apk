@@ -13,6 +13,7 @@ final class PagedFirestoreCollection implements AutoCloseable {
         void changed(List<QuerySnapshot> pages, boolean complete, int loaded);
         void failed(FirebaseFirestoreException error);
         default void requested() {}
+        default void response(long elapsedNanos) {}
     }
     private final Query base;
     private final int size;
@@ -24,6 +25,8 @@ final class PagedFirestoreCollection implements AutoCloseable {
         final String cursor;
         ListenerRegistration registration;
         QuerySnapshot snapshot;
+        final long started=System.nanoTime();
+        boolean measured;
         Page(String cursor){this.cursor=cursor;}
     }
     PagedFirestoreCollection(Query base,int size,Executor executor,Observer observer){
@@ -46,6 +49,7 @@ final class PagedFirestoreCollection implements AutoCloseable {
             // Wait for server confirmation before extending a cached cursor. Cache-only
             // short pages cannot establish completeness or authorize mutations.
             boolean confirmed=!snapshot.getMetadata().isFromCache()&&!snapshot.getMetadata().hasPendingWrites();
+            if(confirmed&&!page.measured){page.measured=true;observer.response(System.nanoTime()-page.started);}
             if(full&&confirmed&&index+1==pages.size())append(end);
             List<QuerySnapshot> result=new ArrayList<>();int loaded=0;boolean complete=true;
             for(Page p:pages){

@@ -1824,6 +1824,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         content.addView(text("Backups include player names, scores and sessions. Keep exported files private.",12,MUTED,false));gap(content,12);
         content.addView(button("Export last recovery backup",false,()->api.exportRecoveryBackup(bytes->{pendingExport=bytes;pendingExportFingerprint=null;Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/json");intent.putExtra(Intent.EXTRA_TITLE,"3patti-recovery.json");startActivityForResult(intent,700);})));gap(content,12);
         content.addView(button("Refresh live data",false,()->api.refresh()));gap(content,12);
+        content.addView(button("Data sync details",false,()->new MotionDialogBuilder(this,motion).setTitle("Data sync details").setMessage(api.performanceSummary()).setPositiveButton("Close",null).show()));gap(content,12);
         if(pendingRoundId!=null){content.addView(button("Retry unconfirmed round",true,this::retryPendingRound));gap(content,12);}
         content.addView(button("Discard local round draft",false,()->new MotionDialogBuilder(this,motion).setTitle("Discard draft?").setMessage(pendingRoundId==null?"Remove your unsaved form selections?":"This round has an unconfirmed save. Refresh and check History before discarding; it may already be saved.").setNegativeButton("Keep",null).setPositiveButton("Discard draft",(d,w)->{resetRound();notice("Local draft discarded");}).show()));
         if(loggedIn){

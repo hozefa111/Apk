@@ -47,6 +47,9 @@ public class NativeNavigationTest {
             onView(withContentDescription("More options")).perform(click());onView(withText("Analytics")).perform(click());onView(withText("Table Analytics")).check(matches(isDisplayed()));capture("04-analytics");
             onView(withContentDescription("More options")).perform(click());onView(withText("Share Studio")).perform(click());onView(withText("CARD STYLE")).check(matches(isDisplayed()));capture("05-share-studio");
             onView(withContentDescription("More options")).perform(click());onView(withText("Settings")).inRoot(androidx.test.espresso.matcher.RootMatchers.isDialog()).perform(click());onView(withText("Compact round history")).check(matches(isDisplayed()));capture("06-settings");
+            onView(withText("Data sync details")).perform(scrollTo(),click());
+            onView(withText(org.hamcrest.Matchers.containsString("Configured batch:"))).check(matches(isDisplayed()));
+            onView(withText("Close")).check(matches(isCompletelyDisplayed())).perform(click());
             scenario.recreate();onView(withContentDescription("More options")).check(matches(isDisplayed()));
         }
     }
