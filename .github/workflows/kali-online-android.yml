@@ -26,10 +26,13 @@ jobs:
         include:
           - api: 30
             shard: all
+            gpu: software
           - api: 35
             shard: 0
+            gpu: lavapipe
           - api: 35
             shard: 1
+            gpu: lavapipe
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -64,9 +67,9 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
-          # Current emulator builds deprecate swiftshader_indirect. Let the
-          # supported Mesa software backend avoids the failing SwiftShader path.
-          emulator-options: -no-window -gpu lavapipe -no-snapshot -noaudio -no-boot-anim
+          # Keep each API on its verified software backend. API35 WebView
+          # runs use Mesa to avoid repeated legacy SwiftShader VM exits.
+          emulator-options: -no-window -gpu ${{ matrix.gpu }} -no-snapshot -noaudio -no-boot-anim
           script: bash 3PattiProNative/scripts/verify_online_android.sh
       - name: Collect host resource diagnostics
         if: always()
