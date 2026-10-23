@@ -35,7 +35,7 @@ collect_online_diagnostics() {
     local screen_names
     screen_names="$(timeout 15s adb shell run-as com.hozefa.threepattipro.nativeapp.sandbox ls files/verification 2>/dev/null | tr -d '\r' || true)"
     for screen in $screen_names; do
-        if [[ "$screen" =~ ^[a-zA-Z0-9_.-]+\.png$ ]]; then
+        if [[ "$screen" =~ ^[a-zA-Z0-9_.-]+\.(png|json)$ ]]; then
             timeout 15s adb exec-out run-as com.hozefa.threepattipro.nativeapp.sandbox cat "files/verification/$screen" > "app/build/verification/screens/$screen" || true
         fi
     done

@@ -115,7 +115,13 @@ public class FirebaseGatewayEmulatorTest {
             assertEquals("Short background/navigation reuses live queries",beforeNavigation[3],afterNavigation[3]);
             assertEquals("Unchanged data is not decoded again",beforeNavigation[0],afterNavigation[0]);
             assertEquals("Unchanged data is not rewritten to cache",beforeNavigation[2],afterNavigation[2]);
-            android.util.Log.i("PagingPerformance","bounded_queries="+gateway.performanceCounters()[3]+" max_batch="+gateway.performanceCounters()[4]+" single_edit_decodes=1 decode_ns="+gateway.performanceCounters()[5]);
+            android.util.Log.i("PagingPerformance",gateway.performanceSummary());
+            java.io.File evidence=new java.io.File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"verification");
+            assertTrue(evidence.isDirectory()||evidence.mkdirs());
+            JSONObject measured=new JSONObject().put("scope","demo Firestore emulator; not production WAN latency")
+                .put("boundedBatch",7).put("singleEditDecodedRecords",1).put("singleEditCacheRowsWritten",1)
+                .put("summary",gateway.performanceSummary()).put("duplicateRecords",0).put("exactScoresVerified",true);
+            try(java.io.FileOutputStream file=new java.io.FileOutputStream(new java.io.File(evidence,"firestore-performance.json"))){file.write(measured.toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));}
         }finally{
             JSONArray deletes=new JSONArray();for(String id:created)deletes.put(new JSONObject().put("delete","projects/demo-three-patti/databases/(default)/documents/rounds/"+id));
             request("POST",":commit",new JSONObject().put("writes",deletes));
