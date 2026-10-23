@@ -12,8 +12,12 @@ android {
         minSdk = 26
         targetSdk = 34
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 30
-        versionName = "2.7.9"
+        // Override with -PfirebasePageSize=... for measured dataset/device tuning.
+        buildConfigField("int", "FIRESTORE_PAGE_SIZE", (providers.gradleProperty("firebasePageSize").orNull ?: "150").also {
+            require(it.toInt() in 2..500) { "firebasePageSize must be 2–500" }
+        })
+        versionCode = 31
+        versionName = "2.7.10"
     }
     testBuildType = "sandbox"
     buildFeatures { buildConfig = true }

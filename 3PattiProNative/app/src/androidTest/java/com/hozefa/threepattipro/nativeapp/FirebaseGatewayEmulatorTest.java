@@ -14,6 +14,7 @@ import static org.junit.Assert.*;
 /** These tests are deliberately incapable of running writes in a production build. */
 public class FirebaseGatewayEmulatorTest {
     private FirebaseGateway gateway;
+    private int batchSize=BuildConfig.FIRESTORE_PAGE_SIZE;
     private final AtomicBoolean live=new AtomicBoolean(),admin=new AtomicBoolean(),busy=new AtomicBoolean();
     private final AtomicReference<List<Map<String,Object>>> sessions=new AtomicReference<>(Collections.emptyList());
     private final AtomicReference<List<Map<String,Object>>> rounds=new AtomicReference<>(Collections.emptyList());
@@ -61,11 +62,84 @@ public class FirebaseGatewayEmulatorTest {
                 public void notice(String message){notice.set(message);android.util.Log.i("GatewayTest",message+"; live="+live.get()+" busy="+busy.get());}
                 public void busy(boolean value){busy.set(value);}
                 public void syncState(boolean value){syncEvent.set(System.currentTimeMillis());live.set(value);}
-            },"demo-key");gateway.start();started.countDown();
+            },"demo-key",System::currentTimeMillis,batchSize);gateway.start();started.countDown();
         });assertTrue(started.await(5,TimeUnit.SECONDS));await(()->live.get()&&players.get().size()>=3);
         gateway.signIn("tester@example.test","test-password-123");await(()->admin.get()&&live.get()&&!busy.get());ready(()->{});
     }
     @After public void cleanup()throws Exception{if(gateway!=null)InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.stop());}
+    @Test public void delayedCacheCallbackAfterShutdownCannotCrashOrRestartQueries()throws Exception{
+        java.lang.reflect.Field field=FirebaseGateway.class.getDeclaredField("cacheFlush");field.setAccessible(true);
+        Runnable delayed=(Runnable)field.get(gateway);long queries=gateway.performanceCounters()[3];
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{
+            gateway.stop();
+            // Reproduce a callback posted by a worker after Activity destruction
+            // removed older UI callbacks. Its executor is already shutting down.
+            for(int i=0;i<10;i++)delayed.run();
+            gateway.setForeground(true);assertFalse(gateway.refresh());gateway.stop();
+        });
+        Thread.sleep(300);assertEquals(queries,gateway.performanceCounters()[3]);
+    }
+    @Test public void boundedCursorsPreserveScoresAcrossBoundaryInsertDeleteAndSingleEdit()throws Exception{
+        final String prefix="paged-"+UUID.randomUUID()+"-";
+        List<String> created=new ArrayList<>();
+        try{
+            JSONArray writes=new JSONArray();
+            for(int i=0;i<52;i++){
+                String id=prefix+String.format(java.util.Locale.ROOT,"%03d",i);created.add(id);
+                JSONObject fields=SdkDocuments.fields(FirebaseGateway.map("type","hukum","timestamp",new com.google.firebase.Timestamp(1000+i,0),"scoreChanges",FirebaseGateway.map("a",i),"playerIds",Arrays.asList("a","b","c"),"bid",155,"hukumId","a","result","win"));
+                writes.put(new JSONObject().put("update",new JSONObject().put("name","projects/demo-three-patti/databases/(default)/documents/rounds/"+id).put("fields",fields)));
+            }
+            request("POST",":commit",new JSONObject().put("writes",writes));
+            await(()->live.get()&&rounds.get().stream().filter(r->String.valueOf(r.get("id")).startsWith(prefix)).count()==52);
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.stop());batchSize=7;startGateway();
+            await(()->live.get()&&rounds.get().stream().filter(r->String.valueOf(r.get("id")).startsWith(prefix)).count()==52);
+            assertTrue("Every query bounded",gateway.performanceCounters()[4]<=7);
+            assertTrue("Dataset spanned multiple cursor queries",gateway.performanceCounters()[3]>3);
+            Thread.sleep(1500);long decodedBefore=gateway.performanceCounters()[0],queriesBefore=gateway.performanceCounters()[3],cacheRowsBefore=gateway.performanceCounters()[6];
+            String edited=created.get(15);
+            JSONObject fields=request("GET","/rounds/"+edited,null).getJSONObject("fields");
+            fields.put("scoreChanges",new JSONObject().put("mapValue",new JSONObject().put("fields",new JSONObject().put("a",new JSONObject().put("integerValue","999")))));
+            request("PATCH","/rounds/"+edited,new JSONObject().put("fields",fields));
+            await(()->live.get()&&rounds.get().stream().anyMatch(r->edited.equals(r.get("id"))&&((Number)((Map<?,?>)r.get("scoreChanges")).get("a")).intValue()==999));
+            assertEquals("Single edit decodes one document",1,gateway.performanceCounters()[0]-decodedBefore);
+            assertEquals("Non-boundary edit reuses subscriptions",queriesBefore,gateway.performanceCounters()[3]);
+            Thread.sleep(1600);
+            assertEquals("Single edit writes one cached row",1,gateway.performanceCounters()[6]-cacheRowsBefore);
+            String boundary=null;for(String candidate:gateway.rangeBoundaries("rounds"))if(candidate.startsWith(prefix)&&!candidate.equals(edited)){boundary=candidate;break;}
+            assertNotNull("Fixture spans a real cursor boundary",boundary);final String removed=boundary;
+            request("DELETE","/rounds/"+removed,null);
+            await(()->live.get()&&rounds.get().stream().noneMatch(r->removed.equals(r.get("id")))&&rounds.get().stream().filter(r->String.valueOf(r.get("id")).startsWith(prefix)).count()==51);
+            long beforeInsertQueries=gateway.performanceCounters()[3];
+            String inserted=prefix+"000a";created.add(inserted);
+            request("PATCH","/rounds/"+inserted,new JSONObject().put("fields",SdkDocuments.fields(FirebaseGateway.map("type","hukum","scoreChanges",FirebaseGateway.map("a",123),"playerIds",Arrays.asList("a")))));
+            // Missing timestamp must not exclude a legacy record from score totals.
+            await(()->live.get()&&rounds.get().stream().filter(r->String.valueOf(r.get("id")).startsWith(prefix)).count()==52);
+            assertTrue("An insert splits only its affected range, not every later page",gateway.performanceCounters()[3]-beforeInsertQueries<=2);
+            Set<String> unique=new HashSet<>();long actual=0;
+            for(Map<String,Object> row:rounds.get()){
+                assertTrue("No duplicate records across cursors",unique.add(String.valueOf(row.get("id"))));
+                if(String.valueOf(row.get("id")).startsWith(prefix))actual+=((Number)((Map<?,?>)row.get("scoreChanges")).get("a")).intValue();
+            }
+            int removedIndex=Integer.parseInt(removed.substring(prefix.length()));
+            assertEquals("Exact score sum after edit/delete/insert",(51*52/2)-15+999-removedIndex+123,actual);
+            Thread.sleep(1600);long[] beforeNavigation=gateway.performanceCounters();
+            for(int i=0;i<4;i++)InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{gateway.setForeground(false);gateway.setForeground(true);});
+            Thread.sleep(1600);long[] afterNavigation=gateway.performanceCounters();
+            assertEquals("Short background/navigation reuses live queries",beforeNavigation[3],afterNavigation[3]);
+            assertEquals("Unchanged data is not decoded again",beforeNavigation[0],afterNavigation[0]);
+            assertEquals("Unchanged data is not rewritten to cache",beforeNavigation[2],afterNavigation[2]);
+            android.util.Log.i("PagingPerformance",gateway.performanceSummary());
+            java.io.File evidence=new java.io.File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"verification");
+            assertTrue(evidence.isDirectory()||evidence.mkdirs());
+            JSONObject measured=new JSONObject().put("scope","demo Firestore emulator; not production WAN latency")
+                .put("boundedBatch",7).put("singleEditDecodedRecords",1).put("singleEditCacheRowsWritten",1)
+                .put("summary",gateway.performanceSummary()).put("duplicateRecords",0).put("exactScoresVerified",true);
+            try(java.io.FileOutputStream file=new java.io.FileOutputStream(new java.io.File(evidence,"firestore-performance.json"))){file.write(measured.toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+        }finally{
+            JSONArray deletes=new JSONArray();for(String id:created)deletes.put(new JSONObject().put("delete","projects/demo-three-patti/databases/(default)/documents/rounds/"+id));
+            request("POST",":commit",new JSONObject().put("writes",deletes));
+        }
+    }
     @Test public void onlineSessionCascadeRemovesLinkedRoundsAndKeepsOtherScores()throws Exception{
         Assume.assumeTrue("true".equals(InstrumentationRegistry.getArguments().getString("kaliOnlineBackend")));
         String id="online-meta-"+UUID.randomUUID();

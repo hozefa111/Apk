@@ -3,6 +3,12 @@ set -euo pipefail
 KALI_PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
 export KALI_PROJECT
 export KALI_ONLINE_BACKEND=1
+export KALI_SHARD_ARGS=""
+case "${KALI_TEST_SHARD:-all}" in
+    all) ;;
+    0|1) export KALI_SHARD_ARGS="-Pandroid.testInstrumentationRunnerArguments.numShards=2 -Pandroid.testInstrumentationRunnerArguments.shardIndex=$KALI_TEST_SHARD" ;;
+    *) echo "Unsupported Android test shard" >&2; exit 2 ;;
+esac
 cd "$KALI_PROJECT"
 # A UI suite may wait for emulator network work longer than the device's idle
 # screen timeout. Keep the *test device* awake; never change production app flags.
@@ -35,7 +41,7 @@ collect_online_diagnostics() {
     local screen_names
     screen_names="$(timeout 15s adb shell run-as com.hozefa.threepattipro.nativeapp.sandbox ls files/verification 2>/dev/null | tr -d '\r' || true)"
     for screen in $screen_names; do
-        if [[ "$screen" =~ ^[a-zA-Z0-9_.-]+\.png$ ]]; then
+        if [[ "$screen" =~ ^[a-zA-Z0-9_.-]+\.(png|json)$ ]]; then
             timeout 15s adb exec-out run-as com.hozefa.threepattipro.nativeapp.sandbox cat "files/verification/$screen" > "app/build/verification/screens/$screen" || true
         fi
     done
@@ -43,4 +49,4 @@ collect_online_diagnostics() {
 trap collect_online_diagnostics EXIT
 firebase emulators:exec --project demo-three-patti --only auth,firestore,database,functions \
     --config tests/online-backend/firebase.json \
-    'python3 "$KALI_PROJECT/scripts/seed_emulator.py" && gradle -p "$KALI_PROJECT" --max-workers=2 -Dorg.gradle.jvmargs="-Xmx1024m -Dfile.encoding=UTF-8" testSandboxUnitTest -Pandroid.testInstrumentationRunnerArguments.kaliOnlineBackend=true -Pandroid.testInstrumentationRunnerArguments.timeout_msec=180000 connectedSandboxAndroidTest'
+    'python3 "$KALI_PROJECT/scripts/seed_emulator.py" && gradle -p "$KALI_PROJECT" --max-workers=2 -Dorg.gradle.jvmargs="-Xmx1024m -Dfile.encoding=UTF-8" testSandboxUnitTest -Pandroid.testInstrumentationRunnerArguments.kaliOnlineBackend=true -Pandroid.testInstrumentationRunnerArguments.timeout_msec=180000 $KALI_SHARD_ARGS connectedSandboxAndroidTest'

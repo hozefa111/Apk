@@ -66,6 +66,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private ScrollView scroll;
     private boolean loggedIn=false, busy=false, hasData=false, liveConnected=false;
     private String syncProblem;
+    private String syncProgress="Connecting to your shared table";
+    private TextView syncProgressView;
     private long syncRetryAt;
     private boolean quotaPaused;
     private int tab=0, historyTab=0;
@@ -137,12 +139,13 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         p.sort(GameOrder.PLAYERS);
         r.sort(GameOrder.ROUNDS);
         s.sort(GameOrder.SESSIONS);
-        ScoreboardModel oldBoard=hasData?scoreboardModel(tab==0):null;
+
         Map<String,Long> timestamps=new HashMap<>();
         for(Map<String,Object> round:r)if(!"settlement".equals(str(round,"type")))timestamps.put(id(round),time(round.get("timestamp")));
         boolean freshRound=motionEvents.update(timestamps,liveConnected&&resumed,System.currentTimeMillis());
         // A no-op coherent refresh still seeds motion after resume/reconnect.
         if(hasData && players.equals(p) && rounds.equals(r) && sessions.equals(s)) return;
+        ScoreboardModel oldBoard=hasData?scoreboardModel(tab==0):null;
         motion.cancelTree(content);
         scoreMotion=freshRound?motion.capture(content):null;
         List<Map<String,Object>> oldRanks=rankedFor(filteredRounds());
@@ -198,6 +201,10 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         render(false);
     }
     @Override public void snapshotContinuity(boolean continuous){if(!continuous)motionEvents.invalidate();}
+    @Override public void dataLoading(String collection,int loaded){
+        syncProgress="Loading "+collection+" · "+loaded+" records received";
+        if(syncProgressView!=null&&!hasData)syncProgressView.setText(syncProgress);
+    }
     @Override public void syncState(boolean online) {
         if(liveConnected==online)return;
         liveConnected=online;
@@ -486,7 +493,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             content.addView(text("This connection error does not delete your points. A fresh install needs one successful connection before an offline table is available. You can leave this screen; the app will retry while open.",14,MUTED,false));
         }else if(!hasData && tab<6) {
             gap(content,80);content.addView(text("♠  Loading your table…",20,GOLD,true));
-            gap(content,16);content.addView(text("Connecting to your shared table",13,MUTED,false));
+            gap(content,16);syncProgressView=text(syncProgress,13,MUTED,false);content.addView(syncProgressView);
             for(int i=0;i<3;i++){gap(content,16);View skeleton=new View(this);skeleton.setBackground(shape(PANEL2,16,0));content.addView(skeleton,lp(-1,64));motion.loading(skeleton);}
         } else {
             switch(tab) {
@@ -1817,6 +1824,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         content.addView(text("Backups include player names, scores and sessions. Keep exported files private.",12,MUTED,false));gap(content,12);
         content.addView(button("Export last recovery backup",false,()->api.exportRecoveryBackup(bytes->{pendingExport=bytes;pendingExportFingerprint=null;Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/json");intent.putExtra(Intent.EXTRA_TITLE,"3patti-recovery.json");startActivityForResult(intent,700);})));gap(content,12);
         content.addView(button("Refresh live data",false,()->api.refresh()));gap(content,12);
+        content.addView(button("Data sync details",false,()->new MotionDialogBuilder(this,motion).setTitle("Data sync details").setMessage(api.performanceSummary()).setPositiveButton("Close",null).show()));gap(content,12);
         if(pendingRoundId!=null){content.addView(button("Retry unconfirmed round",true,this::retryPendingRound));gap(content,12);}
         content.addView(button("Discard local round draft",false,()->new MotionDialogBuilder(this,motion).setTitle("Discard draft?").setMessage(pendingRoundId==null?"Remove your unsaved form selections?":"This round has an unconfirmed save. Refresh and check History before discarding; it may already be saved.").setNegativeButton("Keep",null).setPositiveButton("Discard draft",(d,w)->{resetRound();notice("Local draft discarded");}).show()));
         if(loggedIn){
