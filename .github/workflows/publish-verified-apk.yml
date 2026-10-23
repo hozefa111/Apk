@@ -1,0 +1,33 @@
+name: Publish verified 3 Patti PRO APK
+on:
+  push:
+    branches: [apk-download-v2.7.12]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check completed release gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh api repos/hozefa111/Apk/actions/runs/39951871418 --jq .conclusion)" = success
+          test "$(gh api repos/hozefa111/Apk/actions/runs/39951871418 --jq .head_sha)" = df18cb249e137912158537a1ef82ce6d5511cb07
+      - name: Check isolated retry and Android15 complete shards
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh api repos/hozefa111/Apk/actions/runs/39955837643 --jq .conclusion)" = success
+          test "$(gh api repos/hozefa111/Apk/actions/runs/39955837643 --jq .head_sha)" = 2fb0b856eab9c89ecd93447bfa8d2ebbe1dad30f
+          test "$(gh api repos/hozefa111/Apk/actions/jobs/120413132386 --jq .conclusion)" = success
+          test "$(gh api repos/hozefa111/Apk/actions/jobs/120413132532 --jq .conclusion)" = success
+      - name: Verify tested APK checksum
+        run: sha256sum --check 3-Patti-PRO-v2.7.12.apk.sha256
+      - name: Publish downloadable APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create three-patti-pro-v2.7.12 3-Patti-PRO-v2.7.12.apk 3-Patti-PRO-v2.7.12.apk.sha256 3-Patti-PRO-v2.7.12-Verification.md 3-Patti-PRO-v2.7.12-Test-Report.zip --target dd8939e400b3c8b80a8302bddad71ae3775d6586 --title "3 Patti PRO v2.7.12" --notes-file 3-Patti-PRO-v2.7.12-Verification.md
