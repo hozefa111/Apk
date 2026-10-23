@@ -511,6 +511,7 @@ public final class FirebaseGateway {
     }
     /** Numeric, local-only counters for emulator validation; contains no user data. */
     long[] performanceCounters(){return new long[]{decodedCount,metadataReuses,cacheWrites,queryStarts,maxPageDocuments,decodeNanos,cacheRecordWrites};}
+    List<String> rangeBoundaries(String collection){synchronized(snapshotLock){return new ArrayList<>(liveBoundaries.getOrDefault(collection,Collections.emptyList()));}}
     public String performanceSummary(){
         List<Long> samples;synchronized(snapshotLock){samples=new ArrayList<>(pageLatencies);}Collections.sort(samples);
         String timing=samples.isEmpty()?"Waiting for a confirmed page response":

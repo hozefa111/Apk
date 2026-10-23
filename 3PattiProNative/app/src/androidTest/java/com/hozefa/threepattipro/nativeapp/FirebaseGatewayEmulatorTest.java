@@ -93,8 +93,7 @@ public class FirebaseGatewayEmulatorTest {
             assertEquals("Non-boundary edit reuses subscriptions",queriesBefore,gateway.performanceCounters()[3]);
             Thread.sleep(1600);
             assertEquals("Single edit writes one cached row",1,gateway.performanceCounters()[6]-cacheRowsBefore);
-            List<String> ids=new ArrayList<>();for(Map<String,Object> row:rounds.get())ids.add(String.valueOf(row.get("id")));Collections.sort(ids);
-            String boundary=null;for(int i=6;i<ids.size()-1;i+=7)if(ids.get(i).startsWith(prefix)&&!ids.get(i).equals(edited)){boundary=ids.get(i);break;}
+            String boundary=null;for(String candidate:gateway.rangeBoundaries("rounds"))if(candidate.startsWith(prefix)&&!candidate.equals(edited)){boundary=candidate;break;}
             assertNotNull("Fixture spans a real cursor boundary",boundary);final String removed=boundary;
             request("DELETE","/rounds/"+removed,null);
             await(()->live.get()&&rounds.get().stream().noneMatch(r->removed.equals(r.get("id")))&&rounds.get().stream().filter(r->String.valueOf(r.get("id")).startsWith(prefix)).count()==51);
