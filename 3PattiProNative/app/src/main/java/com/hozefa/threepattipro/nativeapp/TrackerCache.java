@@ -38,7 +38,7 @@ final class TrackerCache extends SQLiteOpenHelper {
     private long marker(SQLiteDatabase db,String key,long fallback){
         try(Cursor cursor=db.rawQuery("SELECT value FROM metadata WHERE key=?",new String[]{key})){return cursor.moveToFirst()?cursor.getLong(0):fallback;}
     }
-    private void marker(SQLiteDatabase db,String key,long value){
+    private void putMarker(SQLiteDatabase db,String key,long value){
         ContentValues row=new ContentValues();row.put("key",key);row.put("value",value);
         if(db.insertWithOnConflict("metadata",null,row,SQLiteDatabase.CONFLICT_REPLACE)<0)throw new SQLiteException("Cache marker rejected");
     }
@@ -75,7 +75,7 @@ final class TrackerCache extends SQLiteOpenHelper {
                 ContentValues value=new ContentValues();value.put("name",range.getKey());value.put("boundaries",new org.json.JSONArray(range.getValue()).toString());
                 if(db.insertWithOnConflict("partitions",null,value,SQLiteDatabase.CONFLICT_REPLACE)<0)throw new SQLiteException("Cache boundaries rejected");
             }
-            marker(db,"complete",revision+1);marker(db,"snapshot_time",snapshotAt);
+            putMarker(db,"complete",revision+1);putMarker(db,"snapshot_time",snapshotAt);
             db.setTransactionSuccessful();
         }finally{db.endTransaction();}
         persisted=new LinkedHashMap<>(next);persistedRevision=revision+1;return changed;
