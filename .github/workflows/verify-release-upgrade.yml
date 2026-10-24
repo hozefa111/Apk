@@ -47,13 +47,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          for attempt in $(seq 1 30); do
-            status=$(gh api repos/hozefa111/Apk/actions/runs/40064823099 --jq .status)
+          for attempt in $(seq 1 60); do
+            status=$(gh api repos/hozefa111/Apk/actions/runs/40065601803 --jq .status)
             if [ "$status" = completed ]; then break; fi
             sleep 10
           done
-          test "$(gh api repos/hozefa111/Apk/actions/runs/40064823099 --jq .conclusion)" = success
-          test "$(gh api repos/hozefa111/Apk/actions/runs/40064823099 --jq .head_sha)" = 05c2565f8f83fcb0aa037365f7fff4869de71c63
+          test "$(gh api repos/hozefa111/Apk/actions/runs/40065601803 --jq .conclusion)" = success
+          test "$(gh api repos/hozefa111/Apk/actions/runs/40065601803 --jq .head_sha)" = e14c1dda5626f87e91387095dd8834f40ab64049
       - name: Publish verified stable APK
         env:
           GH_TOKEN: ${{ github.token }}
