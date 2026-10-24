@@ -1,6 +1,8 @@
 name: Verify stable release update
 on:
   workflow_dispatch:
+  push:
+    branches: [release-v2.7.15]
 permissions:
   contents: write
 jobs:
@@ -13,8 +15,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download three-patti-pro-v2.7.12 -p '*.apk' -D previous
-          gh release download three-patti-pro-v2.7.14 -p '*.apk' -D candidate
+          gh release download three-patti-pro-v2.7.14 -p '*.apk' -D previous
+          sha256sum -c release-candidates/SHA256SUMS.txt
+          mkdir candidate
+          cp release-candidates/*.apk candidate/
       - run: sudo chmod 666 /dev/kvm
       - uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -37,4 +41,11 @@ jobs:
             adb shell am start -n com.hozefa.threepattipro.nativeapp/.MainActivity
             sleep 8
             adb shell pidof com.hozefa.threepattipro.nativeapp
-            adb shell dumpsys package com.hozefa.threepattipro.nativeapp | grep 'versionName=2.7.13'
+            adb shell dumpsys package com.hozefa.threepattipro.nativeapp | grep 'versionName=2.7.15'
+      - name: Publish signed APK after update smoke
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsSL "https://hozefa111.github.io/hh/online/runtime/client.js?v=2.7.15" -o published-client.js
+          echo "671b5e328cba91fe8e973cd16760c7dfce05939f649f6ec6266c1a101d39f3ac  published-client.js" | sha256sum -c -
+          gh release create three-patti-pro-v2.7.15 release-candidates/*.apk release-candidates/SHA256SUMS.txt --target 70191d609f925848c5c5f193b7e33278ad13ab8d --title "3 Patti PRO v2.7.15" --notes-file release-candidates/NOTES.md
