@@ -47,5 +47,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           curl -fsSL "https://hozefa111.github.io/hh/online/runtime/client.js?v=2.7.15" -o published-client.js
-          echo "671b5e328cba91fe8e973cd16760c7dfce05939f649f6ec6266c1a101d39f3ac  published-client.js" | sha256sum -c -
-          gh release create three-patti-pro-v2.7.15 release-candidates/*.apk release-candidates/SHA256SUMS.txt --target 70191d609f925848c5c5f193b7e33278ad13ab8d --title "3 Patti PRO v2.7.15" --notes-file release-candidates/NOTES.md
+          echo "69552f0f6e7a037288f5739a5bbd2296c8bdaa480a0487fd0f00b6c771e1eba9  published-client.js" | sha256sum -c -
+          gh release create three-patti-pro-v2.7.15 release-candidates/*.apk release-candidates/SHA256SUMS.txt --target a17621a2428ed7346932c376cf8428a4cd582540 --title "3 Patti PRO v2.7.15" --notes-file release-candidates/NOTES.md

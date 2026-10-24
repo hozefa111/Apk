@@ -1,1 +1,1 @@
-da91a4657fa23ee659e61abe9cc8fb85ecbd571d4890f5bf620faa0ce6610fac  release-candidates/3-Patti-PRO-v2.7.15.apk
+2b14037c0c6bedd7c8461f91c6335faa340ce9c4522fe0d2a827dd58c4a4e131  release-candidates/3-Patti-PRO-v2.7.15.apk
