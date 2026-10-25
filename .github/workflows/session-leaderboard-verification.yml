@@ -35,7 +35,7 @@ jobs:
       - name: Verify session selection, live projections and Big Scoreboard
         uses: reactivecircus/android-emulator-runner@v2
         env:
-          KALI_TEST_CLASSES: com.hozefa.threepattipro.nativeapp.SessionLeaderboardUiTest
+          KALI_TEST_CLASSES: com.hozefa.threepattipro.nativeapp.SessionLeaderboardUiTest,com.hozefa.threepattipro.nativeapp.NativeScoreboardTest#sessionSelectionWithoutSessionsShowsNoInventedScores
         with:
           api-level: 30
           arch: x86_64

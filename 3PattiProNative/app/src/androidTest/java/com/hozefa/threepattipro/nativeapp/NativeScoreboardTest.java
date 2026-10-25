@@ -16,7 +16,7 @@ public class NativeScoreboardTest {
     private void set(MainActivity a,String n,Object v){try{java.lang.reflect.Field f=MainActivity.class.getDeclaredField(n);f.setAccessible(true);f.set(a,v);}catch(Exception e){throw new AssertionError(e);}}
     private void await(String text)throws Exception{long end=System.currentTimeMillis()+30000;Throwable last=null;while(System.currentTimeMillis()<end){try{onView(withText(text)).check(matches(isDisplayed()));return;}catch(RuntimeException|AssertionError e){last=e;Thread.sleep(150);}}throw new AssertionError(text,last);}
     private void see(String text)throws Exception{Thread.sleep(700);onView(withText(text)).perform(scrollTo()).check(matches(isDisplayed()));}
-    private void seed(MainActivity a,boolean tie,boolean session){assertTrue(BuildConfig.USE_EMULATORS);((FirebaseGateway)get(a,"api")).stop();set(a,"tab",3);set(a,"rankFilter","all");set(a,"scoreboardScope","all");a.snapshotContinuity(false);a.syncState(true);
+    private void seed(MainActivity a,boolean tie,boolean session){assertTrue(BuildConfig.USE_EMULATORS);((FirebaseGateway)get(a,"api")).stop();set(a,"tab",3);set(a,"rankFilter","all");set(a,"scoreboardScope","all");set(a,"ranksSessions",false);set(a,"selectedSessionId","");a.snapshotContinuity(false);a.syncState(true);
         List<Map<String,Object>> p=new ArrayList<>();for(String id:Arrays.asList("a","b","c","d"))p.add(FirebaseGateway.map("id",id,"name","Score player "+id,"active",true));
         Map<String,Object> r=FirebaseGateway.map("id","score-fixture","type","hukum","timestamp","2026-10-20T10:00:00Z","sessionId","current","playerIds",Arrays.asList("a","b","c","d"),"hukumId","a","partnerIds",Arrays.asList("b"),"result","win","scoreChanges",FirebaseGateway.map("a",170,"b",tie?170:100,"c",tie?170:50,"d",tie?170:0));
         List<Map<String,Object>> sessions=session?new ArrayList<>(Arrays.asList(FirebaseGateway.map("id","current","startTime","2026-10-20T00:00:00Z","endTime",null,"sessionName","Fixture session"))):new ArrayList<>();a.dataUpdated(p,new ArrayList<>(Arrays.asList(r)),sessions);
@@ -36,8 +36,8 @@ public class NativeScoreboardTest {
             s.onActivity(a->a.onBackPressed());Thread.sleep(700);s.onActivity(a->assertEquals(get(a,"bigOriginScroll"),((android.widget.ScrollView)get(a,"scroll")).getScrollY()));see("Leaderboard");s.onActivity(a->{assertEquals(3,get(a,"tab"));assertFalse((a.getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)!=0);});
         }
     }
-    @Test public void currentSessionWithoutActiveSessionShowsNoInventedScores()throws Exception{
-        try(ActivityScenario<MainActivity> s=ActivityScenario.launch(MainActivity.class)){await("Table Status");s.onActivity(a->seed(a,false,false));see("Current Session");onView(withText("Current Session")).perform(click());see("No active session");see("No players with rounds in this scope.");capture("46-scoreboard-empty-session");}
+    @Test public void sessionSelectionWithoutSessionsShowsNoInventedScores()throws Exception{
+        try(ActivityScenario<MainActivity> s=ActivityScenario.launch(MainActivity.class)){await("Table Status");s.onActivity(a->seed(a,false,false));see("Sessions");onView(withText("Sessions")).perform(click());see("Select a session to see its leaderboard.");see("No players with rounds in this scope.");capture("46-scoreboard-empty-session");}
     }
     @Test public void scoreCardsShowPersonalChangeAndSessionAndOfflineBigState()throws Exception{
         try(ActivityScenario<MainActivity> s=ActivityScenario.launch(MainActivity.class)){await("Table Status");s.onActivity(a->seed(a,false,true));see("Last played round  +100");see("70 points behind leader");
