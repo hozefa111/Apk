@@ -24,7 +24,7 @@ public class HybridWebViewTest {
   assertTrue(BuildConfig.USE_EMULATORS);android.util.Log.i("HybridTouch","launch");
   try(ActivityScenario<OnlineGameActivity>s=ActivityScenario.launch(OnlineGameActivity.class)){
    s.onActivity(a->activity=a);
-   android.util.Log.i("HybridTouch","activity resumed");waitFor(s,"typeof renderNow==='function'");Thread.sleep(1200);
+   android.util.Log.i("HybridTouch","activity resumed");waitFor(s,"typeof renderNow==='function'");js(s,"window.fixtureAuthReady=false;auth.onAuthStateChanged(()=>window.fixtureAuthReady=true)");waitFor(s,"window.fixtureAuthReady===true");
    for(int mode:new int[]{4,6}){android.util.Log.i("HybridTouch","lobby "+mode);
     js(s,"(()=>{clearCollection();resetCardTaps();unsubs.forEach(f=>f());unsubs=[];let t=1000,r=R.create({id:'cf2_0123456789abcdef0123456789abcdef',code:'V2ABCDEF',uid:'human',playerId:'p1',name:'Human',mode:"+mode+"},t);window.fixtureRoom=r;user={uid:'human',getIdToken:async()=>''};room=R.publicState(r);own=R.privateState(r,'human');previous=null;subscribedRoomId=r.id;uncertainCommand=null;busy=false;connectionReady=true;reduced=true;error='';screen='room';scoreOpen=false;historyOpen=false;renderNow();return true;})()");
     waitFor(s,"!!document.querySelector('.lobby-ready') || !!document.querySelector('[data-action=ready]')");
