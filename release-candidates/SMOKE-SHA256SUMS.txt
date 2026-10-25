@@ -1,2 +1,2 @@
 0f4719320e5d1ec6205d5c4586b6023f733c754e39fb29b0e703817a651da9dd  release-candidates/smoke-sandbox.apk
-88c3721da010f482b203880330d3f868742174a9b7f73b313d1772177bc83965  release-candidates/smoke-test.apk
+9220f00833a8a3f0e5753d4006cee407ab397e7af98db369397ae03ef25fd3b1  release-candidates/smoke-test.apk
