@@ -33,7 +33,7 @@ jobs:
         run: |
           curl -fsSL 'https://hozefa111.github.io/hh/online/runtime/client.js?v=2.7.16' -o published-client.js
           echo '883ff946f79fde8a1472cce8f638def1ccc3b30c2cae39541a5f66ca3eae357d  published-client.js' | sha256sum -c -
-          gh release create three-patti-pro-v2.7.16 release-candidates/3-Patti-PRO-v2.7.16.apk release-candidates/SHA256SUMS.txt --target 09c0b21307b695267a3a5fe1ad2717ff413d5550 --title '3 Patti PRO v2.7.16' --notes-file release-candidates/NOTES.md
+          gh release create three-patti-pro-v2.7.16 release-candidates/3-Patti-PRO-v2.7.16.apk release-candidates/SHA256SUMS.txt --target 55e10cf7e8633f4f01f8d9edfdc260ef5560b4ba --title '3 Patti PRO v2.7.16' --notes-file release-candidates/NOTES.md
       - uses: actions/upload-artifact@v4
         if: always()
         with:
