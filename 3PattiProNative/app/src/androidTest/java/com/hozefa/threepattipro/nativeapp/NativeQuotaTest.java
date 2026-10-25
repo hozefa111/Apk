@@ -81,6 +81,7 @@ public class NativeQuotaTest {
     }
     @Test public void quotaScreenReplacesEndlessLoadingAndKeepsCachedTableReadable()throws Exception{
         try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
+            onView(withText("Load complete history")).perform(scrollTo(),click());
             long end=System.currentTimeMillis()+15000;while(true){try{onView(withText("Table Status")).check(matches(isDisplayed()));break;}catch(RuntimeException|AssertionError e){if(System.currentTimeMillis()>end)throw e;Thread.sleep(100);}}
             scenario.onActivity(a->{
                 try{java.lang.reflect.Field api=MainActivity.class.getDeclaredField("api");api.setAccessible(true);((FirebaseGateway)api.get(a)).stop();java.lang.reflect.Field data=MainActivity.class.getDeclaredField("hasData");data.setAccessible(true);data.setBoolean(a,false);}catch(Exception e){throw new AssertionError(e);}
