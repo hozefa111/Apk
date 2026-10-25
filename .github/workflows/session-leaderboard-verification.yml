@@ -1,7 +1,7 @@
 name: Session leaderboard Android verification
 on:
   push:
-    branches: [session-leaderboard]
+    branches: [session-picker-flicker]
     paths:
       - '3PattiProNative/app/src/main/java/**'
       - '3PattiProNative/app/src/androidTest/**'
@@ -35,7 +35,7 @@ jobs:
       - name: Verify session selection, live projections and Big Scoreboard
         uses: reactivecircus/android-emulator-runner@v2
         env:
-          KALI_TEST_CLASSES: com.hozefa.threepattipro.nativeapp.SessionLeaderboardUiTest,com.hozefa.threepattipro.nativeapp.NativeScoreboardTest#sessionSelectionWithoutSessionsShowsNoInventedScores
+          KALI_TEST_CLASSES: com.hozefa.threepattipro.nativeapp.SessionLeaderboardUiTest#openPickerKeepsWindowRowsAndScrollDuringScoreUpdates
         with:
           api-level: 30
           arch: x86_64

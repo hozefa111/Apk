@@ -26,4 +26,11 @@ public class SessionLeaderboardUiTest {
    s.onActivity(a->{((SessionLiveScores)get(a,"sessionScores")).forget(id);((Set<String>)get(a,"removedSessionIds")).add(id);render(a);assertEquals("",get(a,"selectedSessionId"));});see("Select a session to see its leaderboard.");
   }
  }
+ @Test public void openPickerKeepsWindowRowsAndScrollDuringScoreUpdates()throws Exception{
+  try(ActivityScenario<MainActivity>s=ActivityScenario.launch(MainActivity.class)){NativeTestUi.awaitMotionIdle(s);s.onActivity(a->{((FirebaseGateway)get(a,"api")).stop();set(a,"tab",3);set(a,"ranksSessions",true);List<Map<String,Object>> sessions=new ArrayList<>();for(int n=0;n<25;n++)sessions.add(session("session-"+n,"Session "+n,"manual","stopped"));a.dataUpdated(list(m("id","a","name","Alpha")),new ArrayList<>(),sessions);});
+   onView(withContentDescription("Select Session")).perform(scrollTo(),click());final Object[] held=new Object[3];s.onActivity(a->{held[0]=get(a,"sessionPicker");held[1]=get(a,"sessionPickerList");held[2]=((android.view.ViewGroup)held[1]).getChildAt(0);((android.widget.ScrollView)get(a,"sessionPickerScroll")).scrollTo(0,300);});
+   s.onActivity(a->{SessionLiveScores live=(SessionLiveScores)get(a,"sessionScores");try{java.lang.reflect.Field f=SessionLiveScores.class.getDeclaredField("listener");f.setAccessible(true);SessionLiveScores.Listener listener=(SessionLiveScores.Listener)f.get(live);for(int n=0;n<20;n++)listener.changed();assertSame("Never dismiss/reopen for score frames",held[0],get(a,"sessionPicker"));assertTrue(((android.app.AlertDialog)held[0]).isShowing());assertSame("Unchanged catalog keeps existing rows",held[2],((android.view.ViewGroup)get(a,"sessionPickerList")).getChildAt(0));assertEquals(300,((android.widget.ScrollView)get(a,"sessionPickerScroll")).getScrollY());((List<Map<String,Object>>)get(a,"sessions")).get(0).put("sessionName","Renamed session");listener.changed();assertSame(held[0],get(a,"sessionPicker"));}catch(ReflectiveOperationException e){throw new AssertionError(e);}});
+   NativeTestUi.awaitMotionIdle(s);s.onActivity(a->assertEquals(300,((android.widget.ScrollView)get(a,"sessionPickerScroll")).getScrollY()));capture("session-picker-stable-window");onView(withText("Close")).perform(click());s.onActivity(a->assertNull(get(a,"sessionPicker")));
+  }
+ }
 }

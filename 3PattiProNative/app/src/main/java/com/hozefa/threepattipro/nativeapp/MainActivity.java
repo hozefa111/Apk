@@ -73,7 +73,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private boolean quotaPaused;
     private int tab=0, historyTab=0;
     private String scoreboardScope="all",lastScoreboardContext="";
-    private boolean ranksSessions,sessionScreenVisible;private String selectedSessionId="";private SessionLiveScores sessionScores;private android.app.AlertDialog sessionPicker;private final Set<String> removedSessionIds=new HashSet<>();
+    private boolean ranksSessions,sessionScreenVisible;private String selectedSessionId="";private SessionLiveScores sessionScores;private android.app.AlertDialog sessionPicker;private LinearLayout sessionPickerList;private ScrollView sessionPickerScroll;private String sessionPickerSignature="";private final Set<String> removedSessionIds=new HashSet<>();
     private boolean bigKeepAwake,scoreboardLeaderChanged;
     private int bigOriginScroll;
     private final Map<String,Integer> scoreboardMoves=new HashMap<>();
@@ -548,6 +548,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         scroll.post(()->scroll.scrollTo(0,prev));
         if(screenEntry){motion.enter(content,Integer.compare(tab,oldTab));motion.staged(content);}
         else if(scoreMotion!=null)motion.reconcile(content,scoreMotion);
+        refreshSessionPicker();
     }
     private void home() {
         title(content,"Table Status","3 Patti PRO · Live Game Dashboard");
@@ -1004,8 +1005,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private void syncSessionView(){
         boolean wanted=resumed&&ranksSessions&&(tab==3||tab==10);
         if(wanted){if(sessionScores==null)sessionScores=new SessionLiveScores(this,new SessionLiveScores.Listener(){
-            public void changed(){if(!resumed||!ranksSessions||(tab!=3&&tab!=10))return;boolean reopen=sessionPicker!=null&&sessionPicker.isShowing();if(reopen)sessionPicker.dismiss();render(false);if(reopen)showSessionPicker(false);}
-            public void removed(String id){removedSessionIds.add(id);if(id.equals(selectedSessionId)){selectedSessionId="";settings.edit().remove("ranks_session_id").apply();}if(resumed)render(false);}
+            public void changed(){if(!resumed||!ranksSessions||(tab!=3&&tab!=10))return;render(false);}
+            public void removed(String id){removedSessionIds.add(id);if(id.equals(selectedSessionId)){selectedSessionId="";settings.edit().remove("ranks_session_id").apply();}if(resumed){render(false);}}
         });if(!sessionScreenVisible){sessionScreenVisible=true;sessionScores.resume();sessionScores.discover(false);}Map<String,Object> selected=selectedRankSession();if(selected==null&&!selectedSessionId.isEmpty()&&hasData){selectedSessionId="";settings.edit().remove("ranks_session_id").apply();}sessionScores.select(SessionLeaderboard.needsLive(selected,gameRounds(),sessions,sessionScores.boards.get(selectedSessionId))?selected:null);}
         else if(sessionScreenVisible&&sessionScores!=null){sessionScreenVisible=false;sessionScores.pause();}
     }
@@ -1018,12 +1019,25 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         gap(target,12);
     }
     private String sessionDate(Map<String,Object> value){long t=SessionLeaderboard.time(value.get("startTime"));return t==Long.MIN_VALUE?"Date unavailable":dateFormat.format(Instant.ofEpochMilli(t));}
-    private void showSessionPicker(){showSessionPicker(true);}
-    private void showSessionPicker(boolean refresh){
-        if(refresh&&sessionScores!=null)sessionScores.discover(false);LinearLayout list=DialogUi.body(this);List<Map<String,Object>> available=rankSessions();if(available.isEmpty())list.addView(text("No saved sessions yet. Live online sessions require your room identity.",14,MUTED,false));
+    private boolean sessionPickerLive(Map<String,Object> session){String id=SessionLeaderboard.id(session);return SessionLeaderboard.active(session)&&(!SessionLeaderboard.online(session)?liveConnected:sessionScores!=null&&(sessionScores.discoveredLive.contains(id)||id.equals(selectedSessionId)&&sessionScores.connected));}
+    private void showSessionPicker(){
+        if(sessionScores!=null)sessionScores.discover(false);
+        if(sessionPicker!=null&&sessionPicker.isShowing()){refreshSessionPicker();return;}
         final android.app.AlertDialog dialog=new android.app.AlertDialog.Builder(this).setTitle("Select Session").setNegativeButton("Close",null).create();
-        for(Map<String,Object> session:available){String id=SessionLeaderboard.id(session);LinearLayout entry=column();pad(entry,14,12,14,12);entry.setBackground(DialogUi.background(this,id.equals(selectedSessionId)?0xFF393126:PANEL2,12));LinearLayout top=row();TextView name=text(str(session,"sessionName").isEmpty()?"Game Session":str(session,"sessionName"),16,id.equals(selectedSessionId)?GOLD:WHITE,true);top.addView(name,new LinearLayout.LayoutParams(0,-2,1));boolean live=SessionLeaderboard.active(session)&&(!SessionLeaderboard.online(session)?liveConnected:sessionScores!=null&&(sessionScores.discoveredLive.contains(id)||id.equals(selectedSessionId)&&sessionScores.connected));if(live){TextView badge=text("LIVE",10,GREEN,true);pad(badge,8,5,8,5);badge.setBackground(DialogUi.background(this,0xFF103B2E,8));top.addView(badge);}entry.addView(top);gap(entry,5);entry.addView(text(sessionDate(session)+(SessionLeaderboard.active(session)?" · Active":" · Completed"),12,MUTED,false));entry.setFocusable(true);entry.setContentDescription(str(session,"sessionName")+", "+(live?"LIVE":"Saved")+", "+sessionDate(session));entry.setOnClickListener(v->{selectedSessionId=id;settings.edit().putString("ranks_session_id",id).apply();scoreboardMoves.clear();scoreMotion=null;dialog.dismiss();render(true);});list.addView(entry);gap(list,9);}
-        if(sessionScores!=null&&sessionScores.next!=null)list.addView(button("More online sessions",false,()->{sessionScores.discover(true);}));dialog.setView(DialogUi.scroll(this,list));sessionPicker=dialog;DialogUi.install(dialog);dialog.show();
+        sessionPickerList=DialogUi.body(this);sessionPickerScroll=DialogUi.scroll(this,sessionPickerList);sessionPickerSignature="";sessionPicker=dialog;
+        dialog.setView(sessionPickerScroll);dialog.setOnDismissListener(d->{if(sessionPicker==dialog){sessionPicker=null;sessionPickerList=null;sessionPickerScroll=null;sessionPickerSignature="";}});
+        refreshSessionPicker();DialogUi.install(dialog);dialog.show();
+    }
+    private void refreshSessionPicker(){
+        if(sessionPicker==null||sessionPickerList==null)return;
+        List<Map<String,Object>> available=rankSessions();List<String> signature=new ArrayList<>();signature.add(selectedSessionId);signature.add(String.valueOf(sessionScores!=null&&sessionScores.next!=null));
+        for(Map<String,Object> session:available)signature.add(Arrays.asList(SessionLeaderboard.id(session),str(session,"sessionName"),sessionDate(session),SessionLeaderboard.active(session),sessionPickerLive(session)).toString());
+        String next=signature.toString();if(next.equals(sessionPickerSignature))return;sessionPickerSignature=next;
+        final android.app.AlertDialog dialog=sessionPicker;final ScrollView scroller=sessionPickerScroll;int y=scroller.getScrollY();LinearLayout list=sessionPickerList;list.removeAllViews();
+        if(available.isEmpty())list.addView(text("No saved sessions yet. Live online sessions require your room identity.",14,MUTED,false));
+        for(Map<String,Object> session:available){String id=SessionLeaderboard.id(session);LinearLayout entry=column();pad(entry,14,12,14,12);entry.setBackground(DialogUi.background(this,id.equals(selectedSessionId)?0xFF393126:PANEL2,12));LinearLayout top=row();TextView name=text(str(session,"sessionName").isEmpty()?"Game Session":str(session,"sessionName"),16,id.equals(selectedSessionId)?GOLD:WHITE,true);top.addView(name,new LinearLayout.LayoutParams(0,-2,1));boolean live=sessionPickerLive(session);if(live){TextView badge=text("LIVE",10,GREEN,true);pad(badge,8,5,8,5);badge.setBackground(DialogUi.background(this,0xFF103B2E,8));top.addView(badge);}entry.addView(top);gap(entry,5);entry.addView(text(sessionDate(session)+(SessionLeaderboard.active(session)?" · Active":" · Completed"),12,MUTED,false));entry.setFocusable(true);entry.setContentDescription(str(session,"sessionName")+", "+(live?"LIVE":"Saved")+", "+sessionDate(session));entry.setOnClickListener(v->{selectedSessionId=id;settings.edit().putString("ranks_session_id",id).apply();scoreboardMoves.clear();scoreMotion=null;dialog.dismiss();render(true);});list.addView(entry);gap(list,9);}
+        if(sessionScores!=null&&sessionScores.next!=null)list.addView(button("More online sessions",false,()->{sessionScores.discover(true);}));
+        scroller.post(()->{if(sessionPicker==dialog&&sessionPickerScroll==scroller)scroller.scrollTo(0,y);});
     }
     private void ranksPage() {
         title(content,"Leaderboard","Every point. Every position.");scoreboardControls(content,true);
