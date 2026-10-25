@@ -1,6 +1,8 @@
-name: Verify stable release update
+name: Verify and publish stable hybrid release
 on:
   workflow_dispatch:
+  push:
+    branches: [release-v2.7.16]
 permissions:
   contents: write
 jobs:
@@ -9,22 +11,29 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Download existing release and private candidate
+      - name: Verify candidate checksums and obtain prior release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download three-patti-pro-v2.7.12 -p '*.apk' -D previous
-          gh release download three-patti-pro-v2.7.13 -p '*.apk' -D candidate
+          gh release download three-patti-pro-v2.7.15 -p '*.apk' -D previous
+          sha256sum -c release-candidates/SHA256SUMS.txt
+          sha256sum -c release-candidates/SMOKE-SHA256SUMS.txt
       - run: sudo chmod 666 /dev/kvm
-      - uses: reactivecircus/android-emulator-runner@v2
+      - name: Real Android WebView touches and stable update installation
+        uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
           arch: x86_64
           target: default
-          disable-animations: true
+          disable-animations: false
           script: |
             adb root
             adb wait-for-device
+            adb install release-candidates/smoke-sandbox.apk
+            adb install release-candidates/smoke-test.apk
+            adb shell am instrument -w -r -e class com.hozefa.threepattipro.nativeapp.HybridWebViewTest com.hozefa.threepattipro.nativeapp.sandbox.test/androidx.test.runner.AndroidJUnitRunner > webview-smoke.txt
+            cat webview-smoke.txt
+            grep -F 'OK (1 test)' webview-smoke.txt
             adb shell svc wifi disable
             adb shell svc data disable
             adb install previous/*.apk
@@ -32,9 +41,21 @@ jobs:
             sleep 5
             adb shell mkdir -p /data/user/0/com.hozefa.threepattipro.nativeapp/files
             adb shell touch /data/user/0/com.hozefa.threepattipro.nativeapp/files/upgrade-verification-marker
-            adb install -r candidate/*.apk
+            adb install -r release-candidates/3-Patti-PRO-v2.7.16.apk
             adb shell test -f /data/user/0/com.hozefa.threepattipro.nativeapp/files/upgrade-verification-marker
             adb shell am start -n com.hozefa.threepattipro.nativeapp/.MainActivity
             sleep 8
             adb shell pidof com.hozefa.threepattipro.nativeapp
-            adb shell dumpsys package com.hozefa.threepattipro.nativeapp | grep 'versionName=2.7.13'
+            adb shell dumpsys package com.hozefa.threepattipro.nativeapp | grep 'versionName=2.7.16'
+      - name: Publish after verified update and deployed web assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsSL 'https://hozefa111.github.io/hh/online/runtime/client.js?v=2.7.16' -o published-client.js
+          echo '883ff946f79fde8a1472cce8f638def1ccc3b30c2cae39541a5f66ca3eae357d  published-client.js' | sha256sum -c -
+          gh release create three-patti-pro-v2.7.16 release-candidates/3-Patti-PRO-v2.7.16.apk release-candidates/SHA256SUMS.txt --target 09c0b21307b695267a3a5fe1ad2717ff413d5550 --title '3 Patti PRO v2.7.16' --notes-file release-candidates/NOTES.md
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hybrid-final-release-smoke
+          path: webview-smoke.txt
