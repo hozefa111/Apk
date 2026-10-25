@@ -178,7 +178,7 @@ public final class FirebaseGateway {
             journalHeadKnown=true;boolean active="incremental".equals(head.exists()?head.getString("mode"):"prepare");
             if(active!=journalActive){journalActive=active;legacyEpoch++;synchronized(snapshotLock){liveCollections.clear();collectionComplete.clear();liveBoundaries.clear();}listener.syncState(false);for(PagedFirestoreCollection p:subscriptions)snapshotDispatch.execute(p::close);subscriptions.clear();freshSnapshot=false;}
             listener.historyDeferred(false);
-            if(active){freshSnapshot=false;queueLoad(true);}else{startSubscriptions();queueLoad(true);}
+            if(active){freshSnapshot=false;listener.syncState(false);queueLoad(true);}else{startSubscriptions();queueLoad(true);}
         });
     }
     private void startSubscriptions(){
@@ -221,7 +221,7 @@ public final class FirebaseGateway {
                         ui.removeCallbacks(liveRefresh);ui.postDelayed(liveRefresh,150);
                     });
                 }
-                public void failed(FirebaseFirestoreException error){ui.post(()->{if(running&&generation==subscriptionGeneration)onListenFailure(error);});}
+                public void failed(FirebaseFirestoreException error){ui.post(()->{if(running&&generation==subscriptionGeneration&&streamEpoch==legacyEpoch&&!journalActive)onListenFailure(error);});}
             });
             subscriptions.add(stream);dispatch(()->{if(running&&generation==subscriptionGeneration)snapshotDispatch.execute(()->stream.start(cacheBoundaries.get(collection)));});
         }

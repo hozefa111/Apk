@@ -438,6 +438,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         gap(heading,5);
         heading.addView(text(liveConnected?"●  LIVE SYNC":quotaPaused?"○  SYNC PAUSED · LIMIT REACHED":hasData?"○  SAVED SCORES · SYNCING":"○  SYNCING YOUR TABLE",9,
                 liveConnected?GREEN:MUTED,true));
+        if(lastSyncedAt>0)heading.addView(text("Last synced "+new java.text.SimpleDateFormat("dd MMM, h:mm a",java.util.Locale.ENGLISH).format(new java.util.Date(lastSyncedAt)),9,MUTED,false));
         toolbar.addView(heading,largeText?lp(-1,-2):new LinearLayout.LayoutParams(0,-2,1));
         LinearLayout actions=largeText?row():toolbar;
         if(largeText){gap(toolbar,8);toolbar.addView(actions,lp(-1,-2));}
@@ -496,7 +497,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(!hasData && tab==0){
             TextView onlineFallback=button("♠  Play Online · Kali Ki Tidi",true,()->startActivity(new Intent(this,OnlineGameActivity.class)));onlineFallback.setContentDescription("Play Online Kali Ki Tidi");content.addView(onlineFallback);gap(content,16);
         }
-        if(!hasData && tab<6 && !liveConnected){
+        if(!hasData && tab<6 && !liveConnected && syncProblem==null){
             content.addView(text("Existing scores are preserved. No lifetime totals are calculated from partial pages.",14,MUTED,false));
         }else if(!hasData && tab<6 && syncProblem!=null){
             gap(content,24);content.addView(text("Your table has not loaded yet",20,GOLD,true));gap(content,12);

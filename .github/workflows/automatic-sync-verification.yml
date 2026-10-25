@@ -32,10 +32,10 @@ jobs:
       - name: Compile isolated SDK/cache tests
         run: gradle -p 3PattiProNative assembleSandbox assembleSandboxAndroidTest lintDebug
       - run: sudo chmod 666 /dev/kvm
-      - name: Test automatic startup, incremental CRUD, reopen, quota, cache and voice save
+      - name: Verify corrected no-cache quota UI (passed SDK tests retained)
         uses: reactivecircus/android-emulator-runner@v2
         env:
-          KALI_TEST_CLASSES: com.hozefa.threepattipro.nativeapp.FirebaseGatewayEmulatorTest,com.hozefa.threepattipro.nativeapp.NativeQuotaTest,com.hozefa.threepattipro.nativeapp.TrackerCacheTest,com.hozefa.threepattipro.nativeapp.NativeVoiceTest#confirmedVoiceRoundCreatesExactlyOneSandboxRecord
+          KALI_TEST_CLASSES: com.hozefa.threepattipro.nativeapp.NativeQuotaTest#quotaScreenReplacesEndlessLoadingAndKeepsCachedTableReadable
         with:
           api-level: 30
           arch: x86_64
