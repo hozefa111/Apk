@@ -52,4 +52,4 @@ verification_probe_pid=$!
 fi
 timeout --signal=INT --kill-after=30s 15m firebase emulators:exec --project demo-three-patti --only auth,firestore \
   --config tests/emulator/firebase.json \
-  'python3 scripts/seed_emulator.py && gradle -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true -Pandroid.testInstrumentationRunnerArguments.timeout_msec=180000 connectedSandboxAndroidTest'
+  'python3 scripts/seed_emulator.py && gradle -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true -Pandroid.testInstrumentationRunnerArguments.timeout_msec=180000 ${KALI_TEST_CLASSES:+-Pandroid.testInstrumentationRunnerArguments.class=$KALI_TEST_CLASSES} connectedSandboxAndroidTest'

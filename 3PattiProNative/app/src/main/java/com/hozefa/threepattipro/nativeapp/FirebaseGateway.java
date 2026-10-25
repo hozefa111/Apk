@@ -36,6 +36,7 @@ public final class FirebaseGateway {
         default void snapshotContinuity(boolean continuous) {}
         /** Bounded initial sync progress; partial history never authorizes scores/writes. */
         default void dataLoading(String collection,int loaded) {}
+        default void historyDeferred(boolean deferred) {}
         /** A read-only connection problem; retryAt is a wall-clock deadline, not a write queue. */
         default void syncProblem(String message,long retryAt,boolean quota) {}
     }
@@ -81,7 +82,7 @@ public final class FirebaseGateway {
     private volatile boolean foreground=true;
     private volatile long lastRefreshRequestAt;
     private final Runnable backgroundStop=this::stopInBackground;
-    private void stopInBackground(){if(!foreground){removeSubscriptions();animationContinuity=false;freshSnapshot=false;if(running)listener.syncState(false);}}
+    private void stopInBackground(){if(!foreground){historyRequested=false;removeSubscriptions();animationContinuity=false;freshSnapshot=false;if(running)listener.syncState(false);}}
     private final FirebaseAuth auth;
     private FirebaseAuth.AuthStateListener authObserver;
     private final FirebaseFirestore firestore;
@@ -104,6 +105,8 @@ public final class FirebaseGateway {
     private volatile boolean running;
     private final AtomicBoolean stopped=new AtomicBoolean();
     private volatile boolean freshSnapshot=false;
+    private volatile boolean historyRequested=false;
+    private ListenerRegistration recentPreview;
     private final AtomicBoolean writeInFlight=new AtomicBoolean(false);
     private final Runnable refreshLoop=()->{startSubscriptions();queueLoad(true);};
     private final String documentRoot = "projects/" + project + "/databases/(default)/documents";
@@ -159,6 +162,19 @@ public final class FirebaseGateway {
     }
     private void startSubscriptions(){
         if(!running||!foreground||!subscriptions.isEmpty()||retry.remaining(retryClock.getAsLong())>0)return;
+        if(!historyRequested){
+            listener.historyDeferred(true);listener.syncState(false);
+            if(recentPreview==null){queryStarts++;recentPreview=firestore.collection("rounds").orderBy("timestamp",Query.Direction.DESCENDING).limit(25).addSnapshotListener(snapshotDispatch,(snapshot,error)->{
+                if(!running||historyRequested)return;
+                if(error!=null){ui.post(()->onListenFailure(error));return;}
+                // This bounded preview only signals freshness. It never replaces the
+                // complete ledger cache or supplies partial lifetime totals.
+                ui.post(()->{if(running&&!historyRequested){listener.historyDeferred(true);listener.syncState(false);}});
+            });}
+            return;
+        }
+        listener.historyDeferred(false);
+        if(recentPreview!=null){recentPreview.remove();recentPreview=null;}
         final int generation=subscriptionGeneration;
         for(String collection:Arrays.asList("players","rounds","sessions")){
             PagedFirestoreCollection stream=new PagedFirestoreCollection(firestore.collection(collection),pageSize,snapshotDispatch,new PagedFirestoreCollection.Observer(){
@@ -201,6 +217,7 @@ public final class FirebaseGateway {
         publishProblem(message);removeSubscriptions();scheduleNext();
     }
     private void removeSubscriptions(){
+        if(recentPreview!=null){recentPreview.remove();recentPreview=null;}
         subscriptionGeneration++;
         for(PagedFirestoreCollection registration:subscriptions)snapshotDispatch.execute(registration::close);
         subscriptions.clear();
@@ -329,12 +346,12 @@ public final class FirebaseGateway {
         if(!running)return false;
         long now=retryClock.getAsLong();
         if(retry.remaining(now)>0){publishProblem(retry.quota()?quotaMessage():"Connection unavailable. Automatic retry is scheduled.");scheduleNext();return false;}
-        synchronized(this){if(now-lastRefreshRequestAt<10000)return false;lastRefreshRequestAt=now;}
+        synchronized(this){if(historyRequested&&now-lastRefreshRequestAt<10000)return false;lastRefreshRequestAt=now;historyRequested=true;}
         ui.removeCallbacks(refreshLoop);ui.post(()->{startSubscriptions();queueLoad(false);});return true;
     }
     private void scheduleNext() {
         ui.removeCallbacks(refreshLoop);
-        if(!running||!foreground)return;
+        if(!running||!foreground||!historyRequested)return;
         long delay=retry.remaining(retryClock.getAsLong());
         // A healthy listener already delivers real changes. No minute-by-minute full scans.
         if(delay==0&&freshSnapshot)return;
@@ -357,6 +374,7 @@ public final class FirebaseGateway {
     }
     private void load() {
         if(!running)return;
+        if(!historyRequested&&retry.remaining(retryClock.getAsLong())==0){ui.post(()->{if(running){listener.historyDeferred(true);listener.syncState(false);}});return;}
         if(retry.remaining(retryClock.getAsLong())>0){publishProblem(retry.quota()?quotaMessage():"Connection unavailable. Automatic retry is scheduled.");scheduleNext();return;}
         try{
             Map<String,List<PagedFirestoreCollection.Snapshot>> collections;Map<String,Boolean> complete;Map<String,List<String>> bounds;long revision;
@@ -664,7 +682,7 @@ public final class FirebaseGateway {
             StringBuilder config=new StringBuilder();char[] buffer=new char[1024];int count;
             while((count=reader.read(buffer))!=-1)config.append(buffer,0,count);endpoint=OnlineEndpoint.api(config.toString());
         }
-        JSONObject payload=new JSONObject().put("operation","sessionHistory").put("sessionId",String.valueOf(session.get("id")))
+        JSONObject payload=new JSONObject().put("clientProtocol",2).put("operation","sessionHistory").put("sessionId",String.valueOf(session.get("id")))
                 .put("action",action).put("name",name==null?JSONObject.NULL:name).put("expectedName",session.get("sessionName")).put("commandId",UUID.randomUUID().toString());
         if(preview!=null)payload.put("deleteRounds",true).put("previewToken",preview.getString("previewToken"));
         okhttp3.OkHttpClient http=new okhttp3.OkHttpClient.Builder().callTimeout(25,TimeUnit.SECONDS).build();

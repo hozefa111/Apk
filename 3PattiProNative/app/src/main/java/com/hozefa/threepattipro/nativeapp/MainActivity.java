@@ -64,7 +64,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private final List<Map<String,Object>> sessions = new ArrayList<>();
     private LinearLayout root, content, navigation, toolbar;
     private ScrollView scroll;
-    private boolean loggedIn=false, busy=false, hasData=false, liveConnected=false;
+    private boolean loggedIn=false, busy=false, hasData=false, liveConnected=false, historyDeferred=true;
     private String syncProblem;
     private String syncProgress="Connecting to your shared table";
     private TextView syncProgressView;
@@ -200,6 +200,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(!loggedIn && tab==2) tab=0;
         render(false);
     }
+    @Override public void historyDeferred(boolean deferred){if(historyDeferred!=deferred){historyDeferred=deferred;render(false);}}
     @Override public void snapshotContinuity(boolean continuous){if(!continuous)motionEvents.invalidate();}
     @Override public void dataLoading(String collection,int loaded){
         syncProgress="Loading "+collection+" · "+loaded+" records received";
@@ -478,6 +479,11 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         int prev=reset?0:scroll.getScrollY();
         content.removeAllViews();
         navigation.removeAllViews();
+        if(historyDeferred){
+            LinearLayout saved=panel();saved.addView(text(hasData?"Saved lifetime snapshot":"Tracker history loads on demand",16,GOLD,true));gap(saved,8);
+            saved.addView(text("Play Online works independently. Load complete tracker history to verify current scores and enable manual changes.",13,MUTED,false));gap(saved,10);
+            saved.addView(button("Load complete history",true,()->api.refresh()));content.addView(saved);gap(content,14);
+        }
         if(syncProblem!=null){
             LinearLayout banner=panel();
             banner.addView(text(quotaPaused?"Sync paused · Firebase limit":"Connection unavailable",16,GOLD,true));gap(banner,10);
@@ -488,7 +494,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(!hasData && tab==0){
             TextView onlineFallback=button("♠  Play Online · Kali Ki Tidi",true,()->startActivity(new Intent(this,OnlineGameActivity.class)));onlineFallback.setContentDescription("Play Online Kali Ki Tidi");content.addView(onlineFallback);gap(content,16);
         }
-        if(!hasData && tab<6 && syncProblem!=null){
+        if(!hasData && tab<6 && historyDeferred){
+            content.addView(text("Existing scores are preserved. No lifetime totals are calculated from partial pages.",14,MUTED,false));
+        }else if(!hasData && tab<6 && syncProblem!=null){
             gap(content,24);content.addView(text("Your table has not loaded yet",20,GOLD,true));gap(content,12);
             content.addView(text("This connection error does not delete your points. A fresh install needs one successful connection before an offline table is available. You can leave this screen; the app will retry while open.",14,MUTED,false));
         }else if(!hasData && tab<6) {

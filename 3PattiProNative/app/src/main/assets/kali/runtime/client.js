@@ -10,7 +10,9 @@ if (emulator) {
   db.useEmulator(window.KALI_HOST || location.hostname, 8080);
   presence.useEmulator(window.KALI_HOST || location.hostname, 9e3);
 }
-const host = emulator ? "http://" + (window.KALI_HOST || location.hostname) + ":5001/" + config.projectId + "/asia-south1/" : window.KALI_API_BASE || "https://asia-south1-" + config.projectId + ".cloudfunctions.net/";
+const host = emulator && window.KALI_WORKER_EMULATOR_BASE ? window.KALI_WORKER_EMULATOR_BASE : emulator ? "http://" + (window.KALI_HOST || location.hostname) + ":5001/" + config.projectId + "/asia-south1/" : window.KALI_API_BASE || "https://asia-south1-" + config.projectId + ".cloudfunctions.net/";
+const isCloudRoom = (id) => /^cf2_[a-f0-9]{32}$/.test(id || "");
+let cloudRooms = [], roomPendingExports = 0;
 let subscribedRoomId = null, loadingRoom = false, connectionReady = false, presenceRecovery = null, reconnectBusy = false;
 let user = null, admin = false, room = null, own = { cards: [] }, profiles = [], memberships = [], unsubs = [], connection = null, clockAnchor = { server: Date.now(), mono: performance.now() }, busy = false, selected = null, previous = null, scoreOpen = false, historyOpen = false, historyMore = true, records = [], error = "", screen = "home";
 let pendingSince = 0;
@@ -306,12 +308,12 @@ async function api(body, endpoint = "kaliApi") {
         row.stages.clientToken = performance.now() - start;
       }
     }
-    let res = await fetch(host + endpoint, { method: "POST", headers, body: JSON.stringify(body), cache: "no-store", signal: controller.signal });
+    let res = await fetch(host + endpoint, { method: "POST", headers, body: JSON.stringify({ ...body, clientProtocol: 2 }), cache: "no-store", signal: controller.signal });
     received = true;
     if (res.status === 401 && user) {
       headers.Authorization = "Bearer " + await user.getIdToken(true);
       received = false;
-      res = await fetch(host + endpoint, { method: "POST", headers, body: JSON.stringify(body), cache: "no-store", signal: controller.signal });
+      res = await fetch(host + endpoint, { method: "POST", headers, body: JSON.stringify({ ...body, clientProtocol: 2 }), cache: "no-store", signal: controller.signal });
       received = true;
     }
     row.status = res.status;
@@ -457,6 +459,10 @@ async function reconnectSeat() {
   try {
     await user.getIdToken(true);
     recoveryAttempts = 0;
+    if (isCloudRoom(id)) {
+      await enter(id);
+      return;
+    }
     if (seatConnected()) {
       const reply = await api({ operation: "presenceSync", roomId: id });
       if (reply.connected) {
@@ -481,10 +487,10 @@ async function reconnectSeat() {
   }
 }
 function header() {
-  return `<header><a href="../index.html" class="brand">\u2660 <span>3 PATTI <b>PRO</b></span></a><span class="connection ${navigator.onLine && databaseRetryAt <= Date.now() ? "" : "offline"}">${databaseRetryAt > Date.now() ? "\u25CF DATABASE LIMIT" : !navigator.onLine ? "\u25CF RECONNECTING" : room && !seatConnected() ? "\u25CB RECONNECTING" : "\u25CF ONLINE"}</span>${room ? btn("Rooms", "home", false, "quiet") : ""}${btn(soundEnabled ? "Sound on" : "Sound off", "sound", false, "quiet")}${btn(reduced ? "Motion off" : "Motion on", "motion", false, "quiet")}</header>`;
+  return `<header><a href="../index.html" class="brand">\u2660 <span>3 PATTI <b>PRO</b></span></a><span class="connection ${navigator.onLine && (isCloudRoom(room == null ? void 0 : room.id) || databaseRetryAt <= Date.now()) ? "" : "offline"}">${databaseRetryAt > Date.now() && !isCloudRoom(room == null ? void 0 : room.id) ? "\u25CF DATABASE LIMIT" : !navigator.onLine ? "\u25CF RECONNECTING" : room && !seatConnected() ? "\u25CB RECONNECTING" : "\u25CF ONLINE"}</span>${room ? btn("Rooms", "home", false, "quiet") : ""}${btn(soundEnabled ? "Sound on" : "Sound off", "sound", false, "quiet")}${btn(reduced ? "Motion off" : "Motion on", "motion", false, "quiet")}</header>`;
 }
 function home() {
-  const activeRooms = memberships.filter((r) => !["stopped", "Removed"].includes(r.status));
+  const activeRooms = [...memberships, ...cloudRooms].filter((r) => !["stopped", "Removed"].includes(r.status));
   return `<section class="hero"><span class="eyebrow">THE SAME GAME. NOW AT YOUR TABLE.</span><div class="hero-cards">${cardHTML("AS")}${cardHTML("3S")}${cardHTML("AH")}</div><h1>Kali Ki Tidi</h1><p>250 points. One Hukum. Your next great hand.</p>${btn("Check connection speed", "diagnostics", false, "quiet")}</section><section class="home-grid"><form id="join"><h2>Join your table</h2><label>Your name<select name="playerId" required><option value="">Select from existing Players</option>${profiles.map((p) => `<option value="${esc(p.id)}" ${localStorage.getItem("kaliPlayerId") === p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label><p class="muted">Choose your existing name, then take an empty seat. No admin approval needed.</p><label>Room code<input name="code" required maxlength="8" pattern="[A-Za-z2-9]{8}" value="${esc(new URLSearchParams(location.hash.slice(1)).get("join") || "")}" autocapitalize="characters"></label><button class="gold" ${mutationBlocked() ? "disabled" : ""}>Join game \u2192</button></form>${admin ? `<form id="create"><h2>Create a table</h2><label>Session name<input name="sessionName" required maxlength="80" placeholder="e.g. Huzefa house \xB7 Friday"></label><label>Your player profile<select name="playerId" required>${profiles.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("")}</select></label><label>Players<select name="mode"><option value="4">4 players \xB7 40 cards</option><option value="6">6 players \xB7 42 cards</option></select></label><details><summary>Deck configuration</summary><label>First six<select name="six1">${R.SUITS.map((s) => `<option ${s === "C" ? "selected" : ""} value="${s}">${suit(s)} ${R.NAMES[s]}</option>`).join("")}</select></label><label>Second six<select name="six2">${R.SUITS.map((s) => `<option ${s === "D" ? "selected" : ""} value="${s}">${suit(s)} ${R.NAMES[s]}</option>`).join("")}</select></label><label>Additional three<select name="extraThree">${["H", "C", "D"].map((s) => `<option value="${s}">${suit(s)} ${R.NAMES[s]}</option>`).join("")}</select></label></details><button class="gold" ${mutationBlocked() ? "disabled" : ""}>Create room</button></form>` : location.hostname === "appassets.androidplatform.net" ? window.KALI_NATIVE_PENDING ? `<section class="panel"><h2>Restoring your 3 Patti PRO identity\u2026</h2><p>Your account and seats stay linked to this APK.</p></section>` : `<section class="panel"><h2>Create a room</h2><p class="muted">Sign in using the existing 3 Patti PRO Home account controls.</p><a class="native-login" href="../index.html?nativeLogin=1">Sign in on 3 Patti PRO Home \u2192</a></section>` : `<form id="login"><h2>Admin sign in</h2><p class="muted">Use your existing 3 Patti PRO account to create and manage tables.</p><label>Email<input name="email" type="email" required autocomplete="username"></label><label>Password<input name="password" type="password" required autocomplete="current-password"></label><button>Sign in</button></form>`}</section><section class="panel"><h2>Your active rooms</h2><p class="muted">Completed sessions are in 3 Patti PRO \u2192 History \u2192 Sessions.</p>${activeRooms.length ? activeRooms.map((r) => btn(`${esc(r.sessionName)} \xB7 ${esc(r.status)}`, "room:" + r.roomId, false, "room-link")).join("") : '<p class="muted">No active rooms. Create or join a table.</p>'}</section><details class="panel"><summary>How to play</summary><p>Clockwise play. Default bidder opens 155; raise by 5 or permanently PASS. Choose Hukum and call any card outside your hand. Follow suit when possible; trumping when void is optional. The called-card holder reveals only when that card is played.</p><p>A/K/Q/J/10 = 10 points, each 5 = 5, 3\u2660 = 30. All cards total 250. 3\u2660 can lose to trump. Four players: one secret partner. Six players: one direct and one secret partner, possibly the same person.</p><p>Win: bidder +2\xD7bid, distinct partners +bid, opponents 0. Loss: bidder \u2212bid, partners \u2212rounded half bid, opponents +bid. Human bid/card turns last 30 seconds. Timeout passes or plays a legal card. Session ends only when admin stops it.</p></details>`;
 }
 function liveRoom() {
@@ -817,7 +823,7 @@ function renderNow() {
   const dock = !!room && !live && room.status !== "stopped";
   document.body.classList.toggle("room-lobby", dock);
   document.body.classList.toggle("bidding", live && room.hand.phase === "auction");
-  patchGame(header() + `<main class="${live ? "live-main" : dock ? "lobby-main" : ""}">${error ? `<p class="error">${esc(error)}</p>` : ""}${room ? recoveryPanel() + lobby() : loadingRoom ? '<section class="panel"><h2>Connecting to your table\u2026</h2><p>Restoring seats and your private hand.</p></section>' : home()}</main>${dock ? lobbyReady() : ""}<footer>3 PATTI PRO \xB7 Same players. Same scorecard.</footer>`);
+  patchGame(header() + `<main class="${live ? "live-main" : dock ? "lobby-main" : ""}">${error ? `<p class="error">${esc(error)}</p>` : ""}${room ? (isCloudRoom(room.id) && roomPendingExports ? '<p class="muted" role="status">History sync pending \u2014 game progress saved.</p>' : "") + recoveryPanel() + lobby() : loadingRoom ? '<section class="panel"><h2>Connecting to your table\u2026</h2><p>Restoring seats and your private hand.</p></section>' : home()}</main>${dock ? lobbyReady() : ""}<footer>3 PATTI PRO \xB7 Same players. Same scorecard.</footer>`);
   for (const draft of drafts) {
     const form = Array.from(root.querySelectorAll("form")).find((f) => f.id === draft.id && f.dataset.target === draft.target && (draft.context === null || draft.context === f.dataset.hand + ":" + f.dataset.generation));
     if (!form && draft.id === "bid") {
@@ -1112,6 +1118,21 @@ function stopHistory() {
   historyOwner = null;
 }
 function syncHistory() {
+  if (isCloudRoom(room == null ? void 0 : room.id)) {
+    const key2 = historyOpen ? uid() + ":" + room.id : null;
+    if (key2 === historyOwner) return;
+    stopHistory();
+    if (!key2) return;
+    historyOwner = key2;
+    const epoch2 = historyEpoch, id2 = room.id;
+    api({ operation: "liveHistory", roomId: id2 }).then((v) => {
+      if (epoch2 !== historyEpoch || (room == null ? void 0 : room.id) !== id2) return;
+      records = v.records;
+      historyMore = records.length === 25;
+      render();
+    }).catch((e) => notice(e.message));
+    return;
+  }
   const key = historyOpen && room ? uid() + ":" + room.id : null;
   if (key === historyOwner) return;
   stopHistory();
@@ -1128,6 +1149,141 @@ function syncHistory() {
   }, (e) => {
     if (epoch === historyEpoch) notice("Hand history unavailable. " + e.message);
   });
+}
+async function attachCloudRoom(id) {
+  const owner = uid();
+  let active = true, socket = null, retry = null, heartbeat = null, pending = false, failures = 0;
+  const valid = () => active && subscribedRoomId === id && uid() === owner;
+  const cleanup = () => {
+    clearTimeout(retry);
+    retry = null;
+    clearInterval(heartbeat);
+    heartbeat = null;
+  };
+  const schedule = () => {
+    if (!valid() || retry) return;
+    retry = setTimeout(() => {
+      retry = null;
+      connect();
+    }, Math.min(3e4, 1e3 * 2 ** Math.min(failures++, 5)));
+  };
+  async function connect(force = false) {
+    if (!valid() || pending || !navigator.onLine || document.hidden) return;
+    if ((socket == null ? void 0 : socket.readyState) === 1 && !force) {
+      recoverPending();
+      return;
+    }
+    cleanup();
+    pending = true;
+    const old = socket;
+    socket = null;
+    try {
+      old == null ? void 0 : old.close();
+    } catch {
+    }
+    try {
+      const ticket = await api({ operation: "socketTicket", roomId: id });
+      if (!valid()) return;
+      const url = new URL("kaliSocket", host);
+      url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+      url.searchParams.set("roomId", id);
+      const ws = new WebSocket(url, ["kali.v2", "ticket." + ticket.ticket]);
+      socket = ws;
+      ws.onopen = () => {
+        if (!valid() || socket !== ws) {
+          ws.close();
+          return;
+        }
+        failures = 0;
+        heartbeat = setInterval(() => {
+          if (valid() && !document.hidden && ws.readyState === 1) ws.send("ping");
+        }, 1e4);
+      };
+      ws.onmessage = (e) => {
+        var _a, _b, _c;
+        if (!valid() || socket !== ws || e.data === "pong") return;
+        try {
+          const v = JSON.parse(e.data);
+          if (v.type !== "state" || v.room.id !== id || room && v.room.revision < room.revision) return;
+          const completed = room == null ? void 0 : room.completed, oldPhase = (_a = room == null ? void 0 : room.hand) == null ? void 0 : _a.phase;
+          own = v.own;
+          roomPendingExports = v.pendingExports || 0;
+          connectionReady = true;
+          loadingRoom = false;
+          clockAnchor = { server: v.serverNow, mono: performance.now() };
+          receiveRoomSnapshot(v.room);
+          if (historyOpen && (completed !== v.room.completed || oldPhase !== ((_b = v.room.hand) == null ? void 0 : _b.phase) && ((_c = v.room.hand) == null ? void 0 : _c.phase) === "void")) {
+            stopHistory();
+            render();
+          }
+        } catch (err) {
+          notice("Table update unavailable. Reconnecting\u2026");
+          ws.close();
+        }
+      };
+      ws.onclose = () => {
+        if (!valid() || socket !== ws) return;
+        socket = null;
+        connectionReady = false;
+        cleanup();
+        clearCollection();
+        render();
+        schedule();
+      };
+      ws.onerror = () => {
+        if (socket === ws) ws.close();
+      };
+    } catch (e) {
+      if (valid()) {
+        connectionReady = false;
+        if (/Session was deleted|Not a room participant/.test(e.message)) {
+          active = false;
+          cleanup();
+          unavailableRoom(id);
+          return;
+        }
+        error = e.message;
+        render();
+        schedule();
+      }
+    } finally {
+      pending = false;
+    }
+  }
+  const recover = (force) => {
+    if (force) {
+      failures = 0;
+      cleanup();
+    }
+    connect(!!force);
+  };
+  presenceRecovery = recover;
+  const visibility = () => {
+    if (document.hidden) {
+      cleanup();
+      const old = socket;
+      socket = null;
+      connectionReady = false;
+      try {
+        old == null ? void 0 : old.close();
+      } catch {
+      }
+    } else recover(true);
+  };
+  document.addEventListener("visibilitychange", visibility);
+  unsubs.push(() => {
+    active = false;
+    cleanup();
+    document.removeEventListener("visibilitychange", visibility);
+    try {
+      socket == null ? void 0 : socket.close();
+    } catch {
+    }
+    if (presenceRecovery === recover) presenceRecovery = null;
+    stopHistory();
+  });
+  await connect();
+  localStorage.setItem("kaliRoom", id);
 }
 async function enter(id) {
   clearCollection();
@@ -1151,8 +1307,13 @@ async function enter(id) {
   previous = null;
   selected = null;
   scoreOpen = false;
+  roomPendingExports = 0;
   uncertainCommand = restorePending(id);
   recoveryAttempts = 0;
+  if (isCloudRoom(id)) {
+    await attachCloudRoom(id);
+    return;
+  }
   unsubs.push(db.doc("onlineRooms/" + id).onSnapshot((s) => {
     if (subscribedRoomId !== id) return;
     if (!s.metadata.hasPendingWrites && !s.metadata.isFromCache && s.exists) speedSnapshot(id, s.data().revision);
@@ -1208,7 +1369,16 @@ root.addEventListener("submit", async (e) => {
     else if (f.id === "create") {
       busy = true;
       render();
-      const r = await api({ operation: "create", sessionName: v.sessionName, playerId: v.playerId, mode: Number(v.mode), config: { sixSuits: [v.six1, v.six2], extraThree: v.extraThree } });
+      const draft = { operation: "create", sessionName: v.sessionName, playerId: v.playerId, mode: Number(v.mode), config: { sixSuits: [v.six1, v.six2], extraThree: v.extraThree } }, key = "kaliCreate:" + uid();
+      let prior;
+      try {
+        prior = JSON.parse(sessionStorage.getItem(key) || "null");
+      } catch {
+      }
+      const request = prior && JSON.stringify(prior.draft) === JSON.stringify(draft) ? prior.request : { ...draft, commandId: crypto.randomUUID() };
+      sessionStorage.setItem(key, JSON.stringify({ draft, request }));
+      const r = await api(request);
+      sessionStorage.removeItem(key);
       await enter(r.roomId);
     } else if (f.id === "register") {
       const r = await api({ operation: "register", name: v.name });
@@ -1247,7 +1417,17 @@ root.addEventListener("submit", async (e) => {
     render();
   }
 });
-root.addEventListener("change", (e) => {
+root.addEventListener("change", async (e) => {
+  if (e.target.matches("#join input[name=code]") && e.target.value.trim().length === 8) {
+    try {
+      if (!user) await auth.signInAnonymously();
+      const v = await api({ operation: "liveProfiles", code: e.target.value.trim().toUpperCase() });
+      profiles = v.profiles;
+      localStorage.setItem("kaliProfiles", JSON.stringify(profiles));
+      render();
+    } catch {
+    }
+  }
   if (e.target.matches("#bid select")) updateBidControls();
 });
 root.addEventListener("click", async (e) => {
@@ -1343,6 +1523,13 @@ root.addEventListener("click", async (e) => {
       screen = "room";
       render();
     } else if (action === "older-history") {
+      if (isCloudRoom(room.id)) {
+        const v = await api({ operation: "liveHistory", roomId: room.id, before: records.at(-1).handNumber - 1 });
+        records.push(...v.records);
+        historyMore = v.records.length === 25;
+        render();
+        return;
+      }
       const page = await db.collection("onlineRooms/" + room.id + "/hands").orderBy("handNumber", "desc").startAfter(records.at(-1).handNumber).limit(25).get();
       records.push(...page.docs.map((d) => d.data()));
       historyMore = page.size === 25;
@@ -1396,7 +1583,16 @@ root.addEventListener("click", async (e) => {
   }
 });
 async function loadProfiles() {
+  try {
+    const cached = JSON.parse(localStorage.getItem("kaliProfiles") || "[]");
+    if (!profiles.length && Array.isArray(cached)) {
+      profiles = cached;
+      render();
+    }
+  } catch {
+  }
   profiles = (await db.collection("players").get()).docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  localStorage.setItem("kaliProfiles", JSON.stringify(profiles));
   render();
 }
 function activeMembershipQuery(owner) {
@@ -1427,6 +1623,18 @@ auth.onAuthStateChanged(async (current) => {
   }
   user = current;
   admin = false;
+  cloudRooms = [];
+  if (user) api({ operation: "liveRooms" }).then((v) => {
+    if ((user == null ? void 0 : user.uid) === current.uid) {
+      cloudRooms = v.rooms;
+      render();
+    }
+  }).catch(() => {
+  });
+  if (user && isCloudRoom(localStorage.getItem("kaliRoom")) && !subscribedRoomId) enter(localStorage.getItem("kaliRoom")).catch((e) => {
+    error = e.message;
+    render();
+  });
   if (membershipUnsub) membershipUnsub();
   try {
     if (user) {
@@ -1441,7 +1649,7 @@ auth.onAuthStateChanged(async (current) => {
     await loadProfiles();
     if (user) await api({ operation: "clock" });
   } catch (e) {
-    error = e.message;
+    if (!isCloudRoom(subscribedRoomId)) error = e.message;
   }
   render();
 });

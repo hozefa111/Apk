@@ -33,7 +33,7 @@ public class NativeQuotaTest {
     };}
     private void start(AtomicLong clock)throws Exception{
         live.set(false);quota.set(false);players.set(Collections.emptyList());
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{gateway=new FirebaseGateway(context,listener(),"demo-key",clock::get);gateway.start();});
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{gateway=new FirebaseGateway(context,listener(),"demo-key",clock::get);gateway.start();gateway.refresh();});
     }
     private void stop(){if(gateway!=null){InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.stop());gateway=null;}}
     @Before public void setup()throws Exception{

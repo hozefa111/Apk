@@ -62,7 +62,7 @@ public class FirebaseGatewayEmulatorTest {
                 public void notice(String message){notice.set(message);android.util.Log.i("GatewayTest",message+"; live="+live.get()+" busy="+busy.get());}
                 public void busy(boolean value){busy.set(value);}
                 public void syncState(boolean value){syncEvent.set(System.currentTimeMillis());live.set(value);}
-            },"demo-key",System::currentTimeMillis,batchSize);gateway.start();started.countDown();
+            },"demo-key",System::currentTimeMillis,batchSize);gateway.start();gateway.refresh();started.countDown();
         });assertTrue(started.await(5,TimeUnit.SECONDS));await(()->live.get()&&players.get().size()>=3);
         gateway.signIn("tester@example.test","test-password-123");await(()->admin.get()&&live.get()&&!busy.get());ready(()->{});
     }
@@ -279,4 +279,33 @@ public class FirebaseGatewayEmulatorTest {
         await(()->!gateway.hasPendingBulkOperation()&&rounds.get().stream().noneMatch(r->String.valueOf(r.get("id")).startsWith("bulk-"))&&live.get()&&!busy.get());
         assertEquals(original-501,rounds.get().size());assertEquals(3,players.get().size());
     }
+    @Test public void startupPreviewDoesNotPublishPartialLifetimeHistory()throws Exception{
+        List<String> seeded=new ArrayList<>();
+        try{
+            for(int n=0;n<31;n++){
+                String key="deferred_history_"+n;seeded.add(key);
+                JSONObject fields=new JSONObject().put("type",new JSONObject().put("stringValue","hukum"))
+                    .put("timestamp",new JSONObject().put("timestampValue",n==0?"2020-01-01T00:00:00Z":String.format(java.util.Locale.ROOT,"2026-01-01T00:00:%02dZ",n)))
+                    .put("scoreChanges",new JSONObject().put("mapValue",new JSONObject().put("fields",new JSONObject().put("a",new JSONObject().put("integerValue",n==0?"360":"0")))));
+                request("PATCH","/rounds/"+key,new JSONObject().put("fields",fields));
+            }
+            AtomicBoolean deferred=new AtomicBoolean();
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{
+                gateway.stop();live.set(false);
+                gateway=new FirebaseGateway(InstrumentationRegistry.getInstrumentation().getTargetContext(),new FirebaseGateway.Listener(){
+                    public void dataUpdated(List<Map<String,Object>> p,List<Map<String,Object>> r,List<Map<String,Object>> s){rounds.set(r);}
+                    public void authChanged(boolean a){} public void notice(String m){} public void busy(boolean b){}
+                    public void syncState(boolean value){live.set(value);}
+                    public void historyDeferred(boolean value){deferred.set(value);}
+                },"demo-key");gateway.start();
+            });
+            await(()->deferred.get()&&gateway.performanceCounters()[3]==1);Thread.sleep(500);
+            assertFalse(live.get());assertEquals("only bounded preview attaches before explicit request",1,gateway.performanceCounters()[3]);
+            assertTrue(gateway.refresh());await(live::get);
+            assertTrue(rounds.get().stream().anyMatch(r->"deferred_history_0".equals(r.get("id"))));
+            Map<String,Object> old=rounds.get().stream().filter(r->"deferred_history_0".equals(r.get("id"))).findFirst().get();
+            assertEquals(360,((Number)((Map<?,?>)old.get("scoreChanges")).get("a")).intValue());
+        }finally{for(String key:seeded)request("DELETE","/rounds/"+key,null);}
+    }
+
 }
