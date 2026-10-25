@@ -434,7 +434,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         appName.setMaxLines(1);appName.setAutoSizeTextTypeUniformWithConfiguration(14,21,1,android.util.TypedValue.COMPLEX_UNIT_SP);
         heading.addView(appName);
         gap(heading,5);
-        heading.addView(text(liveConnected?"●  LIVE SYNC":quotaPaused?"○  SYNC PAUSED · LIMIT REACHED":hasData?"○  OFFLINE · SAVED TABLE":"○  OFFLINE / CONNECTING",9,
+        heading.addView(text(liveConnected?"●  LIVE SYNC":quotaPaused?"○  SYNC PAUSED · LIMIT REACHED":historyDeferred?(hasData?"○  SAVED SCORES · ON DEMAND":"○  TRACKER ON DEMAND"):hasData?"○  OFFLINE · SAVED TABLE":"○  OFFLINE / CONNECTING",9,
                 liveConnected?GREEN:MUTED,true));
         toolbar.addView(heading,largeText?lp(-1,-2):new LinearLayout.LayoutParams(0,-2,1));
         LinearLayout actions=largeText?row():toolbar;

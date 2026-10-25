@@ -15,7 +15,7 @@ pull_screenshots() {
         for verification_name in $verification_files; do
             case "$verification_name" in
                 *[!a-z0-9.-]*|*.png.png|.*) verification_status=1; continue ;;
-                *.png) ;;
+                *.png|*.json|*.txt) ;;
                 *) verification_status=1; continue ;;
             esac
             if ! adb exec-out run-as com.hozefa.threepattipro.nativeapp.sandbox cat "files/verification/$verification_name" > "$verification_images/$verification_name"; then

@@ -445,6 +445,7 @@ function leaveRoomView() {
     });
   }
   connectionReady = false;
+  syncLegacyMemberships();
   render();
 }
 async function reconnectSeat() {
@@ -1152,52 +1153,62 @@ function syncHistory() {
 }
 async function attachCloudRoom(id) {
   const owner = uid();
-  let active = true, socket = null, retry = null, heartbeat = null, pending = false, failures = 0;
+  let active = true, socket = null, opening = null, retry = null, heartbeat = null, renewal = null, pending = false, failures = 0, renewNeeded = false;
   const valid = () => active && subscribedRoomId === id && uid() === owner;
   const cleanup = () => {
     clearTimeout(retry);
     retry = null;
     clearInterval(heartbeat);
     heartbeat = null;
+    clearTimeout(renewal);
+    renewal = null;
   };
   const schedule = () => {
     if (!valid() || retry) return;
     retry = setTimeout(() => {
       retry = null;
-      connect();
+      connect(renewNeeded);
     }, Math.min(3e4, 1e3 * 2 ** Math.min(failures++, 5)));
   };
   async function connect(force = false) {
-    if (!valid() || pending || !navigator.onLine || document.hidden) return;
+    if (!valid() || pending || (opening == null ? void 0 : opening.readyState) === 0 || !navigator.onLine || document.hidden) return;
     if ((socket == null ? void 0 : socket.readyState) === 1 && !force) {
       recoverPending();
       return;
     }
-    cleanup();
+    clearTimeout(retry);
+    retry = null;
     pending = true;
+    renewNeeded = force;
     const old = socket;
-    socket = null;
-    try {
-      old == null ? void 0 : old.close();
-    } catch {
-    }
     try {
       const ticket = await api({ operation: "socketTicket", roomId: id });
       if (!valid()) return;
       const url = new URL("kaliSocket", host);
       url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
       url.searchParams.set("roomId", id);
+      const resumeSnapshot = !old || old.readyState !== 1;
+      let firstState = true;
       const ws = new WebSocket(url, ["kali.v2", "ticket." + ticket.ticket]);
-      socket = ws;
+      opening = ws;
       ws.onopen = () => {
-        if (!valid() || socket !== ws) {
+        if (!valid() || opening !== ws) {
           ws.close();
           return;
         }
+        cleanup();
+        socket = ws;
+        opening = null;
         failures = 0;
+        renewNeeded = false;
+        try {
+          old == null ? void 0 : old.close();
+        } catch {
+        }
         heartbeat = setInterval(() => {
           if (valid() && !document.hidden && ws.readyState === 1) ws.send("ping");
         }, 1e4);
+        renewal = setTimeout(() => connect(true), 24e4);
       };
       ws.onmessage = (e) => {
         var _a, _b, _c;
@@ -1205,7 +1216,16 @@ async function attachCloudRoom(id) {
         try {
           const v = JSON.parse(e.data);
           if (v.type !== "state" || v.room.id !== id || room && v.room.revision < room.revision) return;
+          if (firstState) {
+            firstState = false;
+            if (resumeSnapshot) {
+              clearCollection();
+              previous = null;
+            }
+          }
           const completed = room == null ? void 0 : room.completed, oldPhase = (_a = room == null ? void 0 : room.hand) == null ? void 0 : _a.phase;
+          cloudRooms = [...cloudRooms.filter((r) => r.roomId !== id), { roomId: id, code: v.room.code, sessionName: v.room.sessionName, status: v.room.status, transport: "cloudflare-v2", revision: v.room.revision }];
+          if (v.room.status === "stopped" && localStorage.getItem("kaliRoom") === id) localStorage.removeItem("kaliRoom");
           own = v.own;
           roomPendingExports = v.pendingExports || 0;
           connectionReady = true;
@@ -1216,13 +1236,19 @@ async function attachCloudRoom(id) {
             stopHistory();
             render();
           }
-        } catch (err) {
+        } catch {
           notice("Table update unavailable. Reconnecting\u2026");
           ws.close();
         }
       };
       ws.onclose = () => {
-        if (!valid() || socket !== ws) return;
+        if (!valid()) return;
+        if (opening === ws) {
+          opening = null;
+          schedule();
+          return;
+        }
+        if (socket !== ws) return;
         socket = null;
         connectionReady = false;
         cleanup();
@@ -1231,11 +1257,14 @@ async function attachCloudRoom(id) {
         schedule();
       };
       ws.onerror = () => {
-        if (socket === ws) ws.close();
+        try {
+          ws.close();
+        } catch {
+        }
       };
     } catch (e) {
       if (valid()) {
-        connectionReady = false;
+        connectionReady = (socket == null ? void 0 : socket.readyState) === 1;
         if (/Session was deleted|Not a room participant/.test(e.message)) {
           active = false;
           cleanup();
@@ -1253,7 +1282,8 @@ async function attachCloudRoom(id) {
   const recover = (force) => {
     if (force) {
       failures = 0;
-      cleanup();
+      clearTimeout(retry);
+      retry = null;
     }
     connect(!!force);
   };
@@ -1261,11 +1291,13 @@ async function attachCloudRoom(id) {
   const visibility = () => {
     if (document.hidden) {
       cleanup();
-      const old = socket;
+      const old = socket, pendingSocket = opening;
       socket = null;
+      opening = null;
       connectionReady = false;
       try {
         old == null ? void 0 : old.close();
+        pendingSocket == null ? void 0 : pendingSocket.close();
       } catch {
       }
     } else recover(true);
@@ -1277,6 +1309,7 @@ async function attachCloudRoom(id) {
     document.removeEventListener("visibilitychange", visibility);
     try {
       socket == null ? void 0 : socket.close();
+      opening == null ? void 0 : opening.close();
     } catch {
     }
     if (presenceRecovery === recover) presenceRecovery = null;
@@ -1311,9 +1344,12 @@ async function enter(id) {
   uncertainCommand = restorePending(id);
   recoveryAttempts = 0;
   if (isCloudRoom(id)) {
+    membershipUnsub == null ? void 0 : membershipUnsub();
+    membershipUnsub = null;
     await attachCloudRoom(id);
     return;
   }
+  syncLegacyMemberships();
   unsubs.push(db.doc("onlineRooms/" + id).onSnapshot((s) => {
     if (subscribedRoomId !== id) return;
     if (!s.metadata.hasPendingWrites && !s.metadata.isFromCache && s.exists) speedSnapshot(id, s.data().revision);
@@ -1599,6 +1635,16 @@ function activeMembershipQuery(owner) {
   return db.collection("onlineMemberships/" + owner + "/rooms").where("status", "in", ["lobby", "playing", "between"]);
 }
 let membershipUnsub = null;
+function syncLegacyMemberships() {
+  if (membershipUnsub || !user || isCloudRoom(subscribedRoomId)) return;
+  const owner = user.uid;
+  membershipUnsub = activeMembershipQuery(owner).onSnapshot((s) => {
+    if ((user == null ? void 0 : user.uid) !== owner) return;
+    memberships = s.docs.map((d) => d.data());
+    if (!room) render();
+  }, () => {
+  });
+}
 auth.onAuthStateChanged(async (current) => {
   if (user && user.uid !== (current == null ? void 0 : current.uid)) {
     uncertainCommand = null;
@@ -1626,7 +1672,9 @@ auth.onAuthStateChanged(async (current) => {
   cloudRooms = [];
   if (user) api({ operation: "liveRooms" }).then((v) => {
     if ((user == null ? void 0 : user.uid) === current.uid) {
-      cloudRooms = v.rooms;
+      const merged = new Map(v.rooms.map((r) => [r.roomId, r]));
+      for (const r of cloudRooms) if (!merged.has(r.roomId) || (r.revision || 0) >= (merged.get(r.roomId).revision || 0)) merged.set(r.roomId, r);
+      cloudRooms = [...merged.values()];
       render();
     }
   }).catch(() => {
@@ -1636,15 +1684,13 @@ auth.onAuthStateChanged(async (current) => {
     render();
   });
   if (membershipUnsub) membershipUnsub();
+  membershipUnsub = null;
   try {
     if (user) {
       const token = await user.getIdTokenResult();
       const role = await db.doc("admins/" + user.uid).get();
       admin = token.claims.admin === true || role.exists;
-      membershipUnsub = activeMembershipQuery(user.uid).onSnapshot((s) => {
-        memberships = s.docs.map((d) => d.data());
-        if (!room) render();
-      });
+      syncLegacyMemberships();
     }
     await loadProfiles();
     if (user) await api({ operation: "clock" });
