@@ -73,6 +73,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private boolean quotaPaused;
     private int tab=0, historyTab=0;
     private String scoreboardScope="all",lastScoreboardContext="";
+    private boolean ranksSessions,sessionScreenVisible;private String selectedSessionId="";private SessionLiveScores sessionScores;private android.app.AlertDialog sessionPicker;private final Set<String> removedSessionIds=new HashSet<>();
     private boolean bigKeepAwake,scoreboardLeaderChanged;
     private int bigOriginScroll;
     private final Map<String,Integer> scoreboardMoves=new HashMap<>();
@@ -111,6 +112,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         restoreDraft();
         if(state!=null){tab=state.getInt("tab",0);historyTab=state.getInt("historyTab",0);rankFilter=state.getString("rankFilter","all");profileId=state.getString("profileId");customStart=state.getLong("customStart");customEnd=state.getLong("customEnd");searchQuery=state.getString("searchQuery","");}
         if(state!=null){analyticsState.restore(state);scoreboardScope=state.getString("scoreboardScope","all");bigKeepAwake=state.getBoolean("bigKeepAwake");bigOriginScroll=state.getInt("bigOriginScroll");}
+        ranksSessions=state!=null?state.getBoolean("ranksSessions",false):settings.getBoolean("ranks_sessions",false);selectedSessionId=state!=null?state.getString("selectedSessionId",""):settings.getString("ranks_session_id","");
         buildShell();
         voiceGuide=new VoiceRoundGuide(this,motion,this::saveVoiceRound);
         voiceGuide.restore(state);
@@ -129,6 +131,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);openOnlineInvite(intent);}
     @Override protected void onDestroy() {
         persistDraft();
+        if(sessionScores!=null)sessionScores.close();if(sessionPicker!=null)sessionPicker.dismiss();
         if(voiceGuide!=null)voiceGuide.destroy();
         if(authDialog!=null){authDialog.dismiss();authDialog=null;}
         if(motion!=null)motion.close();
@@ -153,6 +156,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         previousLeader=oldRanks.isEmpty()?"":id(oldRanks.get(0));
         boolean firstData=!hasData;
         boolean rosterChanged=!players.equals(p);
+        if(sessionScores!=null){Set<String> incoming=new HashSet<>();for(Map<String,Object> value:s)incoming.add(id(value));for(Map<String,Object> old:sessions)if(!incoming.contains(id(old))){sessionScores.forget(id(old));removedSessionIds.add(id(old));}}
         players.clear();players.addAll(p);
         rounds.clear();rounds.addAll(r);
         sessions.clear();sessions.addAll(s);
@@ -233,14 +237,14 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(tab==2&&roundSaveView!=null&&roundPreviewSection!=null&&roundHintView!=null)
             updateRoundForm();
     }
-    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("scoreboardScope",scoreboardScope);state.putBoolean("bigKeepAwake",bigKeepAwake);state.putInt("bigOriginScroll",bigOriginScroll);if(voiceGuide!=null)voiceGuide.saveState(state);analyticsState.save(state);persistDraft();state.putInt("tab",tab);state.putInt("historyTab",historyTab);state.putString("rankFilter",rankFilter);state.putString("profileId",profileId);state.putLong("customStart",customStart);state.putLong("customEnd",customEnd);state.putString("searchQuery",searchQuery);}
+    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putBoolean("ranksSessions",ranksSessions);state.putString("selectedSessionId",selectedSessionId);state.putString("scoreboardScope",scoreboardScope);state.putBoolean("bigKeepAwake",bigKeepAwake);state.putInt("bigOriginScroll",bigOriginScroll);if(voiceGuide!=null)voiceGuide.saveState(state);analyticsState.save(state);persistDraft();state.putInt("tab",tab);state.putInt("historyTab",historyTab);state.putString("rankFilter",rankFilter);state.putString("profileId",profileId);state.putLong("customStart",customStart);state.putLong("customEnd",customEnd);state.putString("searchQuery",searchQuery);}
     @Override protected void onResume(){
-        super.onResume();resumed=true;if(settings.getBoolean("online_sign_in_requested",false)){settings.edit().remove("online_sign_in_requested").apply();clock.post(this::loginDialog);}applyScoreboardWake();if(voiceGuide!=null)voiceGuide.resume();motion.resume();motionEvents.invalidate();if(hasData&&(tab==0||tab==3||tab==10))render(false);if(api!=null)api.setForeground(true);
+        super.onResume();resumed=true;if(settings.getBoolean("online_sign_in_requested",false)){settings.edit().remove("online_sign_in_requested").apply();clock.post(this::loginDialog);}applyScoreboardWake();if(voiceGuide!=null)voiceGuide.resume();motion.resume();motionEvents.invalidate();if((hasData||ranksSessions)&&(tab==0||tab==3||tab==10))render(false);if(api!=null)api.setForeground(true);
         if(launchReveal){launchReveal=false;motion.enter(root,0);}
         if(deferredRoundResult!=null){Map<String,Object> result=deferredRoundResult;deferredRoundResult=null;showRoundSaved(result,false);}
         if(deferredSessionSummary!=null){Map<String,Object> result=deferredSessionSummary;deferredSessionSummary=null;showSessionSummary(result,false);}
     }
-    @Override protected void onPause(){clock.removeCallbacks(clearScoreboardMoves);scoreboardMoves.clear();scoreboardLeaderChanged=false;getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);if(voiceGuide!=null)voiceGuide.pause();if(api!=null)api.setForeground(false);resumed=false;sessionStartRevealUntil=0;motionEvents.invalidate();if(motion!=null)motion.pause();persistDraft();super.onPause();}
+    @Override protected void onPause(){if(sessionScores!=null)sessionScores.pause();sessionScreenVisible=false;if(sessionPicker!=null)sessionPicker.dismiss();clock.removeCallbacks(clearScoreboardMoves);scoreboardMoves.clear();scoreboardLeaderChanged=false;getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);if(voiceGuide!=null)voiceGuide.pause();if(api!=null)api.setForeground(false);resumed=false;sessionStartRevealUntil=0;motionEvents.invalidate();if(motion!=null)motion.pause();persistDraft();super.onPause();}
     MotionEngine motionEngine(){return motion;}
 
     private boolean persistDraft(){
@@ -472,6 +476,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         return syncRetryAt>0?"\nNext retry: "+DateTimeFormatter.ofPattern("dd MMM, hh:mm a").withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(syncRetryAt))+". Refresh does not bypass this wait.":"";
     }
     private void render(boolean reset) {
+        syncSessionView();
         if(content==null||navigation==null)return;
         if(reset){scoreboardMoves.clear();scoreboardLeaderChanged=false;}
         int oldTab=displayedTab;screenEntry=reset||oldTab!=tab;displayedTab=tab;
@@ -497,12 +502,12 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(!hasData && tab==0){
             TextView onlineFallback=button("♠  Play Online · Kali Ki Tidi",true,()->startActivity(new Intent(this,OnlineGameActivity.class)));onlineFallback.setContentDescription("Play Online Kali Ki Tidi");content.addView(onlineFallback);gap(content,16);
         }
-        if(!hasData && tab<6 && !liveConnected && syncProblem==null){
+        if(!hasData && tab!=3 && tab<6 && !liveConnected && syncProblem==null){
             content.addView(text("Existing scores are preserved. No lifetime totals are calculated from partial pages.",14,MUTED,false));
-        }else if(!hasData && tab<6 && syncProblem!=null){
+        }else if(!hasData && tab!=3 && tab<6 && syncProblem!=null){
             gap(content,24);content.addView(text("Your table has not loaded yet",20,GOLD,true));gap(content,12);
             content.addView(text("This connection error does not delete your points. A fresh install needs one successful connection before an offline table is available. You can leave this screen; the app will retry while open.",14,MUTED,false));
-        }else if(!hasData && tab<6) {
+        }else if(!hasData && tab!=3 && tab<6) {
             gap(content,80);content.addView(text("♠  Loading your table…",20,GOLD,true));
             gap(content,16);syncProgressView=text(syncProgress,13,MUTED,false);content.addView(syncProgressView);
             for(int i=0;i<3;i++){gap(content,16);View skeleton=new View(this);skeleton.setBackground(shape(PANEL2,16,0));content.addView(skeleton,lp(-1,64));motion.loading(skeleton);}
@@ -962,11 +967,15 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(on)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
     private List<Map<String,Object>> scoreboardSource(boolean home){
-        List<Map<String,Object>> source=home?AdvancedAnalytics.games(gameRounds()):AdvancedAnalytics.dates(gameRounds(),rankFilter,Instant.now(),ZoneId.systemDefault(),customStart,customEnd);
-        return AdvancedAnalytics.scope(source,sessions,scoreboardScope);
+        if(!home)return ranksSessions?SessionLeaderboard.rounds(gameRounds(),sessions,selectedSessionId):AdvancedAnalytics.games(gameRounds());
+        return AdvancedAnalytics.scope(AdvancedAnalytics.games(gameRounds()),sessions,scoreboardScope);
     }
-    private ScoreboardModel scoreboardModel(boolean home){return new ScoreboardModel(players,scoreboardSource(home),AdvancedAnalytics.scope(gameRounds(),sessions,"current"));}
+    private ScoreboardModel scoreboardModel(boolean home){
+        if(!home&&ranksSessions)return SessionLeaderboard.model(players,gameRounds(),sessions,selectedRankSession(),sessionScores==null?null:sessionScores.boards.get(selectedSessionId));
+        return new ScoreboardModel(players,scoreboardSource(home),AdvancedAnalytics.scope(gameRounds(),sessions,"current"));
+    }
     private String scoreboardContext(boolean home){
+        if(!home)return ranksSessions?"session:"+selectedSessionId:"lifetime";
         Map<String,Object> session=activeSession();String scope="current".equals(scoreboardScope)?"current:"+(session==null?"none":id(session))+":":"";
         String range=home?"home":rankFilter+":"+customStart+":"+customEnd;
         if(!home&&!"all".equals(rankFilter))range+=":"+DateRange.of(rankFilter,Instant.now(),ZoneId.systemDefault(),customStart,customEnd).start;
@@ -975,9 +984,10 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private ScoreboardPage scoreboardPage(LinearLayout target,ScoreboardModel model,boolean home){
         String context=scoreboardContext(home);
         if(!context.equals(lastScoreboardContext)){scoreboardMoves.clear();scoreboardLeaderChanged=false;lastScoreboardContext=context;}
-        return new ScoreboardPage(this,motion,target,model,scoreboardContext(home),scoreboardMoves,activeSession()!=null,scoreboardLeaderChanged&&scoreMotion!=null,pid->{profileId=pid;tab=5;profileRoundVisible=20;render(true);});
+        return new ScoreboardPage(this,motion,target,model,scoreboardContext(home),scoreboardMoves,model.sessionView||activeSession()!=null,scoreboardLeaderChanged&&scoreMotion!=null,pid->{boolean exists=false;for(Map<String,Object> p:players)if(pid.equals(id(p)))exists=true;if(!exists){Toast.makeText(this,"Session-only participant",Toast.LENGTH_SHORT).show();return;}profileId=pid;tab=5;profileRoundVisible=20;render(true);});
     }
     private void scoreboardControls(LinearLayout target,boolean dates){
+        if(dates){rankSessionControls(target);return;}
         LinearLayout choices=row();choices.setPadding(dp(3),dp(3),dp(3),dp(3));choices.setBackground(DialogUi.background(this,0xFF17191F,13));
         for(String scope:new String[]{"all","current"}){
             boolean selected=scope.equals(scoreboardScope);TextView choice=text((selected?"✓ ":"")+("all".equals(scope)?"Lifetime":"Current Session"),13,selected?GOLD:MUTED,true);
@@ -989,9 +999,36 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         target.addView(text("current".equals(scoreboardScope)?activeSession()==null?"No active session":"Current session points"+(dates&&!"all".equals(rankFilter)?" · "+rankFilter:""):dates&&!"all".equals(rankFilter)?"Total points · "+rankFilter+" · all sessions":"Lifetime game points",13,MUTED,false));gap(target,12);
     }
     private void setScoreboardScope(String scope){scoreboardScope=scope;scoreboardMoves.clear();scoreboardLeaderChanged=false;scoreMotion=null;render(true);}
+    private List<Map<String,Object>> rankSessions(){List<Map<String,Object>> list=SessionLeaderboard.catalog(sessions,sessionScores==null?Collections.emptyList():sessionScores.boards.values());list.removeIf(row->removedSessionIds.contains(SessionLeaderboard.id(row)));return list;}
+    private Map<String,Object> selectedRankSession(){for(Map<String,Object> value:rankSessions())if(selectedSessionId.equals(SessionLeaderboard.id(value)))return value;return null;}
+    private void syncSessionView(){
+        boolean wanted=resumed&&ranksSessions&&(tab==3||tab==10);
+        if(wanted){if(sessionScores==null)sessionScores=new SessionLiveScores(this,new SessionLiveScores.Listener(){
+            public void changed(){if(!resumed||!ranksSessions||(tab!=3&&tab!=10))return;boolean reopen=sessionPicker!=null&&sessionPicker.isShowing();if(reopen)sessionPicker.dismiss();render(false);if(reopen)showSessionPicker(false);}
+            public void removed(String id){removedSessionIds.add(id);if(id.equals(selectedSessionId)){selectedSessionId="";settings.edit().remove("ranks_session_id").apply();}if(resumed)render(false);}
+        });if(!sessionScreenVisible){sessionScreenVisible=true;sessionScores.resume();sessionScores.discover(false);}Map<String,Object> selected=selectedRankSession();if(selected==null&&!selectedSessionId.isEmpty()&&hasData){selectedSessionId="";settings.edit().remove("ranks_session_id").apply();}sessionScores.select(selected);}
+        else if(sessionScreenVisible&&sessionScores!=null){sessionScreenVisible=false;sessionScores.pause();}
+    }
+    private boolean selectedSessionLive(Map<String,Object> session){if(!SessionLeaderboard.active(session))return false;if(!SessionLeaderboard.online(session))return liveConnected;return sessionScores!=null&&selectedSessionId.equals(SessionLeaderboard.id(session))&&sessionScores.connected;}
+    private void rankSessionControls(LinearLayout target){
+        LinearLayout toggle=row();toggle.setBackground(DialogUi.background(this,0xFF17191F,13));toggle.setPadding(dp(3),dp(3),dp(3),dp(3));for(boolean session:new boolean[]{false,true}){TextView option=text((ranksSessions==session?"✓ ":"")+(session?"Sessions":"Lifetime"),13,ranksSessions==session?GOLD:MUTED,true);option.setGravity(Gravity.CENTER);option.setMinHeight(dp(48));option.setFocusable(true);if(ranksSessions==session)option.setBackground(DialogUi.background(this,0xFF393126,10));option.setOnClickListener(v->{ranksSessions=session;settings.edit().putBoolean("ranks_sessions",session).apply();scoreboardMoves.clear();scoreMotion=null;render(true);});toggle.addView(option,new LinearLayout.LayoutParams(0,-2,1));}target.addView(toggle);gap(target,10);
+        if(!ranksSessions){target.addView(text("All-time lifetime game points",13,MUTED,false));gap(target,12);return;}
+        Map<String,Object> selected=selectedRankSession();String label=selected==null?"Select Session  ▾":str(selected,"sessionName")+"  ▾";TextView choose=button(label,false,this::showSessionPicker);choose.setContentDescription("Select Session");choose.setBackground(DialogUi.background(this,0xFF24262E,14));target.addView(choose);gap(target,7);
+        if(selected!=null){boolean live=selectedSessionLive(selected);String status=live?"● LIVE":SessionLeaderboard.active(selected)?"Active · saved scores":"Completed";Map<String,Object> remote=sessionScores==null?null:sessionScores.boards.get(selectedSessionId);if(remote!=null&&AdvancedAnalytics.number(remote.get("pendingExports"))>0)status+=" · history sync pending";if(live&&Boolean.TRUE.equals(selected.get("paused")))status+=" · paused";status+=" · "+sessionDate(selected);target.addView(text(status,12,live?GREEN:MUTED,false));if(SessionLeaderboard.online(selected)&&sessionScores!=null&&!sessionScores.connected&&!sessionScores.message.isEmpty())target.addView(text(sessionScores.message,11,MUTED,false));}
+        gap(target,12);
+    }
+    private String sessionDate(Map<String,Object> value){long t=SessionLeaderboard.time(value.get("startTime"));return t==Long.MIN_VALUE?"Date unavailable":dateFormat.format(Instant.ofEpochMilli(t));}
+    private void showSessionPicker(){showSessionPicker(true);}
+    private void showSessionPicker(boolean refresh){
+        if(refresh&&sessionScores!=null)sessionScores.discover(false);LinearLayout list=DialogUi.body(this);List<Map<String,Object>> available=rankSessions();if(available.isEmpty())list.addView(text("No saved sessions yet. Live online sessions require your room identity.",14,MUTED,false));
+        final android.app.AlertDialog dialog=new android.app.AlertDialog.Builder(this).setTitle("Select Session").setNegativeButton("Close",null).create();
+        for(Map<String,Object> session:available){String id=SessionLeaderboard.id(session);LinearLayout entry=column();pad(entry,14,12,14,12);entry.setBackground(DialogUi.background(this,id.equals(selectedSessionId)?0xFF393126:PANEL2,12));LinearLayout top=row();TextView name=text(str(session,"sessionName").isEmpty()?"Game Session":str(session,"sessionName"),16,id.equals(selectedSessionId)?GOLD:WHITE,true);top.addView(name,new LinearLayout.LayoutParams(0,-2,1));boolean live=SessionLeaderboard.active(session)&&(!SessionLeaderboard.online(session)?liveConnected:sessionScores!=null&&(sessionScores.discoveredLive.contains(id)||id.equals(selectedSessionId)&&sessionScores.connected));if(live){TextView badge=text("LIVE",10,GREEN,true);pad(badge,8,5,8,5);badge.setBackground(DialogUi.background(this,0xFF103B2E,8));top.addView(badge);}entry.addView(top);gap(entry,5);entry.addView(text(sessionDate(session)+(SessionLeaderboard.active(session)?" · Active":" · Completed"),12,MUTED,false));entry.setFocusable(true);entry.setContentDescription(str(session,"sessionName")+", "+(live?"LIVE":"Saved")+", "+sessionDate(session));entry.setOnClickListener(v->{selectedSessionId=id;settings.edit().putString("ranks_session_id",id).apply();scoreboardMoves.clear();scoreMotion=null;dialog.dismiss();render(true);});list.addView(entry);gap(list,9);}
+        if(sessionScores!=null&&sessionScores.next!=null)list.addView(button("More online sessions",false,()->{sessionScores.discover(true);}));dialog.setView(DialogUi.scroll(this,list));sessionPicker=dialog;DialogUi.install(dialog);dialog.show();
+    }
     private void ranksPage() {
-        title(content,"Leaderboard","Every point. Every position.");scoreboardControls(content,true);dateFilterBar(content,true);
+        title(content,"Leaderboard","Every point. Every position.");scoreboardControls(content,true);
         List<Map<String,Object>> games=scoreboardSource(false);currentRankData=games;ScoreboardModel model=scoreboardModel(false);
+        if(model.rows.isEmpty())empty(ranksSessions?(selectedRankSession()==null?"Select a session to see its leaderboard.":"No completed rounds available yet."):"No saved lifetime rounds available yet.");
         ScoreboardPage page=scoreboardPage(content,model,false);page.podium(()->{visibleRankCount=model.rows.size();render(false);});
         gap(content,10);content.addView(button("Big Scoreboard",true,()->{bigOriginScroll=scroll.getScrollY();bigKeepAwake=settings.getBoolean("keep_awake",false);tab=10;render(true);}));gap(content,15);
         page.cards(false,visibleRankCount);
@@ -1002,12 +1039,13 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private void bigScoreboardPage(){
         LinearLayout heading=row();TextView name=text("Big Scoreboard",22,WHITE,true);heading.addView(name,new LinearLayout.LayoutParams(0,-2,1));
         TextView close=button("×",false,this::exitBigScoreboard);close.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP,24);close.setContentDescription("Close Big Scoreboard");pad(close,4,4,4,4);heading.addView(close,lp(48,48));content.addView(heading);
-        LinearLayout status=row();TextView live=text(liveConnected?"● Live scores":"Offline · saved scores",11,liveConnected?GREEN:MUTED,false);status.addView(live,new LinearLayout.LayoutParams(0,-2,1));
+        boolean scoreLive=ranksSessions?selectedSessionLive(selectedRankSession()):liveConnected;String liveLabel=ranksSessions?(scoreLive?"● LIVE session scores":selectedRankSession()!=null&&!SessionLeaderboard.active(selectedRankSession())?"Completed session scores":"Saved session scores"):(liveConnected?"● Live scores":"Offline · saved scores");
+        LinearLayout status=row();TextView live=text(liveLabel,11,scoreLive?GREEN:MUTED,false);status.addView(live,new LinearLayout.LayoutParams(0,-2,1));
         TextView awake=button("Screen on · "+(bigKeepAwake?"On":"Off"),false,()->{bigKeepAwake=!bigKeepAwake;render(false);});awake.setTextSize(11);pad(awake,10,8,10,8);status.addView(awake,lp(-2,-2));content.addView(status);gap(content,10);
         scoreboardControls(content,true);
-        if(!hasData){empty("No saved table is available yet.");return;}
+        if(!hasData&&!ranksSessions){empty("No saved table is available yet.");return;}
         ScoreboardModel model=scoreboardModel(false);
-        if(model.rows.isEmpty())empty("No players with rounds in this scope.");
+        if(model.rows.isEmpty())empty(ranksSessions?(selectedRankSession()==null?"Select a session to see its leaderboard.":"No completed rounds available yet."):"No saved lifetime rounds available yet.");
         scoreboardPage(content,model,false).cards(true,model.rows.size());
     }
     private void historyPage() {
@@ -1674,7 +1712,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         return out;
     }
     private void shareLeaderboard() {
-        List<Map<String,Object>> selected=scoreboardSource(false);
+        if(tab==3||tab==10){ScoreboardModel board=scoreboardModel(false);if(board.rows.isEmpty()){Toast.makeText(this,"No session scores to share",Toast.LENGTH_SHORT).show();return;}List<NativeImageShare.RankRow> rows=new ArrayList<>();for(ScoreboardModel.Row r:board.rows)rows.add(new NativeImageShare.RankRow(r.name,r.points,r.played,r.wins,r.losses,r.asHukum,r.asPartner));Map<String,Object> selected=selectedRankSession();NativeImageShare.leaderboard(this,ranksSessions&&selected!=null?str(selected,"sessionName"):"Lifetime · All Time",rows);return;}
+        List<Map<String,Object>> selected=AdvancedAnalytics.scope(AdvancedAnalytics.dates(gameRounds(),rankFilter,Instant.now(),ZoneId.systemDefault(),customStart,customEnd),sessions,scoreboardScope);
         if(selected.isEmpty()){
             Toast.makeText(this,"No ranks in this period",Toast.LENGTH_SHORT).show();
             return;

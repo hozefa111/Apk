@@ -103,10 +103,10 @@ final class ScoreboardPage {
             if(leader){
                 LinearLayout metrics=DialogUi.column(a);metrics.setOrientation(LinearLayout.HORIZONTAL);metrics.setGravity(Gravity.TOP);
                 metric(metrics,"LAST PLAYED ROUND",r.hasLast?ScoreboardModel.points(r.last):"—",r.last<0?DialogUi.RED:DialogUi.GREEN);
-                metric(metrics,"CURRENT SESSION",session?ScoreboardModel.points(r.sessionPoints):"No active session",DialogUi.WHITE);add(c,metrics);
+                metric(metrics,(model.sessionView?"SESSION SCORE":"CURRENT SESSION"),session?ScoreboardModel.points(r.sessionPoints):"No active session",DialogUi.WHITE);add(c,metrics);
             }else{
                 add(c,text("Last played round  "+(r.hasLast?ScoreboardModel.points(r.last):"—"),12,r.hasLast&&r.last<0?DialogUi.RED:DialogUi.WHITE,false));DialogUi.gap(c,4);
-                add(c,text("Current session  "+(session?ScoreboardModel.points(r.sessionPoints):"No active session"),11,DialogUi.MUTED,false));DialogUi.gap(c,7);
+                add(c,text((model.sessionView?"Session score  ":"Current session  ")+(session?ScoreboardModel.points(r.sessionPoints):"No active session"),11,DialogUi.MUTED,false));DialogUi.gap(c,7);
                 add(c,text(gapLabel(r),11,metal,false));
             }
             int move=moves.getOrDefault(r.id,0);if(move!=0){DialogUi.gap(c,6);add(c,text((move>0?"↑ ":"↓ ")+Math.abs(move)+" position"+(Math.abs(move)==1?"":"s"),13,move>0?DialogUi.GREEN:DialogUi.RED,true));}
@@ -130,7 +130,7 @@ final class ScoreboardPage {
             add(c,head);DialogUi.gap(c,4);add(c,text(r.played+" played",12,DialogUi.MUTED,false));DialogUi.gap(c,10);
             View rule=new View(a);rule.setBackgroundColor(0xFF363943);c.addView(rule,new LinearLayout.LayoutParams(-1,DialogUi.dp(a,1)));DialogUi.gap(c,9);
             add(c,text("Last played round  "+(r.hasLast?ScoreboardModel.points(r.last):"—"),13,DialogUi.WHITE,false));DialogUi.gap(c,4);
-            add(c,text("Current session  "+(session?ScoreboardModel.points(r.sessionPoints):"No active session"),12,DialogUi.MUTED,false));DialogUi.gap(c,7);
+            add(c,text((model.sessionView?"Session score  ":"Current session  ")+(session?ScoreboardModel.points(r.sessionPoints):"No active session"),12,DialogUi.MUTED,false));DialogUi.gap(c,7);
             add(c,text(r.rank==1?(r.tied>1?"Joint leader":"Table leader"):model.gap(r)+" points behind leader",12,color(r),false));
             int move=moves.getOrDefault(r.id,0);if(move!=0)add(c,text((move>0?"↑ ":"↓ ")+Math.abs(move)+" position"+(Math.abs(move)==1?"":"s"),14,move>0?DialogUi.GREEN:DialogUi.RED,true));
             attachProfile(c,r.id);add(parent,c);DialogUi.gap(parent,9);
