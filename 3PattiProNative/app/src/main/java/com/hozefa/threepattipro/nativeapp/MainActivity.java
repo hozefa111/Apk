@@ -216,7 +216,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(liveConnected==online)return;
         liveConnected=online;
 
-        updateToolbar();if(tab==10)render(false);
+        updateToolbar();if(tab==10||tab==3&&ranksSessions)render(false);
         if(tab==2&&roundSaveView!=null&&roundHintView!=null&&roundPreviewSection!=null)updateRoundForm();
     }
     @Override public void syncProblem(String message,long retryAt,boolean quota){
