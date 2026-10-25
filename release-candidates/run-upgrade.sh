@@ -62,6 +62,13 @@ tap_label 'Upgrade session'
 adb shell uiautomator dump /sdcard/release-ui.xml >/dev/null
 adb pull /sdcard/release-ui.xml upgrade-evidence/session-selected.xml >/dev/null
 grep -q 'Upgrade session' upgrade-evidence/session-selected.xml
+for page in 0 1 2 3 4; do
+ if grep -q '+310' upgrade-evidence/session-selected.xml; then break; fi
+ adb shell input swipe 180 700 180 250 400
+ sleep 1
+ adb shell uiautomator dump /sdcard/release-ui.xml >/dev/null
+ adb pull /sdcard/release-ui.xml upgrade-evidence/session-selected.xml >/dev/null
+done
 grep -q '+310' upgrade-evidence/session-selected.xml
 ! grep -q 'text="Today"' upgrade-evidence/session-selected.xml
 tap_label 'Big Scoreboard'
