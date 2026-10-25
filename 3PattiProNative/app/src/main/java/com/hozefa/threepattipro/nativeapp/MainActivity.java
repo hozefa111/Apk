@@ -65,6 +65,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private LinearLayout root, content, navigation, toolbar;
     private ScrollView scroll;
     private boolean loggedIn=false, busy=false, hasData=false, liveConnected=false, historyDeferred=true;
+    private long lastSyncedAt=0;
     private String syncProblem;
     private String syncProgress="Connecting to your shared table";
     private TextView syncProgressView;
@@ -200,6 +201,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(!loggedIn && tab==2) tab=0;
         render(false);
     }
+    @Override public void syncTimestamp(long timestamp){lastSyncedAt=timestamp;}
     @Override public void historyDeferred(boolean deferred){if(historyDeferred!=deferred){historyDeferred=deferred;render(false);}}
     @Override public void snapshotContinuity(boolean continuous){if(!continuous)motionEvents.invalidate();}
     @Override public void dataLoading(String collection,int loaded){
@@ -434,7 +436,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         appName.setMaxLines(1);appName.setAutoSizeTextTypeUniformWithConfiguration(14,21,1,android.util.TypedValue.COMPLEX_UNIT_SP);
         heading.addView(appName);
         gap(heading,5);
-        heading.addView(text(liveConnected?"●  LIVE SYNC":quotaPaused?"○  SYNC PAUSED · LIMIT REACHED":historyDeferred?(hasData?"○  SAVED SCORES · ON DEMAND":"○  TRACKER ON DEMAND"):hasData?"○  OFFLINE · SAVED TABLE":"○  OFFLINE / CONNECTING",9,
+        heading.addView(text(liveConnected?"●  LIVE SYNC":quotaPaused?"○  SYNC PAUSED · LIMIT REACHED":hasData?"○  SAVED SCORES · SYNCING":"○  SYNCING YOUR TABLE",9,
                 liveConnected?GREEN:MUTED,true));
         toolbar.addView(heading,largeText?lp(-1,-2):new LinearLayout.LayoutParams(0,-2,1));
         LinearLayout actions=largeText?row():toolbar;
@@ -479,10 +481,10 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         int prev=reset?0:scroll.getScrollY();
         content.removeAllViews();
         navigation.removeAllViews();
-        if(historyDeferred){
-            LinearLayout saved=panel();saved.addView(text(hasData?"Saved lifetime snapshot":"Tracker history loads on demand",16,GOLD,true));gap(saved,8);
-            saved.addView(text("Play Online works independently. Load complete tracker history to verify current scores and enable manual changes.",13,MUTED,false));gap(saved,10);
-            saved.addView(button("Load complete history",true,()->api.refresh()));content.addView(saved);gap(content,14);
+        if(!liveConnected&&syncProblem==null){
+            LinearLayout saved=panel();saved.addView(text(hasData?"Saved scores · synchronizing":"Synchronizing your scores…",16,GOLD,true));gap(saved,8);
+            saved.addView(text((lastSyncedAt>0?"Last synced "+new java.text.SimpleDateFormat("dd MMM, h:mm a",java.util.Locale.ENGLISH).format(new java.util.Date(lastSyncedAt))+". ":"")+"Verification runs automatically. Play Online works independently.",13,MUTED,false));gap(saved,10);
+            content.addView(saved);gap(content,14);
         }
         if(syncProblem!=null){
             LinearLayout banner=panel();
@@ -494,7 +496,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(!hasData && tab==0){
             TextView onlineFallback=button("♠  Play Online · Kali Ki Tidi",true,()->startActivity(new Intent(this,OnlineGameActivity.class)));onlineFallback.setContentDescription("Play Online Kali Ki Tidi");content.addView(onlineFallback);gap(content,16);
         }
-        if(!hasData && tab<6 && historyDeferred){
+        if(!hasData && tab<6 && !liveConnected){
             content.addView(text("Existing scores are preserved. No lifetime totals are calculated from partial pages.",14,MUTED,false));
         }else if(!hasData && tab<6 && syncProblem!=null){
             gap(content,24);content.addView(text("Your table has not loaded yet",20,GOLD,true));gap(content,12);

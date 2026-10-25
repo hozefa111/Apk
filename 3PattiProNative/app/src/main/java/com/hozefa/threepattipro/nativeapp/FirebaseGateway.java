@@ -37,6 +37,7 @@ public final class FirebaseGateway {
         /** Bounded initial sync progress; partial history never authorizes scores/writes. */
         default void dataLoading(String collection,int loaded) {}
         default void historyDeferred(boolean deferred) {}
+        default void syncTimestamp(long timestamp) {}
         /** A read-only connection problem; retryAt is a wall-clock deadline, not a write queue. */
         default void syncProblem(String message,long retryAt,boolean quota) {}
     }
@@ -72,7 +73,7 @@ public final class FirebaseGateway {
         final DocumentSnapshot source;final Map<String,Object> row;final JSONObject raw;final String token;final String cachedRow;
         CachedDocument(DocumentSnapshot source,Map<String,Object> row,JSONObject raw,String token){this.source=source;this.row=row;this.raw=raw;this.token=token;this.cachedRow=new JSONObject(row).toString();}
     }
-    private int subscriptionGeneration;
+    private int subscriptionGeneration,legacyEpoch;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final LongSupplier retryClock;
@@ -82,7 +83,7 @@ public final class FirebaseGateway {
     private volatile boolean foreground=true;
     private volatile long lastRefreshRequestAt;
     private final Runnable backgroundStop=this::stopInBackground;
-    private void stopInBackground(){if(!foreground){historyRequested=false;removeSubscriptions();animationContinuity=false;freshSnapshot=false;if(running)listener.syncState(false);}}
+    private void stopInBackground(){if(!foreground){removeSubscriptions();animationContinuity=false;freshSnapshot=false;if(running)listener.syncState(false);}}
     private final FirebaseAuth auth;
     private FirebaseAuth.AuthStateListener authObserver;
     private final FirebaseFirestore firestore;
@@ -105,7 +106,13 @@ public final class FirebaseGateway {
     private volatile boolean running;
     private final AtomicBoolean stopped=new AtomicBoolean();
     private volatile boolean freshSnapshot=false;
-    private volatile boolean historyRequested=false;
+    private volatile boolean historyRequested=true;
+    private ListenerRegistration journalHead;
+    private volatile boolean journalHeadKnown=false,journalActive=false;
+    private Map<String,Map<String,Object>> journalDocuments=new LinkedHashMap<>();
+    private volatile long journalEpoch=-1,journalRevision=-1;
+    long[] trackerCheckpoint(){return new long[]{journalEpoch,journalRevision};}
+    private volatile Map<String,Object> journalLatestHead;
     private ListenerRegistration recentPreview;
     private final AtomicBoolean writeInFlight=new AtomicBoolean(false);
     private final Runnable refreshLoop=()->{startSubscriptions();queueLoad(true);};
@@ -160,7 +167,22 @@ public final class FirebaseGateway {
         // AuthStateListener always emits its initial state; it owns initial attach,
         // avoiding an attach/remove/attach race and duplicate cold-start queries.
     }
+    private void startJournalHead(){
+        if(journalHead!=null||!running||!foreground||retry.remaining(retryClock.getAsLong())>0)return;
+        final int generation=subscriptionGeneration;
+        journalHead=firestore.document("trackerSync/state").addSnapshotListener(MetadataChanges.INCLUDE,(head,error)->{
+            if(!running||generation!=subscriptionGeneration)return;
+            if(error!=null){onListenFailure(error);return;}
+            if(head.getMetadata().isFromCache()||head.getMetadata().hasPendingWrites()){freshSnapshot=false;listener.syncState(false);return;}
+            journalLatestHead=TrackerJournalSync.head(head);
+            journalHeadKnown=true;boolean active="incremental".equals(head.exists()?head.getString("mode"):"prepare");
+            if(active!=journalActive){journalActive=active;legacyEpoch++;synchronized(snapshotLock){liveCollections.clear();collectionComplete.clear();liveBoundaries.clear();}listener.syncState(false);for(PagedFirestoreCollection p:subscriptions)snapshotDispatch.execute(p::close);subscriptions.clear();freshSnapshot=false;}
+            listener.historyDeferred(false);
+            if(active){freshSnapshot=false;queueLoad(true);}else{startSubscriptions();queueLoad(true);}
+        });
+    }
     private void startSubscriptions(){
+        startJournalHead();if(!journalHeadKnown||journalActive)return;
         if(!running||!foreground||!subscriptions.isEmpty()||retry.remaining(retryClock.getAsLong())>0)return;
         if(!historyRequested){
             listener.historyDeferred(true);listener.syncState(false);
@@ -175,7 +197,7 @@ public final class FirebaseGateway {
         }
         listener.historyDeferred(false);
         if(recentPreview!=null){recentPreview.remove();recentPreview=null;}
-        final int generation=subscriptionGeneration;
+        final int generation=subscriptionGeneration,streamEpoch=legacyEpoch;
         for(String collection:Arrays.asList("players","rounds","sessions")){
             PagedFirestoreCollection stream=new PagedFirestoreCollection(firestore.collection(collection),pageSize,snapshotDispatch,new PagedFirestoreCollection.Observer(){
                 public void requested(){queryStarts++;}
@@ -184,7 +206,7 @@ public final class FirebaseGateway {
                     for(PagedFirestoreCollection.Snapshot page:pages)maxPageDocuments=Math.max(maxPageDocuments,page.size());
                     final boolean invalidates;
                     synchronized(snapshotLock){
-                        if(!running||generation!=subscriptionGeneration)return;
+                        if(!running||generation!=subscriptionGeneration||streamEpoch!=legacyEpoch||journalActive)return;
                         List<PagedFirestoreCollection.Snapshot> previous=liveCollections.get(collection);
                         boolean dataChanged=previous==null||previous.size()!=pages.size();
                         if(!dataChanged)for(int i=0;i<pages.size();i++)if(previous.get(i)!=pages.get(i)&&!pages.get(i).getDocumentChanges().isEmpty()){dataChanged=true;break;}
@@ -217,6 +239,7 @@ public final class FirebaseGateway {
         publishProblem(message);removeSubscriptions();scheduleNext();
     }
     private void removeSubscriptions(){
+        if(journalHead!=null){journalHead.remove();journalHead=null;}journalHeadKnown=false;
         if(recentPreview!=null){recentPreview.remove();recentPreview=null;}
         subscriptionGeneration++;
         for(PagedFirestoreCollection registration:subscriptions)snapshotDispatch.execute(registration::close);
@@ -257,9 +280,12 @@ public final class FirebaseGateway {
     private void commit(JSONArray writes)throws Exception {
         if(retry.remaining(retryClock.getAsLong())>0)throw new IOException("Sync retry is pending");
         final String owner=bulkOwner();
+        final DocumentReference journalEvent=firestore.collection("trackerChanges").document();
         Tasks.await(firestore.runTransaction(transaction->{
             try{
                 if(signingOut||!owner.equals(bulkOwner()))throw new IOException("Login changed");
+                if(transaction.get(journalEvent).exists())return null;
+                DocumentReference syncRef=firestore.document("trackerSync/state");DocumentSnapshot syncSnapshot=transaction.get(syncRef);Map<String,Object> sync=TrackerJournalSync.head(syncSnapshot);
                 List<DocumentReference> refs=new ArrayList<>();
                 List<Map<String,Object>> edits=new ArrayList<>();
                 for(int i=0;i<writes.length();i++){
@@ -294,6 +320,11 @@ public final class FirebaseGateway {
                         transaction.set(ref,edits.get(i),SetOptions.mergeFieldPaths(new ArrayList<>(updates.keySet())));
                     }else transaction.set(ref,edits.get(i));
                 }
+                List<String> paths=new ArrayList<>();for(DocumentReference ref:refs)if(!paths.contains(ref.getPath()))paths.add(ref.getPath());Collections.sort(paths);
+                if(paths.size()>450)throw new IOException("Split tracker changes into smaller batches");
+                long revision=TrackerJournalSync.number(sync,"revision")+1;
+                transaction.set(journalEvent,TrackerJournalSync.values("epoch",sync.get("epoch"),"revision",revision,"paths",paths));
+                Map<String,Object> next=new HashMap<>(sync);next.put("revision",revision);next.put("eventId",journalEvent.getId());next.put("paths",paths);transaction.set(syncRef,next);
                 return null;
             }catch(FirebaseFirestoreException error){throw error;}
             catch(Exception conflict){
@@ -374,6 +405,8 @@ public final class FirebaseGateway {
     }
     private void load() {
         if(!running)return;
+        if(!journalHeadKnown)return;
+        if(journalActive){loadJournal();return;}
         if(!historyRequested&&retry.remaining(retryClock.getAsLong())==0){ui.post(()->{if(running){listener.historyDeferred(true);listener.syncState(false);}});return;}
         if(retry.remaining(retryClock.getAsLong())>0){publishProblem(retry.quota()?quotaMessage():"Connection unavailable. Automatic retry is scheduled.");scheduleNext();return;}
         try{
@@ -422,10 +455,34 @@ public final class FirebaseGateway {
                 if(lastDeliveredContent!=deliveredContent||!continuous){
                     lastDeliveredContent=deliveredContent;listener.dataUpdated(ps.rows,rs.rows,ss.rows);
                 }
-                listener.syncState(online);
+                listener.syncTimestamp(snapshotAt);listener.syncState(online);
             });
             scheduleNext();
         }catch(Exception error){freshSnapshot=false;animationContinuity=false;retry.unavailable(retryClock.getAsLong());publishProblem("Cannot read the shared table. Saved data remains available; retry is automatic.");scheduleNext();}
+    }
+    private void loadJournal(){
+        if(!foreground||retry.remaining(retryClock.getAsLong())>0){scheduleNext();return;}
+        final int generation=subscriptionGeneration;
+        try{
+            TrackerJournalSync engine=new TrackerJournalSync(firestore,pageSize,25);
+            Map<String,Object> supplied=journalLatestHead;if(supplied!=null&&TrackerJournalSync.number(supplied,"revision")<journalRevision)supplied=null;
+            TrackerJournalSync.Result result=engine.pull(journalDocuments,journalEpoch,journalRevision,supplied,()->!running||!foreground||generation!=subscriptionGeneration);
+            if(result==null){journalActive=false;ui.post(this::startSubscriptions);return;}
+            if(!running||!foreground||generation!=subscriptionGeneration||!journalActive)return;
+            Map<String,List<Map<String,Object>>> groups=new HashMap<>();for(String col:TrackerJournalSync.COLLECTIONS)groups.put(col,new ArrayList<>());
+            Map<String,String> rows=new LinkedHashMap<>(),newVersions=new HashMap<>();Map<String,JSONObject> documents=new HashMap<>();
+            for(Map.Entry<String,Map<String,Object>> item:result.documents.entrySet()){
+                String path=item.getKey();JSONObject fields=SdkDocuments.fields(item.getValue());String token=DocumentVersion.of(fields);Map<String,Object> row=decodeFields(fields);row.put("id",path.substring(path.indexOf('/')+1));row.put("_updateTime",token);
+                groups.get(path.substring(0,path.indexOf('/'))).add(row);JSONObject saved=new JSONObject(row);saved.put("_journalFields",fields.toString());rows.put(path,saved.toString());newVersions.put(path,token);documents.put(path,new JSONObject().put("name",documentRoot+"/"+path).put("fields",fields).put("updateTime",token));
+            }
+            long now=System.currentTimeMillis();ui.removeCallbacks(cacheFlush);cacheRows=null;
+            cacheRecordWrites+=trackerCache.write(rows,Collections.emptyMap(),now,result.epoch,result.revision);
+            if(!running||generation!=subscriptionGeneration||!journalActive)return;
+            journalDocuments=result.documents;journalEpoch=result.epoch;journalRevision=result.revision;
+            if(journalLatestHead==null||TrackerJournalSync.number(journalLatestHead,"revision")<result.revision)journalLatestHead=TrackerJournalSync.values("mode","incremental","epoch",result.epoch,"revision",result.revision);versions=newVersions;rawDocuments=documents;snapshotAt=now;freshSnapshot=true;retry.succeeded();retryStore.edit().clear().apply();queryStarts+=engine.queries;
+            ui.post(()->{if(!running||generation!=subscriptionGeneration)return;listener.historyDeferred(false);listener.syncProblem(null,0,false);listener.dataUpdated(groups.get("players"),groups.get("rounds"),groups.get("sessions"));listener.syncTimestamp(snapshotAt);listener.syncState(true);});
+        }catch(java.util.concurrent.CancellationException cancelled){/* Resume keeps the durable checkpoint. */}
+        catch(Exception failure){freshSnapshot=false;if(failure.getMessage()!=null&&failure.getMessage().contains("journal gap")){journalEpoch=-1;journalRevision=-1;}Throwable cause=failure;while(cause.getCause()!=null)cause=cause.getCause();if(cause instanceof FirebaseFirestoreException&&((FirebaseFirestoreException)cause).getCode()==FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED){recordQuota(null);return;}retry.unavailable(retryClock.getAsLong());publishProblem("Synchronization interrupted. Saved scores remain available; retry is automatic.");scheduleNext();}
     }
     // A private read-only offline snapshot. It NEVER queues or replays mutations.
     private File snapshotFile(){return new File(context.getFilesDir(),"3patti_snapshot.json");}
@@ -433,6 +490,9 @@ public final class FirebaseGateway {
         try{
             Map<String,String> cached=trackerCache.read();cacheBoundaries=trackerCache.boundaries();
             if(cached!=null){
+                final long cachedAt=trackerCache.lastSyncedAt();ui.post(()->listener.syncTimestamp(cachedAt));
+                journalEpoch=trackerCache.journalEpoch();journalRevision=trackerCache.journalRevision();journalDocuments.clear();
+                for(Map.Entry<String,String> entry:cached.entrySet()){JSONObject value=new JSONObject(entry.getValue());if(value.has("_journalFields"))journalDocuments.put(entry.getKey(),SdkDocuments.decode(new JSONObject(value.getString("_journalFields")),firestore));else{journalEpoch=-1;journalRevision=-1;}}
                 Map<String,List<Map<String,Object>>> rows=new HashMap<>();
                 for(String name:Arrays.asList("players","rounds","sessions"))rows.put(name,new ArrayList<>());
                 for(Map.Entry<String,String> item:cached.entrySet()){
@@ -735,7 +795,7 @@ public final class FirebaseGateway {
                 if(!freshSnapshot || System.currentTimeMillis()-snapshotAt>60000){load();}
                 if(!freshSnapshot)throw new IOException("Data changed. Refresh and retry.");
                 if(hasPendingBulkOperation()&&!resumeBulk)throw new IOException("An interrupted data operation needs attention in Settings before other changes");
-                action.run(idToken);
+                action.run(idToken);journalLatestHead=null;
                 if(success!=null&&!success.isEmpty())notify(success);
                 onUi(onSuccess);
                 load();

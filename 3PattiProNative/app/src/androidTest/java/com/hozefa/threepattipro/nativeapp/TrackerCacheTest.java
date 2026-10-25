@@ -45,4 +45,11 @@ public class TrackerCacheTest {
         assertEquals(1,cache.write(Collections.emptyMap()));cache.close();cache=new TrackerCache(context,name);
         assertNotNull(cache.read());assertTrue(cache.read().isEmpty());
     }
+    @Test public void journalCheckpointCommitsWithRowsAndSurvivesInterruptedWrite(){
+        Map<String,String> original=Collections.singletonMap("rounds/a","{\"score\":360}");cache.write(original,Collections.emptyMap(),100,7,12);
+        Map<String,String> bad=new LinkedHashMap<>();bad.put("rounds/a","{\"score\":700}");bad.put("rounds/b",null);
+        try{cache.write(bad,Collections.emptyMap(),200,7,13);fail("Must abort");}catch(android.database.sqlite.SQLiteException expected){}
+        cache.close();cache=new TrackerCache(context,name);assertEquals(original,cache.read());assertEquals(7,cache.journalEpoch());assertEquals(12,cache.journalRevision());
+    }
+
 }

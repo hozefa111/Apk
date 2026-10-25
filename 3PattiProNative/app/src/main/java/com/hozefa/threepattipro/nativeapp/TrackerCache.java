@@ -55,7 +55,11 @@ final class TrackerCache extends SQLiteOpenHelper {
     /** Returns exactly how many individual record rows were changed. */
     int write(Map<String,String> next){return write(next,Collections.emptyMap());}
     int write(Map<String,String> next,Map<String,List<String>> boundaries){return write(next,boundaries,System.currentTimeMillis());}
-    int write(Map<String,String> next,Map<String,List<String>> boundaries,long snapshotAt){
+    long lastSyncedAt(){return marker(getReadableDatabase(),"snapshot_time",0);}
+    long journalEpoch(){return marker(getReadableDatabase(),"sync_epoch",-1);}
+    long journalRevision(){return marker(getReadableDatabase(),"sync_revision",-1);}
+    int write(Map<String,String> next,Map<String,List<String>> boundaries,long snapshotAt){return write(next,boundaries,snapshotAt,-1,-1);}
+    int write(Map<String,String> next,Map<String,List<String>> boundaries,long snapshotAt,long epoch,long remoteRevision){
         if(persisted==null)read();
         SQLiteDatabase db=getWritableDatabase();int changed=0;
         db.beginTransaction();long revision;
@@ -75,7 +79,7 @@ final class TrackerCache extends SQLiteOpenHelper {
                 ContentValues value=new ContentValues();value.put("name",range.getKey());value.put("boundaries",new org.json.JSONArray(range.getValue()).toString());
                 if(db.insertWithOnConflict("partitions",null,value,SQLiteDatabase.CONFLICT_REPLACE)<0)throw new SQLiteException("Cache boundaries rejected");
             }
-            putMarker(db,"complete",revision+1);putMarker(db,"snapshot_time",snapshotAt);
+            putMarker(db,"complete",revision+1);putMarker(db,"snapshot_time",snapshotAt);putMarker(db,"sync_epoch",epoch);putMarker(db,"sync_revision",remoteRevision);
             db.setTransactionSuccessful();
         }finally{db.endTransaction();}
         persisted=new LinkedHashMap<>(next);persistedRevision=revision+1;return changed;

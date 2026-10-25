@@ -279,7 +279,7 @@ public class FirebaseGatewayEmulatorTest {
         await(()->!gateway.hasPendingBulkOperation()&&rounds.get().stream().noneMatch(r->String.valueOf(r.get("id")).startsWith("bulk-"))&&live.get()&&!busy.get());
         assertEquals(original-501,rounds.get().size());assertEquals(3,players.get().size());
     }
-    @Test public void startupPreviewDoesNotPublishPartialLifetimeHistory()throws Exception{
+    @Test public void startupAutomaticallyLoadsCompleteHistoryWithoutManualAction()throws Exception{
         List<String> seeded=new ArrayList<>();
         try{
             for(int n=0;n<31;n++){
@@ -299,13 +299,34 @@ public class FirebaseGatewayEmulatorTest {
                     public void historyDeferred(boolean value){deferred.set(value);}
                 },"demo-key");gateway.start();
             });
-            await(()->deferred.get()&&gateway.performanceCounters()[3]==1);Thread.sleep(500);
-            assertFalse(live.get());assertEquals("only bounded preview attaches before explicit request",1,gateway.performanceCounters()[3]);
-            assertTrue(gateway.refresh());await(live::get);
+            await(live::get);assertFalse(deferred.get());assertTrue("Automatic complete verification uses the existing page streams",gateway.performanceCounters()[3]>1);
             assertTrue(rounds.get().stream().anyMatch(r->"deferred_history_0".equals(r.get("id"))));
             Map<String,Object> old=rounds.get().stream().filter(r->"deferred_history_0".equals(r.get("id"))).findFirst().get();
             assertEquals(360,((Number)((Map<?,?>)old.get("scoreChanges")).get("a")).intValue());
         }finally{for(String key:seeded)request("DELETE","/rounds/"+key,null);}
+    }
+
+    @Test public void incrementalJournalSurvivesReopenAndTracksHistoricalEditDelete()throws Exception{
+        String id="journal-native-"+UUID.randomUUID();JSONObject head;
+        try{head=request("GET","/trackerSync/state",null).getJSONObject("fields");}catch(Exception missing){head=SdkDocuments.fields(FirebaseGateway.map("revision",0L,"epoch",1L,"mode","prepare","eventId","seed","paths",new ArrayList<>()));}
+        long epoch=head.getJSONObject("epoch").getLong("integerValue")+1;
+        head.put("enforced",new JSONObject().put("booleanValue",true));
+        head.put("mode",new JSONObject().put("stringValue","incremental")).put("epoch",new JSONObject().put("integerValue",String.valueOf(epoch)));
+        request("PATCH","/trackerSync/state",new JSONObject().put("fields",head));
+        try{
+            await(()->gateway.trackerCheckpoint()[0]==epoch&&live.get()&&!busy.get());
+            Map<String,Object> body=FirebaseGateway.map("type","hukum","timestamp",new FirebaseGateway.Stamp("2000-01-01T00:00:00Z"),"scoreChanges",FirebaseGateway.map("a",360));
+            CountDownLatch saved=new CountDownLatch(1);ready(()->gateway.addRoundWithId(id,body,saved::countDown,()->{}));completed(saved,"journal create");await(()->rounds.get().stream().anyMatch(r->id.equals(r.get("id")))&&live.get()&&!busy.get());
+            CountDownLatch edited=new CountDownLatch(1);ready(()->gateway.patchDocument("rounds",id,FirebaseGateway.map("scoreChanges",FirebaseGateway.map("a",700)),"Edited",edited::countDown));completed(edited,"journal edit");
+            await(()->rounds.get().stream().anyMatch(r->id.equals(r.get("id"))&&((Number)((Map<?,?>)r.get("scoreChanges")).get("a")).intValue()==700)&&live.get()&&!busy.get());
+            long cursor=gateway.trackerCheckpoint()[1];InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.stop());startGateway();
+            assertEquals(epoch,gateway.trackerCheckpoint()[0]);assertEquals(cursor,gateway.trackerCheckpoint()[1]);assertEquals("Unchanged reopen performs no full ledger query",0,gateway.performanceCounters()[3]);
+            ready(()->gateway.deleteDocument("rounds",id,"Deleted"));await(()->rounds.get().stream().noneMatch(r->id.equals(r.get("id")))&&live.get()&&!busy.get());assertTrue(gateway.trackerCheckpoint()[1]>cursor);
+        }finally{
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.stop());
+            JSONObject latest=request("GET","/trackerSync/state",null).getJSONObject("fields");latest.put("mode",new JSONObject().put("stringValue","prepare")).put("enforced",new JSONObject().put("booleanValue",false));request("PATCH","/trackerSync/state",new JSONObject().put("fields",latest));
+            try{request("DELETE","/rounds/"+id,null);}catch(Exception removed){}
+        }
     }
 
 }

@@ -29,7 +29,7 @@ public class NativeVoiceTest {
     private void await(String label)throws Exception{long end=System.currentTimeMillis()+30000;Throwable last=null;while(System.currentTimeMillis()<end){try{onView(withText(label)).check(matches(isDisplayed()));return;}catch(RuntimeException|AssertionError e){last=e;Thread.sleep(150);}}throw new AssertionError(label,last);}
     private void idle(ActivityScenario<MainActivity> scenario)throws Exception{NativeTestUi.awaitMotionIdle(scenario);Thread.sleep(300);}
     private void open(ActivityScenario<MainActivity> scenario)throws Exception{
-        onView(withText("Load complete history")).perform(scrollTo(),click());await("Table Status");
+        await("Table Status");
         Tasks.await(FirebaseAuth.getInstance(FirebaseApp.getInstance("three-patti-native")).signInWithEmailAndPassword("tester@example.test","test-password-123"),20,TimeUnit.SECONDS);await("ADMIN");
         idle(scenario);onView(withContentDescription("Round")).perform(click());idle(scenario);
         onView(withText("🎙  Voice se round add karo")).perform(scrollTo(),click());await("Voice Round · PLAYERS");
