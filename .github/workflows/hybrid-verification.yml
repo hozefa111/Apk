@@ -2,6 +2,11 @@ name: Hybrid targeted Android verification
 on:
   push:
     branches: [hybrid-free-tier]
+    paths:
+      - '3PattiProNative/app/src/main/java/**'
+      - '3PattiProNative/app/src/androidTest/**'
+      - '3PattiProNative/scripts/**'
+      - '.github/workflows/hybrid-verification.yml' 
 permissions:
   contents: read
 concurrency:
@@ -23,7 +28,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - run: npm install -g firebase-tools@15.34.0
+      - run: npm install -g firebase-tools@14.17.0
       - name: Compile isolated SDK/cache tests
         run: gradle -p 3PattiProNative assembleSandbox assembleSandboxAndroidTest lintDebug
       - run: sudo chmod 666 /dev/kvm
