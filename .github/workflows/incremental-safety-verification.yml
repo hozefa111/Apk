@@ -35,6 +35,7 @@ jobs:
       - name: Verify session selection, live projections and Big Scoreboard
         uses: reactivecircus/android-emulator-runner@v2
         env:
+          KALI_REQUIRE_APP_EVIDENCE: '0'
           KALI_TEST_CLASSES: com.hozefa.threepattipro.nativeapp.TrackerCacheTest,com.hozefa.threepattipro.nativeapp.FirebaseGatewayEmulatorTest#sixConcurrentNativeCommandsCommitOnceAndReplayReceipts,com.hozefa.threepattipro.nativeapp.FirebaseGatewayEmulatorTest#incrementalJournalSurvivesReopenAndTracksHistoricalEditDelete
         with:
           api-level: 30

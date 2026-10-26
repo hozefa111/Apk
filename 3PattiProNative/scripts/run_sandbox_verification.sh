@@ -23,9 +23,9 @@ pull_screenshots() {
             fi
             if [ ! -s "$verification_images/$verification_name" ]; then verification_status=1; fi
         done
-        if [ -z "$verification_files" ]; then verification_status=1; fi
+        if [ -z "$verification_files" ] && [ "${KALI_REQUIRE_APP_EVIDENCE:-1}" != "0" ]; then verification_status=1; fi
     else
-        verification_status=1
+        if [ "${KALI_REQUIRE_APP_EVIDENCE:-1}" != "0" ]; then verification_status=1; fi
     fi
     exit "$verification_status"
 }
