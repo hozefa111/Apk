@@ -18,24 +18,24 @@ jobs:
         run: |
           sha256sum -c release-candidates/SHA256SUMS.txt
           gh release download three-patti-pro-v2.7.20 -p '*.apk' -D previous
-      - run: sudo chmod 666 /dev/kvm
-      - name: Preserve signed installation, SQLite cache and score screens
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 30
-          arch: x86_64
-          target: default
-          disable-animations: true
-          script: bash release-candidates/run-upgrade.sh
+      - name: Reuse passed signed upgrade of this exact unchanged APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh run view 40327472921 --repo hozefa111/Apk --json headSha --jq .headSha)" = '82a057154eb1160ffe81778b7692ba611b702ed9'
+          gh api repos/hozefa111/Apk/actions/runs/40327472921/jobs --jq '[.jobs[].steps[] | select(.name=="Preserve signed installation, SQLite cache and score screens" and .conclusion=="success")] | length' > proof-count.txt
+          test "$(cat proof-count.txt)" = '1'
+          gh api 'repos/hozefa111/Apk/contents/release-candidates/SHA256SUMS.txt?ref=82a057154eb1160ffe81778b7692ba611b702ed9' --jq .content | base64 --decode > previous-proof.sha256
+          cmp previous-proof.sha256 release-candidates/SHA256SUMS.txt
       - name: Confirm critical source checks before publishing verification candidate
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run watch 40326047505 --repo hozefa111/Apk --exit-status
+          gh run watch 40328063195 --repo hozefa111/Apk --exit-status
           gh run watch 40326043140 --repo hozefa111/hh --exit-status
           gh run watch 40326050054 --repo hozefa111/hh --exit-status
-          gh run watch 40326056063 --repo hozefa111/Apk --exit-status
-          gh release create three-patti-pro-v2.7.21-rc.1 release-candidates/3-Patti-PRO-v2.7.21.apk release-candidates/SHA256SUMS.txt --target b47fd7e --prerelease --title '3 Patti PRO 2.7.21 verification candidate — activation BLOCKED' --notes-file release-candidates/NOTES.md
+          gh run watch 40328072416 --repo hozefa111/Apk --exit-status
+          gh release create three-patti-pro-v2.7.21-rc.1 release-candidates/3-Patti-PRO-v2.7.21.apk release-candidates/SHA256SUMS.txt --target f35a764 --prerelease --title '3 Patti PRO 2.7.21 verification candidate — activation BLOCKED' --notes-file release-candidates/NOTES.md
       - uses: actions/upload-artifact@v4
         if: always()
         with:

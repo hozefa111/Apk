@@ -4,7 +4,7 @@ Android changes: wrapped Firestore quota errors retain the persistent cooldown; 
 
 Companion web/backend source PR fixes prepare-mode write preconditions, exact timestamp comparisons and optional Firebase Functions player-registration journaling. Production activation must remain prepare/enforced=false until all gates and separate owner approval.
 
-Automated verification: Android 11/15 tracker and SQLite instrumentation, JVM/lint, web/emulator concurrency and integrity checks, real Chromium IndexedDB/offline recovery, Cloudflare four/six-player outage/restart/private-card checks. This release workflow additionally verifies installation over signed v2.7.20 with marker, actual SQLite cache and session/Big Scoreboard touch checks retained.
+Automated verification: Android 11/15 tracker and SQLite instrumentation, JVM/lint, web/emulator concurrency and integrity checks, real Chromium IndexedDB/offline recovery, Cloudflare four/six-player outage/restart/private-card checks. Signed installation over v2.7.20 retained the marker, actual SQLite cache and session/Big Scoreboard touch checks. The final gate reuses that exact unchanged APK proof (run 40327472921, successful upgrade step) and requires all final-head web and Android regression checks to pass.
 
 Package/signing identity unchanged. Install OVER the existing app; never uninstall or clear data. APK version 2.7.21, code 42. SHA256: 8650c2214488280e44c1cb3903993e6c7c0865d7139aeffdd44f345b9bec8f04.
 
