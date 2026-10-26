@@ -338,4 +338,25 @@ public class FirebaseGatewayEmulatorTest {
 
         }finally{workers.shutdownNow();JSONObject latest=request("GET","/trackerSync/state",null).getJSONObject("fields");latest.put("mode",new JSONObject().put("stringValue","prepare")).put("enforced",new JSONObject().put("booleanValue",false));request("PATCH","/trackerSync/state",new JSONObject().put("fields",latest));}
     }
+    @Test public void wrappedJournalQuotaRetainsPersistentCooldownAndBlocksRefresh()throws Exception{
+        com.google.firebase.firestore.FirebaseFirestoreException quota=new com.google.firebase.firestore.FirebaseFirestoreException(
+            "Quota exhausted",com.google.firebase.firestore.FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED,new java.io.IOException("Transport cause"));
+        Exception wrapped=new java.util.concurrent.ExecutionException(quota);
+        // The previous deepest-cause walk selected IOException and treated quota as network loss.
+        Throwable deepest=wrapped;while(deepest.getCause()!=null)deepest=deepest.getCause();
+        assertFalse(deepest instanceof com.google.firebase.firestore.FirebaseFirestoreException);
+        try{
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.handleJournalFailure(wrapped));
+            java.lang.reflect.Field f=FirebaseGateway.class.getDeclaredField("retry");f.setAccessible(true);SyncRetryPolicy retry=(SyncRetryPolicy)f.get(gateway);
+            assertTrue("Quota status survives wrapped transport causes",retry.quota());
+            assertTrue(retry.remaining(System.currentTimeMillis())>50000);
+            assertFalse("Refresh must respect the quota cooldown",gateway.refresh());
+            Context c=InstrumentationRegistry.getInstrumentation().getTargetContext();
+            assertTrue(c.getSharedPreferences("firebase_sdk_retry_v1",Context.MODE_PRIVATE).getLong("quota_until",0)>System.currentTimeMillis());
+            assertFalse(live.get());
+        }finally{
+            InstrumentationRegistry.getInstrumentation().getTargetContext().getSharedPreferences("firebase_sdk_retry_v1",Context.MODE_PRIVATE).edit().clear().commit();
+        }
+    }
+
 }

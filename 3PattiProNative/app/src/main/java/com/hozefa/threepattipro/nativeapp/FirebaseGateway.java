@@ -502,7 +502,16 @@ public final class FirebaseGateway {
             if(journalLatestHead==null||TrackerJournalSync.number(journalLatestHead,"revision")<result.revision)journalLatestHead=TrackerJournalSync.values("mode","incremental","epoch",result.epoch,"revision",result.revision);versions=newVersions;rawDocuments=documents;snapshotAt=now;freshSnapshot=true;retry.succeeded();retryStore.edit().clear().apply();queryStarts+=engine.queries;
             ui.post(()->{if(!running||generation!=subscriptionGeneration)return;listener.historyDeferred(false);listener.syncProblem(null,0,false);listener.dataUpdated(groups.get("players"),groups.get("rounds"),groups.get("sessions"));listener.syncTimestamp(snapshotAt);listener.syncState(true);});
         }catch(java.util.concurrent.CancellationException cancelled){/* Resume keeps the durable checkpoint. */}
-        catch(Exception failure){freshSnapshot=false;if(failure.getMessage()!=null&&failure.getMessage().contains("journal gap")){journalEpoch=-1;journalRevision=-1;}Throwable cause=failure;while(cause.getCause()!=null)cause=cause.getCause();if(cause instanceof FirebaseFirestoreException&&((FirebaseFirestoreException)cause).getCode()==FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED){recordQuota(null);return;}retry.unavailable(retryClock.getAsLong());publishProblem("Synchronization interrupted. Saved scores remain available; retry is automatic.");scheduleNext();}
+        catch(Exception failure){handleJournalFailure(failure);}
+    }
+    /** Preserve the SDK status: its deepest cause may be a transport IOException. */
+    void handleJournalFailure(Exception failure){
+        freshSnapshot=false;
+        if(failure.getMessage()!=null&&failure.getMessage().contains("journal gap")){journalEpoch=-1;journalRevision=-1;}
+        Throwable cause=failure;
+        while(!(cause instanceof FirebaseFirestoreException)&&cause.getCause()!=null)cause=cause.getCause();
+        if(cause instanceof FirebaseFirestoreException&&((FirebaseFirestoreException)cause).getCode()==FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED){recordQuota(null);return;}
+        retry.unavailable(retryClock.getAsLong());publishProblem("Synchronization interrupted. Saved scores remain available; retry is automatic.");scheduleNext();
     }
     // A private read-only offline snapshot. It NEVER queues or replays mutations.
     private File snapshotFile(){return new File(context.getFilesDir(),"3patti_snapshot.json");}
