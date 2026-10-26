@@ -48,7 +48,7 @@ jobs:
           echo '6d94d0b34a99c9d0f31857b1edcb8d261d97ebac360dc446a171347616a9de97  published-app.js' | sha256sum -c -
           echo '524f4dedec3f7ba53c26b6da4b03a6fa9d93001ba1cdf3c5551baefbb449450e  published-sync.js' | sha256sum -c -
           echo '9c24a2c1170a2628dd4c38d385ebe37bfa95352a3ce630e062b3f0a36da5768c  published-client.js' | sha256sum -c -
-          gh release create three-patti-pro-v2.7.21-rc.1 release-candidates/3-Patti-PRO-v2.7.21.apk release-candidates/SHA256SUMS.txt --target 8feb44a --prerelease --title '3 Patti PRO 2.7.21 verification candidate — activation BLOCKED' --notes-file release-candidates/NOTES.md
+          gh release create three-patti-pro-v2.7.21-rc.1 release-candidates/3-Patti-PRO-v2.7.21.apk release-candidates/SHA256SUMS.txt --target 8feb44a185b222b7c010bfaf1330b9c411981352 --prerelease --title '3 Patti PRO 2.7.21 verification candidate — activation BLOCKED' --notes-file release-candidates/NOTES.md
       - uses: actions/upload-artifact@v4
         if: always()
         with:
