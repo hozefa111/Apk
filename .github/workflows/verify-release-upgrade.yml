@@ -31,11 +31,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run watch 40323839040 --repo hozefa111/Apk --exit-status
-          gh run watch 40324799292 --repo hozefa111/hh --exit-status
-          gh run watch 40324805089 --repo hozefa111/hh --exit-status
-          gh run watch 40324614920 --repo hozefa111/Apk --exit-status
-          gh release create three-patti-pro-v2.7.21-rc.1 release-candidates/3-Patti-PRO-v2.7.21.apk release-candidates/SHA256SUMS.txt --target f7f8a68 --prerelease --title '3 Patti PRO 2.7.21 verification candidate — activation BLOCKED' --notes-file release-candidates/NOTES.md
+          gh run watch 40326047505 --repo hozefa111/Apk --exit-status
+          gh run watch 40326043140 --repo hozefa111/hh --exit-status
+          gh run watch 40326050054 --repo hozefa111/hh --exit-status
+          gh run watch 40326056063 --repo hozefa111/Apk --exit-status
+          gh release create three-patti-pro-v2.7.21-rc.1 release-candidates/3-Patti-PRO-v2.7.21.apk release-candidates/SHA256SUMS.txt --target b47fd7e --prerelease --title '3 Patti PRO 2.7.21 verification candidate — activation BLOCKED' --notes-file release-candidates/NOTES.md
       - uses: actions/upload-artifact@v4
         if: always()
         with:
