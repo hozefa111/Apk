@@ -11,7 +11,7 @@ import java.util.*;
  */
 final class TrackerCache extends SQLiteOpenHelper {
     private Map<String,String> persisted;
-    private long persistedRevision=-1;
+    private long persistedRevision=-1;private boolean cacheVerified;
     TrackerCache(Context context){this(context,"3patti_tracker_cache_v1.db");}
     TrackerCache(Context context,String name){super(context,name,null,1);}
     @Override public void onCreate(SQLiteDatabase db){
@@ -21,12 +21,19 @@ final class TrackerCache extends SQLiteOpenHelper {
     }
     @Override public void onUpgrade(SQLiteDatabase db,int oldVersion,int newVersion){throw new IllegalStateException("Unsupported cache version");}
     Map<String,String> read(){
-        SQLiteDatabase db=getReadableDatabase();
+        SQLiteDatabase db=getReadableDatabase();cacheVerified=false;
         try(Cursor marker=db.rawQuery("SELECT value FROM metadata WHERE key='complete'",null)){
             if(!marker.moveToFirst()){persisted=new LinkedHashMap<>();persistedRevision=-1;return null;}
             persistedRevision=marker.getLong(0);
         }
-        persisted=rows(db);return new LinkedHashMap<>(persisted);
+        persisted=rows(db);cacheVerified=false;
+        if(marker(db,"integrity_version",0)==1){
+            TrackerCacheIntegrity signature=new TrackerCacheIntegrity(persisted,marker(db,"sync_epoch",-1),marker(db,"sync_revision",-1));
+            boolean valid=marker(db,"record_count",-1)==signature.total&&("sha256:"+signature.sha256).equals(textMarker(db,"integrity_sha256"));
+            for(Map.Entry<String,Long> c:signature.counts.entrySet())valid&=marker(db,"count_"+c.getKey(),-1)==c.getValue();
+            if(!valid)return null;cacheVerified=true;
+        }
+        return new LinkedHashMap<>(persisted);
     }
     private Map<String,String> rows(SQLiteDatabase db){
         Map<String,String> result=new LinkedHashMap<>();
@@ -38,6 +45,8 @@ final class TrackerCache extends SQLiteOpenHelper {
     private long marker(SQLiteDatabase db,String key,long fallback){
         try(Cursor cursor=db.rawQuery("SELECT value FROM metadata WHERE key=?",new String[]{key})){return cursor.moveToFirst()?cursor.getLong(0):fallback;}
     }
+    private String textMarker(SQLiteDatabase db,String key){try(Cursor c=db.rawQuery("SELECT value FROM metadata WHERE key=?",new String[]{key})){return c.moveToFirst()?c.getString(0):"";}}
+    private void putTextMarker(SQLiteDatabase db,String key,String value){ContentValues row=new ContentValues();row.put("key",key);row.put("value",value);if(db.insertWithOnConflict("metadata",null,row,SQLiteDatabase.CONFLICT_REPLACE)<0)throw new SQLiteException("Cache integrity rejected");}
     private void putMarker(SQLiteDatabase db,String key,long value){
         ContentValues row=new ContentValues();row.put("key",key);row.put("value",value);
         if(db.insertWithOnConflict("metadata",null,row,SQLiteDatabase.CONFLICT_REPLACE)<0)throw new SQLiteException("Cache marker rejected");
@@ -56,8 +65,8 @@ final class TrackerCache extends SQLiteOpenHelper {
     int write(Map<String,String> next){return write(next,Collections.emptyMap());}
     int write(Map<String,String> next,Map<String,List<String>> boundaries){return write(next,boundaries,System.currentTimeMillis());}
     long lastSyncedAt(){return marker(getReadableDatabase(),"snapshot_time",0);}
-    long journalEpoch(){return marker(getReadableDatabase(),"sync_epoch",-1);}
-    long journalRevision(){return marker(getReadableDatabase(),"sync_revision",-1);}
+    long journalEpoch(){return cacheVerified?marker(getReadableDatabase(),"sync_epoch",-1):-1;}
+    long journalRevision(){return cacheVerified?marker(getReadableDatabase(),"sync_revision",-1):-1;}
     int write(Map<String,String> next,Map<String,List<String>> boundaries,long snapshotAt){return write(next,boundaries,snapshotAt,-1,-1);}
     int write(Map<String,String> next,Map<String,List<String>> boundaries,long snapshotAt,long epoch,long remoteRevision){
         if(persisted==null)read();
@@ -68,7 +77,7 @@ final class TrackerCache extends SQLiteOpenHelper {
             // flush. It may not overwrite a newer complete cache or mix row sets.
             if(snapshotAt<marker(db,"snapshot_time",Long.MIN_VALUE))return 0;
             revision=marker(db,"complete",-1);
-            if(revision!=persistedRevision){persisted=rows(db);persistedRevision=revision;}
+            persisted=rows(db);persistedRevision=revision;
             for(Map.Entry<String,String> row:next.entrySet())if(!persisted.containsKey(row.getKey())||!Objects.equals(persisted.get(row.getKey()),row.getValue())){
                 ContentValues value=new ContentValues();value.put("path",row.getKey());value.put("payload",row.getValue());
                 if(db.insertWithOnConflict("records",null,value,SQLiteDatabase.CONFLICT_REPLACE)<0)throw new SQLiteException("Cache row rejected");changed++;
@@ -80,8 +89,10 @@ final class TrackerCache extends SQLiteOpenHelper {
                 if(db.insertWithOnConflict("partitions",null,value,SQLiteDatabase.CONFLICT_REPLACE)<0)throw new SQLiteException("Cache boundaries rejected");
             }
             putMarker(db,"complete",revision+1);putMarker(db,"snapshot_time",snapshotAt);putMarker(db,"sync_epoch",epoch);putMarker(db,"sync_revision",remoteRevision);
+            TrackerCacheIntegrity signature=new TrackerCacheIntegrity(next,epoch,remoteRevision);
+            putMarker(db,"integrity_version",1);putMarker(db,"record_count",signature.total);for(Map.Entry<String,Long> c:signature.counts.entrySet())putMarker(db,"count_"+c.getKey(),c.getValue());putTextMarker(db,"integrity_sha256","sha256:"+signature.sha256);
             db.setTransactionSuccessful();
         }finally{db.endTransaction();}
-        persisted=new LinkedHashMap<>(next);persistedRevision=revision+1;return changed;
+        persisted=new LinkedHashMap<>(next);persistedRevision=revision+1;cacheVerified=true;return changed;
     }
 }

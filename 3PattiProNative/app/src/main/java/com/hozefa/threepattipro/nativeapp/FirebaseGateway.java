@@ -277,15 +277,20 @@ public final class FirebaseGateway {
     private void notify(String msg) { ui.post(() -> { if (running) listener.notice(msg); }); }
     private void setBusy(boolean b) { ui.post(() -> { if (running) listener.busy(b); }); }
     /** All preconditions are read and checked before any write in this SDK transaction. */
-    private void commit(JSONArray writes)throws Exception {
+    private static final class TrackerConflict extends IllegalStateException {TrackerConflict(Exception cause){super(cause.getMessage(),cause);}}
+    private void commit(JSONArray requestWrites)throws Exception {
+        final JSONArray writes=new JSONArray(requestWrites.toString());
         if(retry.remaining(retryClock.getAsLong())>0)throw new IOException("Sync retry is pending");
         final String owner=bulkOwner();
-        final DocumentReference journalEvent=firestore.collection("trackerChanges").document();
+        final DocumentReference journalEvent=firestore.collection("trackerChanges").document("native_"+DocumentVersion.of(new JSONObject().put("owner",owner).put("writes",writes)).substring(5));
+        for(int attempt=0;attempt<6;attempt++){
+        final java.util.concurrent.atomic.AtomicReference<Map<String,Object>> attempted=new java.util.concurrent.atomic.AtomicReference<>();
+        try{
         Tasks.await(firestore.runTransaction(transaction->{
             try{
                 if(signingOut||!owner.equals(bulkOwner()))throw new IOException("Login changed");
                 if(transaction.get(journalEvent).exists())return null;
-                DocumentReference syncRef=firestore.document("trackerSync/state");DocumentSnapshot syncSnapshot=transaction.get(syncRef);Map<String,Object> sync=TrackerJournalSync.head(syncSnapshot);
+                DocumentReference syncRef=firestore.document("trackerSync/state");DocumentSnapshot syncSnapshot=transaction.get(syncRef);Map<String,Object> sync=TrackerJournalSync.head(syncSnapshot);attempted.set(sync);
                 List<DocumentReference> refs=new ArrayList<>();
                 List<Map<String,Object>> edits=new ArrayList<>();
                 for(int i=0;i<writes.length();i++){
@@ -330,9 +335,21 @@ public final class FirebaseGateway {
             catch(Exception conflict){
                 // A stale dialog/payload is final; only the SDK's real concurrency/network
                 // failures should trigger its automatic transaction retries.
-                throw new IllegalStateException(conflict.getMessage(),conflict);
+                throw new TrackerConflict(conflict);
             }
-        }),60,TimeUnit.SECONDS);
+        }),60,TimeUnit.SECONDS);return;
+        }catch(Exception failure){
+            for(Throwable t=failure;t!=null;t=t.getCause())if(t instanceof TrackerConflict)throw failure;
+            Throwable cause=failure;while(!(cause instanceof FirebaseFirestoreException)&&cause.getCause()!=null)cause=cause.getCause();
+            if(!(cause instanceof FirebaseFirestoreException)||attempted.get()==null)throw failure;
+            FirebaseFirestoreException.Code code=((FirebaseFirestoreException)cause).getCode();
+            if(!Arrays.asList(FirebaseFirestoreException.Code.PERMISSION_DENIED,FirebaseFirestoreException.Code.ABORTED,FirebaseFirestoreException.Code.UNAVAILABLE,FirebaseFirestoreException.Code.DEADLINE_EXCEEDED,FirebaseFirestoreException.Code.UNKNOWN).contains(code))throw failure;
+            Map<String,Object> latest;
+            try{if(Tasks.await(journalEvent.get(Source.SERVER),15,TimeUnit.SECONDS).exists())return;latest=TrackerJournalSync.head(Tasks.await(firestore.document("trackerSync/state").get(Source.SERVER),15,TimeUnit.SECONDS));}catch(Exception unavailable){throw failure;}
+            Map<String,Object> old=attempted.get();boolean advanced=Objects.equals(latest.get("epoch"),old.get("epoch"))&&Objects.equals(latest.get("mode"),old.get("mode"))&&Objects.equals(latest.get("enforced"),old.get("enforced"))&&TrackerJournalSync.number(latest,"revision")>TrackerJournalSync.number(old,"revision");
+            if(attempt==5||code==FirebaseFirestoreException.Code.PERMISSION_DENIED&&!advanced)throw failure;
+            Thread.sleep(Math.min(400,25L<<attempt)+java.util.concurrent.ThreadLocalRandom.current().nextInt(25));
+        }}
     }
     private JSONObject readDocument(String collection,String id)throws Exception{
         DocumentSnapshot doc=Tasks.await(firestore.collection(collection).document(id).get(Source.SERVER),25,TimeUnit.SECONDS);
@@ -505,7 +522,7 @@ public final class FirebaseGateway {
                 ui.post(()->{if(running){listener.syncState(false);listener.dataUpdated(rows.get("players"),rows.get("rounds"),rows.get("sessions"));}});
                 return;
             }
-        }catch(Exception ignored){/* A disposable cache failure never changes server data. */}
+        }catch(Exception ignored){journalDocuments.clear();journalEpoch=-1;journalRevision=-1;/* Never reuse a partially decoded cache checkpoint. */}
         // Existing installs can show their prior JSON cache until a full live sync
         // commits the new SQLite cache. No remote migration or write replay occurs.
         File file=snapshotFile();
