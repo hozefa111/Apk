@@ -277,12 +277,15 @@ public final class FirebaseGateway {
     private void notify(String msg) { ui.post(() -> { if (running) listener.notice(msg); }); }
     private void setBusy(boolean b) { ui.post(() -> { if (running) listener.busy(b); }); }
     /** All preconditions are read and checked before any write in this SDK transaction. */
+    private final Map<JSONArray,String[]> trackerWriteIntents=new WeakHashMap<>();
     private static final class TrackerConflict extends IllegalStateException {TrackerConflict(Exception cause){super(cause.getMessage(),cause);}}
     private void commit(JSONArray requestWrites)throws Exception {
         final JSONArray writes=new JSONArray(requestWrites.toString());
         if(retry.remaining(retryClock.getAsLong())>0)throw new IOException("Sync retry is pending");
         final String owner=bulkOwner();
-        final DocumentReference journalEvent=firestore.collection("trackerChanges").document("native_"+DocumentVersion.of(new JSONObject().put("owner",owner).put("writes",writes)).substring(5));
+        final String fingerprint=DocumentVersion.of(new JSONObject().put("owner",owner).put("writes",writes));final String commandId;
+        synchronized(trackerWriteIntents){String[] intent=trackerWriteIntents.get(requestWrites);if(intent==null){intent=new String[]{UUID.randomUUID().toString().replace("-",""),fingerprint};trackerWriteIntents.put(requestWrites,intent);}if(!intent[1].equals(fingerprint))throw new IOException("Write command changed. Review and create a new save.");commandId=intent[0];}
+        final DocumentReference journalEvent=firestore.collection("trackerChanges").document("native_"+commandId);
         for(int attempt=0;attempt<6;attempt++){
         final java.util.concurrent.atomic.AtomicReference<Map<String,Object>> attempted=new java.util.concurrent.atomic.AtomicReference<>();
         try{
