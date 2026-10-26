@@ -32,17 +32,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh run watch 40328063195 --repo hozefa111/Apk --exit-status
-          gh run watch 40326043140 --repo hozefa111/hh --exit-status
-          gh run watch 40326050054 --repo hozefa111/hh --exit-status
+          gh run watch 40334994962 --repo hozefa111/hh --exit-status
+          gh run watch 40335007257 --repo hozefa111/hh --exit-status
           # Runtime code is unchanged; reuse completed full suites and rerun only the corrected fixture.
-          gh run watch 40330917376 --repo hozefa111/Apk --exit-status
+          gh run watch 40336867741 --repo hozefa111/Apk --exit-status
           gh api repos/hozefa111/Apk/actions/runs/40328072416/jobs --jq '[.jobs[]|select(.conclusion=="success")]|length' > baseline-passed.txt
           test "$(cat baseline-passed.txt)" = '2'
           gh run download 40328072416 --repo hozefa111/Apk -n kali-android-api-35-1 -D baseline35
           python3 release-candidates/check-baseline.py
-          git fetch origin f35a764a90f781829dc1468b713ad409455a7818 094016dff280eab29ff9d959a8911b1f3d4a0e16 --depth=1
-          git diff --exit-code f35a764a90f781829dc1468b713ad409455a7818 094016dff280eab29ff9d959a8911b1f3d4a0e16 -- 3PattiProNative/app/src/main 3PattiProNative/app/build.gradle.kts 3PattiProNative/build.gradle.kts 3PattiProNative/tests/online-backend
-          gh release create three-patti-pro-v2.7.21-rc.1 release-candidates/3-Patti-PRO-v2.7.21.apk release-candidates/SHA256SUMS.txt --target 094016d --prerelease --title '3 Patti PRO 2.7.21 verification candidate — activation BLOCKED' --notes-file release-candidates/NOTES.md
+          git fetch origin f35a764a90f781829dc1468b713ad409455a7818 8feb44a185b222b7c010bfaf1330b9c411981352 --depth=1
+          git diff --exit-code f35a764a90f781829dc1468b713ad409455a7818 8feb44a185b222b7c010bfaf1330b9c411981352 -- 3PattiProNative/app/src/main 3PattiProNative/app/build.gradle.kts 3PattiProNative/build.gradle.kts 3PattiProNative/tests/online-backend
+          curl -fsSL 'https://hozefa111.github.io/hh/app.js?issue27=bf331f08' -o published-app.js
+          curl -fsSL 'https://hozefa111.github.io/hh/tracker-sync.js?issue27=bf331f08' -o published-sync.js
+          curl -fsSL 'https://hozefa111.github.io/hh/online/runtime/client.js?issue27=bf331f08' -o published-client.js
+          echo '6d94d0b34a99c9d0f31857b1edcb8d261d97ebac360dc446a171347616a9de97  published-app.js' | sha256sum -c -
+          echo '524f4dedec3f7ba53c26b6da4b03a6fa9d93001ba1cdf3c5551baefbb449450e  published-sync.js' | sha256sum -c -
+          echo '9c24a2c1170a2628dd4c38d385ebe37bfa95352a3ce630e062b3f0a36da5768c  published-client.js' | sha256sum -c -
+          gh release create three-patti-pro-v2.7.21-rc.1 release-candidates/3-Patti-PRO-v2.7.21.apk release-candidates/SHA256SUMS.txt --target 8feb44a --prerelease --title '3 Patti PRO 2.7.21 verification candidate — activation BLOCKED' --notes-file release-candidates/NOTES.md
       - uses: actions/upload-artifact@v4
         if: always()
         with:
