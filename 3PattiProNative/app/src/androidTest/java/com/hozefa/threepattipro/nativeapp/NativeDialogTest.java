@@ -69,7 +69,7 @@ public class NativeDialogTest {
             onView(withText("Close")).check(matches(isCompletelyDisplayed())).perform(click());
             scenario.onActivity(a->invoke(a,"roundDetails",new Class<?>[]{Map.class},round(0)));
             waitFor("Round details");onView(withText("0")).inRoot(androidx.test.espresso.matcher.RootMatchers.isDialog()).perform(scrollTo()).check((view,error)->{if(error!=null)throw error;assertEquals(DialogUi.MUTED,((TextView)view).getCurrentTextColor());});capture("18-round-detail-zero");onView(withText("Close")).perform(click());
-            onView(withContentDescription("Ranks")).perform(click());onView(withText("Custom")).perform(scrollTo(),click());
+            onView(withContentDescription("Ranks")).perform(click());onView(withContentDescription("Podium "+LONG_NAME)).perform(scrollTo(),click());onView(withText("Custom")).perform(scrollTo(),click());
             onView(withText("Start Date")).perform(scrollTo(),click());onView(withText("Cancel")).check(matches(isCompletelyDisplayed()));capture("21-datepicker-themed");onView(withText("Cancel")).perform(click());
         }
     }

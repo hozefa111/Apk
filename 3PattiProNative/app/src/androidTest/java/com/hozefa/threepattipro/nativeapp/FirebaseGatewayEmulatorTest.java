@@ -338,4 +338,47 @@ public class FirebaseGatewayEmulatorTest {
 
         }finally{workers.shutdownNow();JSONObject latest=request("GET","/trackerSync/state",null).getJSONObject("fields");latest.put("mode",new JSONObject().put("stringValue","prepare")).put("enforced",new JSONObject().put("booleanValue",false));request("PATCH","/trackerSync/state",new JSONObject().put("fields",latest));}
     }
+    @Test public void wrappedJournalQuotaRetainsPersistentCooldownAndBlocksRefresh()throws Exception{
+        com.google.firebase.firestore.FirebaseFirestoreException quota=new com.google.firebase.firestore.FirebaseFirestoreException(
+            "Quota exhausted",com.google.firebase.firestore.FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED,new java.io.IOException("Transport cause"));
+        Exception wrapped=new java.util.concurrent.ExecutionException(quota);
+        // The previous deepest-cause walk selected IOException and treated quota as network loss.
+        Throwable deepest=wrapped;while(deepest.getCause()!=null)deepest=deepest.getCause();
+        assertFalse(deepest instanceof com.google.firebase.firestore.FirebaseFirestoreException);
+        try{
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.handleJournalFailure(wrapped));
+            java.lang.reflect.Field f=FirebaseGateway.class.getDeclaredField("retry");f.setAccessible(true);SyncRetryPolicy retry=(SyncRetryPolicy)f.get(gateway);
+            assertTrue("Quota status survives wrapped transport causes",retry.quota());
+            assertTrue(retry.remaining(System.currentTimeMillis())>50000);
+            assertFalse("Refresh must respect the quota cooldown",gateway.refresh());
+            Context c=InstrumentationRegistry.getInstrumentation().getTargetContext();
+            assertTrue(c.getSharedPreferences("firebase_sdk_retry_v1",Context.MODE_PRIVATE).getLong("quota_until",0)>System.currentTimeMillis());
+            assertFalse(live.get());
+        }finally{
+            InstrumentationRegistry.getInstrumentation().getTargetContext().getSharedPreferences("firebase_sdk_retry_v1",Context.MODE_PRIVATE).edit().clear().commit();
+        }
+    }
+
+    @Test public void unenforcedIncrementalHeadUsesCompleteFallback()throws Exception{
+        JSONObject h;try{h=request("GET","/trackerSync/state",null).getJSONObject("fields");}catch(Exception|AssertionError missing){h=SdkDocuments.fields(FirebaseGateway.map("revision",0L,"epoch",1L,"mode","prepare","enforced",false,"eventId","seed","paths",new ArrayList<>()));}
+        long epoch=h.getJSONObject("epoch").getLong("integerValue")+1;
+        String id="unenforced-"+UUID.randomUUID();
+        try{
+            h.put("mode",new JSONObject().put("stringValue","incremental")).put("enforced",new JSONObject().put("booleanValue",false)).put("epoch",new JSONObject().put("integerValue",String.valueOf(epoch)));
+            request("PATCH","/trackerSync/state",new JSONObject().put("fields",h));
+            request("PATCH","/rounds/"+id,new JSONObject().put("fields",SdkDocuments.fields(FirebaseGateway.map("type","hukum","scoreChanges",FirebaseGateway.map("a",900)))));
+            await(()->live.get()&&rounds.get().stream().anyMatch(r->id.equals(r.get("id"))));
+            java.lang.reflect.Field active=FirebaseGateway.class.getDeclaredField("journalActive");active.setAccessible(true);
+            assertFalse("Unenforced journal must never authorize incremental totals",active.getBoolean(gateway));
+            h.put("enforced",new JSONObject().put("booleanValue",true)).put("epoch",new JSONObject().put("integerValue",String.valueOf(epoch+1)));
+            request("PATCH","/trackerSync/state",new JSONObject().put("fields",h));
+            await(()->live.get()&&gateway.trackerCheckpoint()[0]==epoch+1);
+            Map<String,Object> row=rounds.get().stream().filter(r->id.equals(r.get("id"))).findFirst().get();
+            assertEquals(900,((Number)((Map<?,?>)row.get("scoreChanges")).get("a")).intValue());
+        }finally{
+            h.put("mode",new JSONObject().put("stringValue","prepare")).put("enforced",new JSONObject().put("booleanValue",false));
+            request("PATCH","/trackerSync/state",new JSONObject().put("fields",h));request("DELETE","/rounds/"+id,null);
+        }
+    }
+
 }
