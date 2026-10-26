@@ -81,8 +81,8 @@ public class NativeMotionTest {
                 a.dataUpdated(new ArrayList<>(players),new ArrayList<>(Arrays.asList(first,second)),new ArrayList<>());
                 long end=android.os.SystemClock.uptimeMillis()+1000;
                 a.getWindow().getDecorView().postOnAnimation(new Runnable(){public void run(){
-                    View card=anchor(a.getWindow().getDecorView(),"rank:podium:all:0:0:b");
-                    TextView score=(TextView)anchor(a.getWindow().getDecorView(),"podium-score:all:0:0:b");
+                    View card=anchor(a.getWindow().getDecorView(),"rank:podium:lifetime:b");
+                    TextView score=(TextView)anchor(a.getWindow().getDecorView(),"podium-score:lifetime:b");
                     if(card!=null&&Math.abs(card.getTranslationY())>.1f)moved.set(true);
                     if(score!=null&&!"+155".contentEquals(score.getText())&&!"+465".contentEquals(score.getText()))intermediate.set(true);
                     if(moved.get()&&intermediate.get())movingFrame.countDown();
@@ -92,7 +92,7 @@ public class NativeMotionTest {
             assertTrue("Score and rank must produce actual intermediate frames",movingFrame.await(5,TimeUnit.SECONDS));capture("12-motion-live-ranks");
             assertTrue(framesDone.await(5,TimeUnit.SECONDS));assertTrue(intermediate.get());assertTrue(moved.get());
             scenario.onActivity(a->{
-                TextView score=(TextView)anchor(a.getWindow().getDecorView(),"podium-score:all:0:0:b");assertEquals("+465",score.getText().toString());
+                TextView score=(TextView)anchor(a.getWindow().getDecorView(),"podium-score:lifetime:b");assertEquals("+465",score.getText().toString());
                 assertEquals(0,a.motionEngine().activeCount());assertTrue(a.motionEngine().deltaCount()>0);
                 int before=a.motionEngine().deltaCount();
                 a.snapshotContinuity(false);a.syncState(false);Map<String,Object> third=round("motion-reconnect","a","c","b",155);
