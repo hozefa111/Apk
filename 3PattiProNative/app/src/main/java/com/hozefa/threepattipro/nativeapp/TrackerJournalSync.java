@@ -19,20 +19,20 @@ final class TrackerJournalSync {
  private <T>T await(Task<T> task)throws Exception{return Tasks.await(task,30,TimeUnit.SECONDS);}
  private Map<String,Object> readHead()throws Exception{documentReads++;return head(await(db.document("trackerSync/state").get(Source.SERVER)));}
  Result pull(Map<String,Map<String,Object>> cached,long epoch,long revision,Map<String,Object> suppliedHead,BooleanSupplier cancelled)throws Exception{
-  Map<String,Object> h=suppliedHead!=null?suppliedHead:readHead();if(!"incremental".equals(h.get("mode")))return null;final long expectedEpoch=number(h,"epoch");Map<String,Map<String,Object>> rows=new LinkedHashMap<>(cached);long cursor=revision;
+  Map<String,Object> h=suppliedHead!=null?suppliedHead:readHead();if(!"incremental".equals(h.get("mode"))||!Boolean.TRUE.equals(h.get("enforced")))return null;final long expectedEpoch=number(h,"epoch");Map<String,Map<String,Object>> rows=new LinkedHashMap<>(cached);long cursor=revision;
   if(epoch!=expectedEpoch||cursor<0||cursor>number(h,"revision")){
    rows.clear();cursor=number(h,"revision");
    for(String name:COLLECTIONS){String after=null;for(;;){if(cancelled.getAsBoolean())throw new CancellationException();Query q=db.collection(name).orderBy(FieldPath.documentId()).limit(pageSize);if(after!=null)q=q.startAfter(after);queries++;QuerySnapshot page=await(q.get(Source.SERVER));documentReads+=page.size();for(DocumentSnapshot d:page)rows.put(name+"/"+d.getId(),d.getData());if(page.size()<pageSize)break;after=page.getDocuments().get(page.size()-1).getId();}}
    h=readHead();
   }
   for(int pass=0;pass<8;pass++){
-   if(cancelled.getAsBoolean())throw new CancellationException();if(!"incremental".equals(h.get("mode"))||number(h,"epoch")!=expectedEpoch)throw new IllegalStateException("Tracker epoch changed; verification will restart");
+   if(cancelled.getAsBoolean())throw new CancellationException();if(!"incremental".equals(h.get("mode"))||!Boolean.TRUE.equals(h.get("enforced"))||number(h,"epoch")!=expectedEpoch)throw new IllegalStateException("Tracker epoch changed; verification will restart");
    Set<String> changed=new LinkedHashSet<>();while(cursor<number(h,"revision")){
     queries++;QuerySnapshot events=await(db.collection("trackerChanges").whereGreaterThan("revision",cursor).whereLessThanOrEqualTo("revision",number(h,"revision")).orderBy("revision").limit(eventPageSize).get(Source.SERVER));documentReads+=events.size();if(events.isEmpty())throw new IllegalStateException("Tracker journal gap");
     for(DocumentSnapshot d:events){Map<String,Object> e=d.getData();if(number(e,"epoch")!=expectedEpoch||number(e,"revision")!=cursor+1)throw new IllegalStateException("Tracker journal gap");Object paths=e.get("paths");if(!(paths instanceof List))throw new IllegalStateException("Invalid tracker paths");for(Object p:(List<?>)paths){if(!(p instanceof String)||!path((String)p))throw new IllegalStateException("Invalid tracker path");changed.add((String)p);}cursor++;}
    }
    List<String> paths=new ArrayList<>(changed);for(int i=0;i<paths.size();i+=20){if(cancelled.getAsBoolean())throw new CancellationException();List<Task<DocumentSnapshot>> tasks=new ArrayList<>();for(String p:paths.subList(i,Math.min(paths.size(),i+20)))tasks.add(db.document(p).get(Source.SERVER));await(Tasks.whenAll(tasks));documentReads+=tasks.size();for(Task<DocumentSnapshot> task:tasks){DocumentSnapshot d=task.getResult();if(d.exists())rows.put(d.getReference().getPath(),d.getData());else rows.remove(d.getReference().getPath());}}
-   Map<String,Object> latest=changed.isEmpty()?h:readHead();if(number(latest,"epoch")!=expectedEpoch||!"incremental".equals(latest.get("mode")))throw new IllegalStateException("Tracker epoch changed; verification will restart");if(number(latest,"revision")!=cursor){h=latest;continue;}return new Result(rows,latest);
+   Map<String,Object> latest=changed.isEmpty()?h:readHead();if(number(latest,"epoch")!=expectedEpoch||!"incremental".equals(latest.get("mode"))||!Boolean.TRUE.equals(latest.get("enforced")))throw new IllegalStateException("Tracker epoch changed; verification will restart");if(number(latest,"revision")!=cursor){h=latest;continue;}return new Result(rows,latest);
   }
   throw new IllegalStateException("Tracker changed during synchronization; retry is automatic");
  }

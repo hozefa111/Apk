@@ -359,4 +359,26 @@ public class FirebaseGatewayEmulatorTest {
         }
     }
 
+    @Test public void unenforcedIncrementalHeadUsesCompleteFallback()throws Exception{
+        JSONObject h;try{h=request("GET","/trackerSync/state",null).getJSONObject("fields");}catch(Exception|AssertionError missing){h=SdkDocuments.fields(FirebaseGateway.map("revision",0L,"epoch",1L,"mode","prepare","enforced",false,"eventId","seed","paths",new ArrayList<>()));}
+        long epoch=h.getJSONObject("epoch").getLong("integerValue")+1;
+        String id="unenforced-"+UUID.randomUUID();
+        try{
+            h.put("mode",new JSONObject().put("stringValue","incremental")).put("enforced",new JSONObject().put("booleanValue",false)).put("epoch",new JSONObject().put("integerValue",String.valueOf(epoch)));
+            request("PATCH","/trackerSync/state",new JSONObject().put("fields",h));
+            request("PATCH","/rounds/"+id,new JSONObject().put("fields",SdkDocuments.fields(FirebaseGateway.map("type","hukum","scoreChanges",FirebaseGateway.map("a",900)))));
+            await(()->live.get()&&rounds.get().stream().anyMatch(r->id.equals(r.get("id"))));
+            java.lang.reflect.Field active=FirebaseGateway.class.getDeclaredField("journalActive");active.setAccessible(true);
+            assertFalse("Unenforced journal must never authorize incremental totals",active.getBoolean(gateway));
+            h.put("enforced",new JSONObject().put("booleanValue",true)).put("epoch",new JSONObject().put("integerValue",String.valueOf(epoch+1)));
+            request("PATCH","/trackerSync/state",new JSONObject().put("fields",h));
+            await(()->live.get()&&gateway.trackerCheckpoint()[0]==epoch+1);
+            Map<String,Object> row=rounds.get().stream().filter(r->id.equals(r.get("id"))).findFirst().get();
+            assertEquals(900,((Number)((Map<?,?>)row.get("scoreChanges")).get("a")).intValue());
+        }finally{
+            h.put("mode",new JSONObject().put("stringValue","prepare")).put("enforced",new JSONObject().put("booleanValue",false));
+            request("PATCH","/trackerSync/state",new JSONObject().put("fields",h));request("DELETE","/rounds/"+id,null);
+        }
+    }
+
 }

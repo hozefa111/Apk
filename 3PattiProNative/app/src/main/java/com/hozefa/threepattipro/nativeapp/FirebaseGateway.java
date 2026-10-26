@@ -175,7 +175,7 @@ public final class FirebaseGateway {
             if(error!=null){onListenFailure(error);return;}
             if(head.getMetadata().isFromCache()||head.getMetadata().hasPendingWrites()){freshSnapshot=false;listener.syncState(false);return;}
             journalLatestHead=TrackerJournalSync.head(head);
-            journalHeadKnown=true;boolean active="incremental".equals(head.exists()?head.getString("mode"):"prepare");
+            journalHeadKnown=true;boolean active="incremental".equals(journalLatestHead.get("mode"))&&Boolean.TRUE.equals(journalLatestHead.get("enforced"));
             if(active!=journalActive){journalActive=active;legacyEpoch++;synchronized(snapshotLock){liveCollections.clear();collectionComplete.clear();liveBoundaries.clear();}listener.syncState(false);for(PagedFirestoreCollection p:subscriptions)snapshotDispatch.execute(p::close);subscriptions.clear();freshSnapshot=false;}
             listener.historyDeferred(false);
             if(active){freshSnapshot=false;listener.syncState(false);queueLoad(true);}else{startSubscriptions();queueLoad(true);}
@@ -499,7 +499,7 @@ public final class FirebaseGateway {
             cacheRecordWrites+=trackerCache.write(rows,Collections.emptyMap(),now,result.epoch,result.revision);
             if(!running||generation!=subscriptionGeneration||!journalActive)return;
             journalDocuments=result.documents;journalEpoch=result.epoch;journalRevision=result.revision;
-            if(journalLatestHead==null||TrackerJournalSync.number(journalLatestHead,"revision")<result.revision)journalLatestHead=TrackerJournalSync.values("mode","incremental","epoch",result.epoch,"revision",result.revision);versions=newVersions;rawDocuments=documents;snapshotAt=now;freshSnapshot=true;retry.succeeded();retryStore.edit().clear().apply();queryStarts+=engine.queries;
+            if(journalLatestHead==null||TrackerJournalSync.number(journalLatestHead,"revision")<result.revision)journalLatestHead=TrackerJournalSync.values("mode","incremental","enforced",true,"epoch",result.epoch,"revision",result.revision);versions=newVersions;rawDocuments=documents;snapshotAt=now;freshSnapshot=true;retry.succeeded();retryStore.edit().clear().apply();queryStarts+=engine.queries;
             ui.post(()->{if(!running||generation!=subscriptionGeneration)return;listener.historyDeferred(false);listener.syncProblem(null,0,false);listener.dataUpdated(groups.get("players"),groups.get("rounds"),groups.get("sessions"));listener.syncTimestamp(snapshotAt);listener.syncState(true);});
         }catch(java.util.concurrent.CancellationException cancelled){/* Resume keeps the durable checkpoint. */}
         catch(Exception failure){handleJournalFailure(failure);}
