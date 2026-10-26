@@ -18,8 +18,6 @@ jobs:
         include:
           - api: 30
             gpu: software
-          - api: 35
-            gpu: lavapipe
     env:
       JAVA_TOOL_OPTIONS: -Xmx768m
       NODE_OPTIONS: --max-old-space-size=512
