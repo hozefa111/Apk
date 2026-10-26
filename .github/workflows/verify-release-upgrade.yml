@@ -1,40 +1,42 @@
-name: Verify stable release update
+name: Verify and publish session leaderboard release
 on:
   workflow_dispatch:
+  push:
+    branches: [release-v2.7.20]
 permissions:
   contents: write
 jobs:
   upgrade:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Download existing release and private candidate
+      - name: Verify candidate and download stable previous release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download three-patti-pro-v2.7.12 -p '*.apk' -D previous
-          gh release download three-patti-pro-v2.7.13 -p '*.apk' -D candidate
+          sha256sum -c release-candidates/SHA256SUMS.txt
+          gh release download three-patti-pro-v2.7.19 -p '*.apk' -D previous
       - run: sudo chmod 666 /dev/kvm
-      - uses: reactivecircus/android-emulator-runner@v2
+      - name: Update stable app and restore actual old SQLite cache
+        uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
           arch: x86_64
           target: default
           disable-animations: true
-          script: |
-            adb root
-            adb wait-for-device
-            adb shell svc wifi disable
-            adb shell svc data disable
-            adb install previous/*.apk
-            adb shell am start -n com.hozefa.threepattipro.nativeapp/.MainActivity
-            sleep 5
-            adb shell mkdir -p /data/user/0/com.hozefa.threepattipro.nativeapp/files
-            adb shell touch /data/user/0/com.hozefa.threepattipro.nativeapp/files/upgrade-verification-marker
-            adb install -r candidate/*.apk
-            adb shell test -f /data/user/0/com.hozefa.threepattipro.nativeapp/files/upgrade-verification-marker
-            adb shell am start -n com.hozefa.threepattipro.nativeapp/.MainActivity
-            sleep 8
-            adb shell pidof com.hozefa.threepattipro.nativeapp
-            adb shell dumpsys package com.hozefa.threepattipro.nativeapp | grep 'versionName=2.7.13'
+          script: bash release-candidates/run-upgrade.sh
+      - name: Publish only after upgrade and matching web deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsSL 'https://hozefa111.github.io/hh/app.js?v=2.7.20' -o published-app.js
+          curl -fsSL 'https://hozefa111.github.io/hh/tracker-sync.js?v=2.7.20' -o published-sync.js
+          echo 'dfe28a178ef442a0112ae1bb1da2855e35900f65be601e935d5315cfe087fd9a  published-app.js' | sha256sum -c -
+          echo '844aadda61feb200602019ecf0b62c3cb5cf16c37c56bc64bdfc08b98cc9d65f  published-sync.js' | sha256sum -c -
+          gh release create three-patti-pro-v2.7.20 release-candidates/3-Patti-PRO-v2.7.20.apk release-candidates/SHA256SUMS.txt --target c97519a99ad8a5668cd309d05446d571eb21b65e --title '3 Patti PRO v2.7.20' --notes-file release-candidates/NOTES.md
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: session-leaderboard-release-upgrade
+          path: upgrade-evidence/
