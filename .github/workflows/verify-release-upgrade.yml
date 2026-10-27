@@ -1,35 +1,36 @@
-name: Verify signed v2.7.25 upgrade
+name: Publish verified v2.7.25
 on:
   push:
     branches: [verification-v2.7.25]
+  workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
   actions: read
 jobs:
-  upgrade:
+  publish:
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Reuse passed Android 11 and 15 save-delete gates
+      - name: Reuse exact passed tests and signed upgrade
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           test "$(gh run view 40479455400 --json conclusion --jq .conclusion)" = success
-          test "$(gh run view 40474919311 --json conclusion --jq .conclusion)" = success
+          test "$(gh run view 40479455400 --json headSha --jq .headSha)" = 7ed1056f38e8e98a0744e688f2d19d9b79065828
+          test "$(gh run view 40481435428 --json conclusion --jq .conclusion)" = success
+          test "$(gh run view 40481435428 --json headSha --jq .headSha)" = db72e094df19980cd6400bb95538ca51cee59ed6
+          test "$(gh run view 40479461193 -R hozefa111/hh --json conclusion --jq .conclusion)" = success
+          test "$(gh run view 40479461193 -R hozefa111/hh --json headSha --jq .headSha)" = 63d9f1d0dfa8790a153c5559fa9be0dd8427be7f
           sha256sum -c release-candidates/SHA256SUMS.txt
-          gh release download three-patti-pro-v2.7.24 -p '*.apk' -D previous
-      - run: sudo chmod 666 /dev/kvm
-      - name: Preserve v2.7.24 installation and data during signed upgrade
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 30
-          arch: x86_64
-          target: default
-          disable-animations: true
-          script: bash release-candidates/run-upgrade.sh
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: v2.7.25-upgrade-proof
-          path: upgrade-evidence/
+          echo '11a9a32504eabcbf5024c52a4e5f08dd19addfc27f33437689fc61615f2bf1f1  release-candidates/3-Patti-PRO-v2.7.25.apk' | sha256sum -c -
+          git fetch origin 808636fa64b909f810c5f155716eca403c07e4f6 db72e094df19980cd6400bb95538ca51cee59ed6 --depth=1
+          git diff --exit-code 808636fa64b909f810c5f155716eca403c07e4f6 HEAD -- 3PattiProNative/app/src/main 3PattiProNative/app/build.gradle.kts
+          git diff --exit-code db72e094df19980cd6400bb95538ca51cee59ed6 HEAD -- release-candidates/3-Patti-PRO-v2.7.25.apk
+      - name: Publish the exact verified APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sed 's@release-candidates/@@' release-candidates/SHA256SUMS.txt > /tmp/release.sha256
+          cp /tmp/release.sha256 release-candidates/SHA256SUMS.txt
+          gh release create three-patti-pro-v2.7.25 release-candidates/3-Patti-PRO-v2.7.25.apk release-candidates/SHA256SUMS.txt release-candidates/MEASUREMENTS.json --target 808636fa64b909f810c5f155716eca403c07e4f6 --latest --title '3 Patti PRO v2.7.25 — Faster save and delete' --notes-file release-candidates/NOTES.md

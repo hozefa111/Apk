@@ -1,0 +1,85 @@
+{
+  "version": "2.7.25",
+  "code": 46,
+  "package": "com.hozefa.threepattipro.nativeapp",
+  "nativeCommit": "808636fa64b909f810c5f155716eca403c07e4f6",
+  "android11Before": {
+    "baseline": true,
+    "fixtureRounds": 3000,
+    "tokenDelayMs": 350,
+    "roleDelayMs": 350,
+    "saveAckMs": 2291,
+    "saveReadyMs": 2802,
+    "roundDeleteMs": 3212,
+    "sessionDeleteMs": 8020,
+    "historyHttpAcquisitions": 6,
+    "historyDistinctConnections": 6,
+    "historyClientsCreated": 6
+  },
+  "android11After": {
+    "baseline": false,
+    "fixtureRounds": 3000,
+    "tokenDelayMs": 350,
+    "roleDelayMs": 350,
+    "saveAckMs": 1135,
+    "saveReadyMs": 1345,
+    "roundDeleteMs": 2310,
+    "sessionDeleteMs": 2205,
+    "historyHttpAcquisitions": 4,
+    "historyDistinctConnections": 1,
+    "historyClientsCreated": 1,
+    "encodedRowsAfterBootstrap": 3010,
+    "reusedRows": 9018
+  },
+  "android15After": {
+    "baseline": false,
+    "fixtureRounds": 3000,
+    "tokenDelayMs": 350,
+    "roleDelayMs": 350,
+    "saveAckMs": 937,
+    "saveReadyMs": 1248,
+    "roundDeleteMs": 2521,
+    "sessionDeleteMs": 2711,
+    "historyHttpAcquisitions": 4,
+    "historyDistinctConnections": 1,
+    "historyClientsCreated": 1,
+    "encodedRowsAfterBootstrap": 3010,
+    "reusedRows": 9018
+  },
+  "measurementsAre": "controlled emulator tests; simulated 350ms token and role delays; NOT production network or physical phone",
+  "nativeFinalRun": "https://github.com/hozefa111/Apk/actions/runs/40479455400",
+  "nativeFinalTests": [
+    {
+      "api": 30,
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "api": 35,
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    }
+  ],
+  "savedDataUpgradeRun": "https://github.com/hozefa111/Apk/actions/runs/40481435428",
+  "apkSha256": "11a9a32504eabcbf5024c52a4e5f08dd19addfc27f33437689fc61615f2bf1f1",
+  "gameAssetFilesUnchanged": 18,
+  "backendCommit": "04da6d44ae8dad21253a28ace27d5c9d9bf767bb",
+  "backendRegressionRun": "https://github.com/hozefa111/hh/actions/runs/40479461193",
+  "backendRegression": "PASS on rerun; first attempt transient legacy join timeout",
+  "signedUpgrade": "PASS; retained synthetic cache and marker without uninstall/clear",
+  "cloudflareVersion": "6a96a819-9e3e-44c2-acc3-b30b8785711f",
+  "cloudflareDeleteFixture": {
+    "conditions": "empty stopped CF2 room, mocked Firestore transport, actual SQLite Durable Object; not billed production totals",
+    "beforeMs": 3061,
+    "afterMs": 92,
+    "beforePointReads": 30,
+    "afterPointReads": 19,
+    "beforeWrites": 16,
+    "afterWrites": 14
+  },
+  "physicalDeviceTesting": false
+}
