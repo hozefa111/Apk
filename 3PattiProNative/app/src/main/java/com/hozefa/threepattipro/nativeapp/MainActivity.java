@@ -65,8 +65,12 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private LinearLayout root, content, navigation, toolbar;
     private ScrollView scroll;
     private final Map<String,Map<String,Object>> correctedManualSessions=new HashMap<>();
+    private Map<String,List<Map<String,Object>>> manualSummaryIndex;
     private final Map<String,ScoreboardModel> savedScoreboardModels=new HashMap<>();
-    private String analyticsCacheKey;private AdvancedAnalytics.Report analyticsCache;
+    private String analyticsCacheKey,analyticsPendingKey,analyticsFailureKey,analyticsRenderedKey;private AdvancedAnalytics.Report analyticsCache;
+    private long dataGeneration;
+    private java.util.concurrent.Future<?> analyticsTask;
+    private final java.util.concurrent.ThreadPoolExecutor analyticsWorker=new java.util.concurrent.ThreadPoolExecutor(1,1,0L,java.util.concurrent.TimeUnit.MILLISECONDS,new java.util.concurrent.ArrayBlockingQueue<Runnable>(1),new java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy());
     private boolean loggedIn=false, busy=false, hasData=false, liveConnected=false, historyDeferred=true;
     private long lastSyncedAt=0;
     private String syncProblem;
@@ -141,6 +145,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(authDialog!=null){authDialog.dismiss();authDialog=null;}
         if(motion!=null)motion.close();
         clock.removeCallbacksAndMessages(null);
+        analyticsWorker.shutdownNow();
         if (api != null) api.stop();
         super.onDestroy();
     }
@@ -154,8 +159,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         boolean freshRound=motionEvents.update(timestamps,liveConnected&&resumed,System.currentTimeMillis());
         // A no-op coherent refresh still seeds motion after resume/reconnect.
         if(hasData && players.equals(p) && rounds.equals(r) && sessions.equals(s)) return;
-        correctedManualSessions.clear();
-        ScoreboardModel oldBoard=hasData?scoreboardModel(tab==0):null;
+        correctedManualSessions.clear();manualSummaryIndex=null;dataGeneration++;
+        if(analyticsTask!=null)analyticsTask.cancel(true);analyticsWorker.getQueue().clear();analyticsPendingKey=null;analyticsFailureKey=null;
+        ScoreboardModel oldBoard=hasData&&(tab==0||tab==3||tab==10)?scoreboardModel(tab==0):null;
         savedScoreboardModels.clear();analyticsCache=null;analyticsCacheKey=null;
         motion.cancelTree(content);
         scoreMotion=freshRound?motion.capture(content):null;
@@ -255,6 +261,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putBoolean("ranksSessions",ranksSessions);state.putString("selectedSessionId",selectedSessionId);state.putString("scoreboardScope",scoreboardScope);state.putBoolean("bigKeepAwake",bigKeepAwake);state.putInt("bigOriginScroll",bigOriginScroll);if(voiceGuide!=null)voiceGuide.saveState(state);analyticsState.save(state);persistDraft();state.putInt("tab",tab);state.putInt("historyTab",historyTab);state.putString("rankFilter",rankFilter);state.putString("profileId",profileId);state.putLong("customStart",customStart);state.putLong("customEnd",customEnd);state.putString("searchQuery",searchQuery);}
     @Override protected void onResume(){
         super.onResume();resumed=true;if(settings.getBoolean("online_sign_in_requested",false)){settings.edit().remove("online_sign_in_requested").apply();clock.post(this::loginDialog);}applyScoreboardWake();if(voiceGuide!=null)voiceGuide.resume();motion.resume();motionEvents.invalidate();if((hasData||ranksSessions)&&(tab==0||tab==3||tab==10))render(false);if(api!=null)api.setForeground(true);
+        if(tab==7&&analyticsCache!=null&&!Objects.equals(analyticsRenderedKey,analyticsCacheKey))render(false);
         if(launchReveal){launchReveal=false;motion.enter(root,0);}
         if(deferredRoundResult!=null){Map<String,Object> result=deferredRoundResult;deferredRoundResult=null;showRoundSaved(result,false);}
         if(deferredSessionSummary!=null){Map<String,Object> result=deferredSessionSummary;deferredSessionSummary=null;showSessionSummary(result,false);}
@@ -1003,7 +1010,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(!home&&ranksSessions)return SessionLeaderboard.model(players,gameRounds(),sessions,selectedRankSession(),sessionScores==null?null:sessionScores.boards.get(selectedSessionId));
         // Live/session projections stay uncached. Saved all-time models change only
         // when the coherent tracker dataset changes, which clears this bounded map.
-        String key=home?"home:"+scoreboardScope:"lifetime";
+        String key=home&&"current".equals(scoreboardScope)?"home:current":"lifetime";
         return savedScoreboardModels.computeIfAbsent(key,k->new ScoreboardModel(players,scoreboardSource(home),AdvancedAnalytics.scope(gameRounds(),sessions,"current")));
     }
     private String scoreboardContext(boolean home){
@@ -1571,8 +1578,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     private void showSessionSummary(Map<String,Object> session) {showSessionSummary(session,false);}
     private Map<String,Object> effectiveSession(Map<String,Object> session){
-        if(!hasData||historyDeferred||session.get("endTime")==null||SessionLeaderboard.online(session))return session;
-        return correctedManualSessions.computeIfAbsent(id(session),key->SessionSummary.corrected(session,players,gameRounds(),sessions));
+        if(!hasData||historyDeferred||id(session).isEmpty()||session.get("endTime")==null||SessionLeaderboard.online(session))return session;
+        if(manualSummaryIndex==null)manualSummaryIndex=SessionSummary.indexNewest(gameRounds(),sessions);
+        return correctedManualSessions.computeIfAbsent(id(session),key->SessionSummary.fromSelected(session,players,manualSummaryIndex.getOrDefault(key,Collections.emptyList())));
     }
     private void showSessionSummary(Map<String,Object> source,boolean celebrate) {
         Map<String,Object> session=effectiveSession(source);
@@ -1858,8 +1866,20 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(!hasData){empty("Analytics needs a loaded or saved table.");content.addView(text("Connect to your shared table once to build analytics. Your last saved table works offline.",14,MUTED,false));return;}
         Instant now=Instant.now();ZoneId zone=ZoneId.systemDefault();DateRange range=DateRange.of(rankFilter,now,zone,customStart,customEnd);
         String key=rankFilter+"|"+range.start+"|"+range.end+"|"+zone.getId()+"|"+analyticsState.scope;
-        if(analyticsCache==null||!key.equals(analyticsCacheKey)){List<Map<String,Object>> scope=AdvancedAnalytics.scope(AdvancedAnalytics.dates(gameRounds(),rankFilter,now,zone,customStart,customEnd),sessions,analyticsState.scope);analyticsCache=new AdvancedAnalytics.Report(players,scope,sessions);analyticsCacheKey=key;}
-        AdvancedAnalytics.Report report=analyticsCache;
+        if(analyticsCache==null||!key.equals(analyticsCacheKey)){
+            if(key.equals(analyticsFailureKey)){content.addView(text("Could not calculate analytics. Your saved scores are unchanged.",14,MUTED,false));content.addView(button("Retry analytics",false,()->{analyticsFailureKey=null;render(false);}));return;}
+            content.addView(text("Loading analytics…",14,MUTED,false));analyticsRenderedKey=null;
+            if(!key.equals(analyticsPendingKey)){
+                if(analyticsTask!=null)analyticsTask.cancel(true);analyticsWorker.getQueue().clear();analyticsPendingKey=key;
+                final long generation=dataGeneration;final String filter=rankFilter,scopeId=analyticsState.scope;final long from=customStart,to=customEnd;
+                final List<Map<String,Object>> people=new ArrayList<>(players),games=new ArrayList<>(gameRounds()),catalog=new ArrayList<>(sessions);
+                analyticsTask=analyticsWorker.submit(()->{try{List<Map<String,Object>> scope=AdvancedAnalytics.scope(AdvancedAnalytics.dates(games,filter,now,zone,from,to),catalog,scopeId);AdvancedAnalytics.Report calculated=new AdvancedAnalytics.Report(people,scope,catalog);
+                    clock.post(()->{if(isDestroyed()||isFinishing()||generation!=dataGeneration||!key.equals(analyticsPendingKey))return;analyticsCache=calculated;analyticsCacheKey=key;analyticsPendingKey=null;if(tab==7&&resumed)render(false);});
+                }catch(Exception failure){clock.post(()->{if(isDestroyed()||generation!=dataGeneration||!key.equals(analyticsPendingKey))return;analyticsFailureKey=key;analyticsPendingKey=null;if(tab==7&&resumed)render(false);});}});
+            }
+            return;
+        }
+        analyticsRenderedKey=key;AdvancedAnalytics.Report report=analyticsCache;
         new AdvancedAnalyticsPage(this,content,analyticsState,report,sessions,PANEL,GOLD,GREEN,RED,BLUE,new AdvancedAnalyticsPage.Host(){
             public void choose(String title,String[] labels,java.util.function.IntConsumer action){
                 if(labels.length==0){Toast.makeText(MainActivity.this,"No other options in this scope",Toast.LENGTH_SHORT).show();return;}

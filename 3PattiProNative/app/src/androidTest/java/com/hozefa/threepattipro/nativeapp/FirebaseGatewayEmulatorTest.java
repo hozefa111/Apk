@@ -459,4 +459,34 @@ public class FirebaseGatewayEmulatorTest {
         }finally{InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.stop());request("PATCH","/trackerSync/state",new JSONObject().put("fields",original));}
     }
 
+    private void enableManualGuardFixture()throws Exception{request("PATCH","/meta/manualSession",new JSONObject().put("fields",SdkDocuments.fields(FirebaseGateway.map("sessionId",null))));}
+    private void cleanManualFixture(List<String> paths)throws Exception{
+        JSONArray deletes=new JSONArray();for(String path:paths)if(com.google.android.gms.tasks.Tasks.await(testDb().document(path).get(com.google.firebase.firestore.Source.SERVER),20,TimeUnit.SECONDS).exists())deletes.put(new JSONObject().put("delete","projects/demo-three-patti/databases/(default)/documents/"+path).put("currentDocument",new JSONObject().put("exists",true)));
+        if(deletes.length()>0){ready(()->{});java.lang.reflect.Method commit=FirebaseGateway.class.getDeclaredMethod("commit",JSONArray.class);commit.setAccessible(true);commit.invoke(gateway,deletes);}
+        request("DELETE","/meta/manualSession",null);
+    }
+    private Map<String,Object> createGuardSession(String name)throws Exception{
+        CountDownLatch saved=new CountDownLatch(1);ready(()->gateway.addDocument("sessions",FirebaseGateway.map("sessionName",name,"source","manual","startTime",FirebaseGateway.now(),"endTime",null),"Session started",saved::countDown,()->fail(notice.get())));completed(saved,"guarded manual start");await(()->sessions.get().stream().anyMatch(s->name.equals(s.get("sessionName")))&&live.get()&&!busy.get());return sessions.get().stream().filter(s->name.equals(s.get("sessionName"))).findFirst().get();
+    }
+    @Test public void manualSessionGuardBindsRoundRejectsSecondStartAndAdvancesAfterEnd()throws Exception{
+        List<String> paths=new ArrayList<>();enableManualGuardFixture();String prefix="guard-"+UUID.randomUUID();
+        try{
+            Map<String,Object> one=createGuardSession(prefix);String sid=String.valueOf(one.get("id"));paths.add("sessions/"+sid);assertEquals(sid,request("GET","/meta/manualSession",null).getJSONObject("fields").getJSONObject("sessionId").getString("stringValue"));
+            String rid=prefix+"-round";paths.add("rounds/"+rid);Map<String,Object> body=FirebaseGateway.map("source","manual","type","hukum","sessionId","stale","bid",180,"hukumId","a","partnerIds",Arrays.asList("b"),"nonPartnerIds",Arrays.asList("c"),"playerIds",Arrays.asList("a","b","c"),"result","win","scoreChanges",FirebaseGateway.map("a",360,"b",180,"c",0));
+            CountDownLatch saved=new CountDownLatch(1);ready(()->gateway.addRoundWithId(rid,body,saved::countDown,()->fail(notice.get())));completed(saved,"bound round");await(()->rounds.get().stream().anyMatch(r->rid.equals(r.get("id")))&&live.get()&&!busy.get());assertEquals(sid,rounds.get().stream().filter(r->rid.equals(r.get("id"))).findFirst().get().get("sessionId"));
+            CountDownLatch rejected=new CountDownLatch(1);ready(()->gateway.addDocument("sessions",FirebaseGateway.map("sessionName",prefix+"-duplicate","endTime",null),"Must not start",()->fail("Duplicate active session"),rejected::countDown));completed(rejected,"second start rejected");assertTrue(notice.get().contains("already active"));await(()->live.get()&&!busy.get());
+            CountDownLatch closed=new CountDownLatch(1);Map<String,Object> latest=sessions.get().stream().filter(r->sid.equals(r.get("id"))).findFirst().get();ready(()->gateway.patchDocument("sessions",sid,FirebaseGateway.map("endTime",FirebaseGateway.now()),"Ended",String.valueOf(latest.get("_updateTime")),closed::countDown));completed(closed,"end guarded session");await(()->live.get()&&!busy.get());assertTrue(request("GET","/meta/manualSession",null).getJSONObject("fields").getJSONObject("sessionId").has("nullValue"));
+            Map<String,Object> two=createGuardSession(prefix+"-next");paths.add("sessions/"+two.get("id"));assertNotEquals(sid,String.valueOf(two.get("id")));assertEquals(sid,request("GET","/rounds/"+rid,null).getJSONObject("fields").getJSONObject("sessionId").getString("stringValue"));
+        }finally{cleanManualFixture(paths);}
+    }
+    @Test public void restoreCannotAddPointsBeforeDiscoveringConflictingActiveSession()throws Exception{
+        List<String> paths=new ArrayList<>();enableManualGuardFixture();String prefix="restore-guard-"+UUID.randomUUID();
+        try{
+            Map<String,Object> active=createGuardSession(prefix);paths.add("sessions/"+active.get("id"));
+            JSONArray docs=new JSONArray().put(new JSONObject().put("name","projects/demo-three-patti/databases/(default)/documents/rounds/"+prefix).put("fields",SdkDocuments.fields(FirebaseGateway.map("source","manual","scoreChanges",FirebaseGateway.map("a",999)))))
+                .put(new JSONObject().put("name","projects/demo-three-patti/databases/(default)/documents/sessions/"+prefix).put("fields",SdkDocuments.fields(FirebaseGateway.map("source","manual","sessionName","Conflicting active","endTime",null))));
+            byte[] bytes=new JSONObject().put("format","3patti-firestore-v1").put("project","demo-three-patti").put("documents",docs).toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);assertEquals(2,BackupArchive.validate(bytes,"demo-three-patti").size());notice.set("");ready(()->gateway.restoreBackup(bytes));await(()->notice.get().contains("multiple active manual sessions")&&!busy.get());assertFalse(gateway.hasPendingBulkOperation());assertFalse(com.google.android.gms.tasks.Tasks.await(testDb().document("rounds/"+prefix).get(com.google.firebase.firestore.Source.SERVER),20,TimeUnit.SECONDS).exists());assertFalse(com.google.android.gms.tasks.Tasks.await(testDb().document("sessions/"+prefix).get(com.google.firebase.firestore.Source.SERVER),20,TimeUnit.SECONDS).exists());
+        }finally{cleanManualFixture(paths);}
+    }
+
 }

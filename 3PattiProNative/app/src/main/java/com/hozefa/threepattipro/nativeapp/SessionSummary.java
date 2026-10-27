@@ -7,9 +7,21 @@ public final class SessionSummary {
     private SessionSummary(){}
     /** Saved metadata is an archive; corrected manual views follow the same rounds as Ranks. */
     public static Map<String,Object> corrected(Map<String,Object> session,List<Map<String,Object>> players,List<Map<String,Object>> all,List<Map<String,Object>> catalog){
-        if(session.get("endTime")==null||SessionLeaderboard.online(session))return session;
+        if(SessionLeaderboard.id(session).isEmpty()||session.get("endTime")==null||SessionLeaderboard.online(session))return session;
         List<Map<String,Object>> sessions=new ArrayList<>();for(Map<String,Object> s:catalog)if(!SessionLeaderboard.id(s).equals(SessionLeaderboard.id(session)))sessions.add(s);sessions.add(session);
         List<Map<String,Object>> selected=SessionLeaderboard.rounds(all,sessions,SessionLeaderboard.id(session));Collections.reverse(selected);
+        return fromSelected(session,players,selected);
+    }
+    static Map<String,List<Map<String,Object>>> indexNewest(List<Map<String,Object>> newest,List<Map<String,Object>> sessions){
+        Map<String,long[]> bounds=new LinkedHashMap<>();for(Map<String,Object> session:sessions)if(!SessionLeaderboard.online(session)){bounds.put(SessionLeaderboard.id(session),new long[]{SessionLeaderboard.time(session.get("startTime")),session.get("endTime")==null?Long.MAX_VALUE:SessionLeaderboard.time(session.get("endTime"))});}
+        Map<String,List<Map<String,Object>>> groups=new HashMap<>();Map<String,Set<String>> seen=new HashMap<>();int anonymous=0;
+        for(Map<String,Object> r:newest){if(!AdvancedAnalytics.eligible(r)||"online".equals(r.get("source")))continue;String target=text(r,"sessionId");
+            if(target.isEmpty()){long t=SessionLeaderboard.time(r.get("timestamp"));int count=0;for(Map.Entry<String,long[]> b:bounds.entrySet())if(t!=Long.MIN_VALUE&&b.getValue()[0]!=Long.MIN_VALUE&&t>=b.getValue()[0]&&t<b.getValue()[1]){target=b.getKey();count++;}if(count!=1)continue;}
+            String key=text(r,"id");if(key.isEmpty())key="anonymous:"+(anonymous++);if(seen.computeIfAbsent(target,k->new HashSet<>()).add(key))groups.computeIfAbsent(target,k->new ArrayList<>()).add(r);
+        }
+        return groups;
+    }
+    static Map<String,Object> fromSelected(Map<String,Object> session,List<Map<String,Object>> players,List<Map<String,Object>> selected){
         Map<String,Map<String,Object>> roster=new LinkedHashMap<>();for(Map<String,Object> p:players)roster.put(text(p,"id"),p);
         for(Map<String,Object> p:SessionLeaderboard.maps(session.get("leaderboard"))){String id=text(p,"id");if(id.isEmpty())id=text(p,"playerId");if(!id.isEmpty())roster.putIfAbsent(id,row("id",id,"name",p.get("name")));}
         for(Map<String,Object> r:selected){

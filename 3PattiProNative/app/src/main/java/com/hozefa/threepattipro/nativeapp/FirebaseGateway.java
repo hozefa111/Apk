@@ -305,13 +305,14 @@ public final class FirebaseGateway {
     /** All preconditions are read and checked before any write in this SDK transaction. */
     private final Map<JSONArray,String[]> trackerWriteIntents=new WeakHashMap<>();
     private static final class TrackerConflict extends IllegalStateException {TrackerConflict(Exception cause){super(cause.getMessage(),cause);}}
-    private void commit(JSONArray requestWrites)throws Exception {
+    private void commit(JSONArray requestWrites)throws Exception {commit(requestWrites,false,null);}
+    private void commit(JSONArray requestWrites,boolean manualRound,Long startRevision)throws Exception {
         final JSONArray writes=new JSONArray(requestWrites.toString());
         if(retry.remaining(retryClock.getAsLong())>0)throw new IOException("Sync retry is pending");
         final String owner=bulkOwner();
-        final String fingerprint=DocumentVersion.of(new JSONObject().put("owner",owner).put("writes",writes));final String commandId;
+        final String fingerprint=DocumentVersion.of(new JSONObject().put("owner",owner).put("writes",writes).put("manualRound",manualRound));final String commandId;
         synchronized(trackerWriteIntents){String[] intent=trackerWriteIntents.get(requestWrites);if(intent==null){intent=new String[]{UUID.randomUUID().toString().replace("-",""),fingerprint};trackerWriteIntents.put(requestWrites,intent);}if(!intent[1].equals(fingerprint))throw new IOException("Write command changed. Review and create a new save.");commandId=intent[0];}
-        final DocumentReference journalEvent=firestore.collection("trackerChanges").document("native_"+commandId);
+        final DocumentReference journalEvent=firestore.collection("trackerChanges").document("native2_"+(manualRound?"round_":"")+commandId);
         for(int attempt=0;attempt<6;attempt++){
         final java.util.concurrent.atomic.AtomicReference<Map<String,Object>> attempted=new java.util.concurrent.atomic.AtomicReference<>();
         try{
@@ -320,6 +321,11 @@ public final class FirebaseGateway {
                 if(signingOut||!owner.equals(bulkOwner()))throw new IOException("Login changed");
                 if(transaction.get(journalEvent).exists())return null;
                 DocumentReference syncRef=firestore.document("trackerSync/state");DocumentSnapshot syncSnapshot=transaction.get(syncRef);Map<String,Object> sync=TrackerJournalSync.head(syncSnapshot);attempted.set(sync);
+                boolean sessionEdits=false;for(int i=0;i<writes.length();i++){JSONObject w=writes.getJSONObject(i);String name=w.has("delete")?w.getString("delete"):w.getJSONObject("update").getString("name");if(name.contains("/documents/sessions/"))sessionEdits=true;}
+                DocumentReference guardRef=firestore.document("meta/manualSession");DocumentSnapshot guard=manualRound||sessionEdits?transaction.get(guardRef):null;
+                if(startRevision!=null&&(guard==null||!guard.exists())&&TrackerJournalSync.number(sync,"revision")!=startRevision)throw new IOException("Session state changed. Synchronize before starting another.");
+                String pointer=guard!=null&&guard.exists()?guard.getString("sessionId"):null;
+                Map<String,Map<String,Object>> sessionAfter=new LinkedHashMap<>();
                 List<DocumentReference> refs=new ArrayList<>();
                 List<Map<String,Object>> edits=new ArrayList<>();
                 for(int i=0;i<writes.length();i++){
@@ -337,12 +343,15 @@ public final class FirebaseGateway {
                         if(!current.exists()||!token.equals(DocumentVersion.of(SdkDocuments.fields(current.getData()))))
                             throw new IOException("Record changed. Refresh before saving; newer data was kept.");
                     }
-                    if(write.has("delete")){edits.add(null);continue;}
+                    if(write.has("delete")){edits.add(null);if(path.startsWith("sessions/"))sessionAfter.put(ref.getId(),null);continue;}
                     Map<String,Object> values=SdkDocuments.decode(write.getJSONObject("update").getJSONObject("fields"),firestore);
                     JSONArray transforms=write.optJSONArray("updateTransforms");
                     if(transforms!=null)for(int j=0;j<transforms.length();j++)values.put(transforms.getJSONObject(j).getString("fieldPath"),FieldValue.serverTimestamp());
+                    if(manualRound&&guard!=null&&guard.exists()&&path.startsWith("rounds/"))values.put("sessionId",pointer);
+                    if(path.startsWith("sessions/")){Map<String,Object> after=new HashMap<>();if(write.has("updateMask")&&current.exists())after.putAll(current.getData());after.putAll(values);sessionAfter.put(ref.getId(),after);}
                     edits.add(values);
                 }
+                String nextPointer=guard!=null&&guard.exists()?ManualSessionGuard.next(pointer,sessionAfter):pointer;
                 // SDK transactions fail offline; unlike batches they cannot queue an offline save.
                 for(int i=0;i<writes.length();i++){
                     JSONObject write=writes.getJSONObject(i);DocumentReference ref=refs.get(i);
@@ -354,6 +363,7 @@ public final class FirebaseGateway {
                         transaction.set(ref,edits.get(i),SetOptions.mergeFieldPaths(new ArrayList<>(updates.keySet())));
                     }else transaction.set(ref,edits.get(i));
                 }
+                if(guard!=null&&guard.exists()&&!Objects.equals(pointer,nextPointer))transaction.set(guardRef,TrackerJournalSync.values("sessionId",nextPointer));
                 List<String> paths=new ArrayList<>();for(DocumentReference ref:refs)if(!paths.contains(ref.getPath()))paths.add(ref.getPath());Collections.sort(paths);
                 if(paths.size()>450)throw new IOException("Split tracker changes into smaller batches");
                 long revision=TrackerJournalSync.number(sync,"revision")+1;
@@ -1021,6 +1031,8 @@ public final class FirebaseGateway {
             // Load live state first; conflicts fail before any mutation.
             load();if(!freshSnapshot)throw new IOException("Live data required");
             if(legacy)for(String path:rawDocuments.keySet())if(path.startsWith("players/"))throw new IOException("Legacy import requires an empty player collection");
+            Set<String> activeIds=new HashSet<>();for(Map<String,Object> session:cachedSessionRows()){String sid=String.valueOf(session.get("id"));if(ManualSessionGuard.active(sid,session))activeIds.add(sid);}
+            List<JSONObject> activeSessionWrites=new ArrayList<>();
             for(JSONObject doc:documents){
                 String path=BackupArchive.path(doc,project);
                 JSONObject normalized=SdkDocuments.fields(SdkDocuments.decode(doc.getJSONObject("fields"),firestore));
@@ -1030,10 +1042,14 @@ public final class FirebaseGateway {
                         throw new IOException("Backup conflicts with existing "+path+". No records changed.");
                     continue;
                 }
-                writes.put(new JSONObject().put("update",new JSONObject().put("name",documentRoot+"/"+path).put("fields",normalized))
-                    .put("currentDocument",new JSONObject().put("exists",false)));
+                JSONObject candidate=new JSONObject().put("update",new JSONObject().put("name",documentRoot+"/"+path).put("fields",normalized)).put("currentDocument",new JSONObject().put("exists",false));
+                if(path.startsWith("sessions/")&&ManualSessionGuard.active(path.substring(9),decodeFields(normalized))){activeIds.add(path.substring(9));activeSessionWrites.add(candidate);}else writes.put(candidate);
             }
-            startBulk("restore",writes,token);
+            if(activeIds.size()>1)throw new IOException("Restore would create multiple active manual sessions. End extra sessions first. No records changed.");
+            // Claim any restored active session before adding points. A concurrent
+            // start then fails this first atomic chunk instead of partially importing rounds.
+            JSONArray ordered=new JSONArray();for(JSONObject candidate:activeSessionWrites)ordered.put(candidate);for(int i=0;i<writes.length();i++)ordered.put(writes.get(i));
+            startBulk("restore",ordered,token);
         });
     }
     public static Map<String,Object> map(Object... v) {
@@ -1063,7 +1079,13 @@ public final class FirebaseGateway {
         final String documentId=UUID.randomUUID().toString();
         write(success,token->{
             JSONObject update=updateWrite(collection,documentId,fields,new JSONObject().put("exists",false),false);
-            commit(new JSONArray().put(update));
+            Long startRevision=null;
+            if("sessions".equals(collection)&&ManualSessionGuard.active(documentId,fields)){
+                DocumentSnapshot head=Tasks.await(firestore.document("trackerSync/state").get(Source.SERVER),20,TimeUnit.SECONDS);
+                startRevision=head.exists()?TrackerJournalSync.number(head.getData(),"revision"):0L;
+                for(DocumentSnapshot open:Tasks.await(firestore.collection("sessions").whereEqualTo("endTime",null).get(Source.SERVER),20,TimeUnit.SECONDS))if(ManualSessionGuard.active(open.getId(),open.getData()))throw new IOException("A manual session is already active. Refresh before starting another.");
+            }
+            commit(new JSONArray().put(update),false,startRevision);
         },onSaved,onFailed);
     }
     /**
@@ -1080,7 +1102,7 @@ public final class FirebaseGateway {
         write("Round saved successfully",token->{
             JSONObject update=updateWrite("rounds",id,tagged,new JSONObject().put("exists",false),false);
             try {
-                commit(new JSONArray().put(update));
+                commit(new JSONArray().put(update),true,null);
             }catch(Exception failure){
                 // A timeout might occur AFTER the backend committed the write.
                 // Verify our unique UUID before offering a retry, to avoid
