@@ -109,7 +109,7 @@ public class OnlineGameTest {
    }
   }
  }
- @Test public void invitationPrefillsRoomCodeInBundledTable()throws Exception{Intent intent=new Intent(InstrumentationRegistry.getInstrumentation().getTargetContext(),OnlineGameActivity.class).putExtra("roomCode","ABCDEFGH");try(ActivityScenario<OnlineGameActivity>s=ActivityScenario.launch(intent)){try{long until=System.currentTimeMillis()+45000;boolean loaded=false;while(System.currentTimeMillis()<until){if("\"ABCDEFGH\"".equals(js(s,"document.querySelector('#join input[name=code]')?.value"))){loaded=true;break;}Thread.sleep(300);}assertTrue("Invite retained",loaded);}finally{onlineUi(android.app.Activity::finish);}}}
+ @Test public void invitationPrefillsRoomCodeInBundledTable()throws Exception{Intent intent=new Intent(InstrumentationRegistry.getInstrumentation().getTargetContext(),OnlineGameActivity.class).putExtra("roomCode","ABCDEFGH");try(ActivityScenario<OnlineGameActivity>s=ActivityScenario.launch(intent)){try{long until=System.currentTimeMillis()+45000;boolean loaded=false;while(System.currentTimeMillis()<until){if("\"ABCDEFGH\"".equals(js(s,"(function(){var input=document.querySelector('#join input[name=code]');return input?input.value:null;})()"))){loaded=true;break;}Thread.sleep(300);}assertTrue("Invite retained",loaded);}finally{onlineUi(android.app.Activity::finish);}}}
  @Test public void nativeAndEmbeddedAuthRestoreExactlyTheSameIdentity()throws Exception{
   org.junit.Assume.assumeTrue("Full online emulator required", "true".equals(InstrumentationRegistry.getArguments().getString("kaliOnlineBackend")));
   try(ActivityScenario<OnlineGameActivity> scenario=ActivityScenario.launch(OnlineGameActivity.class)){
