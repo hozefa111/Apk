@@ -3,9 +3,31 @@ import android.content.Intent;import android.webkit.WebView;import android.view.
 public class OnlineGameTest {
  private WebView web(View v){if(v instanceof WebView)return(WebView)v;if(v instanceof ViewGroup)for(int i=0;i<((ViewGroup)v).getChildCount();i++){WebView found=web(((ViewGroup)v).getChildAt(i));if(found!=null)return found;}return null;}
  private View described(View v,String text){if(text.contentEquals(v.getContentDescription()==null?"":v.getContentDescription()))return v;if(v instanceof ViewGroup)for(int i=0;i<((ViewGroup)v).getChildCount();i++){View found=described(((ViewGroup)v).getChildAt(i),text);if(found!=null)return found;}return null;}
- private String js(ActivityScenario<OnlineGameActivity> s,String script)throws Exception{CountDownLatch latch=new CountDownLatch(1);AtomicReference<String> value=new AtomicReference<>();s.onActivity(a->web(a.getWindow().getDecorView()).evaluateJavascript(script,v->{value.set(v);latch.countDown();}));assertTrue("Javascript result",latch.await(15,TimeUnit.SECONDS));return value.get();}
+ // WebView animation frames need not leave the whole looper idle. Probe the
+ // real UI thread with bounded callbacks, as HybridWebViewTest already does.
+ private void onlineUi(java.util.function.Consumer<OnlineGameActivity> action)throws Exception{
+  CountDownLatch done=new CountDownLatch(1);AtomicReference<Throwable> failure=new AtomicReference<>();
+  new android.os.Handler(android.os.Looper.getMainLooper()).post(()->{try{
+   for(androidx.test.runner.lifecycle.Stage stage:new androidx.test.runner.lifecycle.Stage[]{androidx.test.runner.lifecycle.Stage.RESUMED,androidx.test.runner.lifecycle.Stage.STARTED,androidx.test.runner.lifecycle.Stage.CREATED,androidx.test.runner.lifecycle.Stage.PAUSED,androidx.test.runner.lifecycle.Stage.STOPPED})
+    for(android.app.Activity a:androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage))if(a instanceof OnlineGameActivity){action.accept((OnlineGameActivity)a);return;}
+   throw new AssertionError("Online Activity unavailable");
+  }catch(Throwable error){failure.set(error);}finally{done.countDown();}});
+  assertTrue("WebView UI thread must respond",done.await(15,TimeUnit.SECONDS));if(failure.get()!=null)throw new AssertionError(failure.get());
+ }
+ private String js(ActivityScenario<OnlineGameActivity> s,String script)throws Exception{CountDownLatch latch=new CountDownLatch(1);AtomicReference<String> value=new AtomicReference<>();onlineUi(a->web(a.getWindow().getDecorView()).evaluateJavascript(script,v->{value.set(v);latch.countDown();}));assertTrue("Javascript result",latch.await(15,TimeUnit.SECONDS));return value.get();}
  @Test public void existingNativeHomeContainsOnlineEntry()throws Exception{try(ActivityScenario<MainActivity> s=ActivityScenario.launch(MainActivity.class)){long until=System.currentTimeMillis()+20000;AtomicReference<View> entry=new AtomicReference<>();while(System.currentTimeMillis()<until){s.onActivity(a->entry.set(described(a.getWindow().getDecorView(),"Play Online Kali Ki Tidi")));if(entry.get()!=null)break;Thread.sleep(200);}assertNotNull(entry.get());assertTrue(entry.get().isClickable());}}
- @Test public void sharedTableLoadsInsideSamePackageWithSafeWebSettings()throws Exception{try(ActivityScenario<OnlineGameActivity> s=ActivityScenario.launch(OnlineGameActivity.class)){long until=System.currentTimeMillis()+45000;boolean loaded=false;while(System.currentTimeMillis()<until){if("true".equals(js(s,"typeof KaliRules!=='undefined' && !!document.getElementById('join')"))){loaded=true;break;}Thread.sleep(300);}assertTrue("Bundled table loaded",loaded);assertEquals("true",js(s,"!!document.querySelector('#join select[name=playerId]') && !document.querySelector('#join input[name=name]')"));assertEquals("[40,42,30]",js(s,"[KaliRules.deck(4).length,KaliRules.deck(6).length,KaliRules.points('3S')]"));js(s,"window.resumeRepairs=0;window.kaliReconnect=()=>window.resumeRepairs++");s.moveToState(androidx.lifecycle.Lifecycle.State.CREATED);s.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED);assertEquals("true",js(s,"window.resumeRepairs>0"));s.onActivity(a->{WebView w=web(a.getWindow().getDecorView());assertFalse(w.getSettings().getAllowFileAccess());assertFalse(w.getSettings().getAllowContentAccess());assertTrue(w.getUrl().startsWith("https://appassets.androidplatform.net/assets/kali/"));});}}
+ @Test public void sharedTableLoadsInsideSamePackageWithSafeWebSettings()throws Exception{
+  try(ActivityScenario<OnlineGameActivity> s=ActivityScenario.launch(OnlineGameActivity.class)){
+   try{
+    long until=System.currentTimeMillis()+45000;boolean loaded=false;while(System.currentTimeMillis()<until){if("true".equals(js(s,"typeof KaliRules!=='undefined' && !!document.getElementById('join')"))){loaded=true;break;}Thread.sleep(300);}
+    assertTrue("Bundled table loaded",loaded);assertEquals("true",js(s,"!!document.querySelector('#join select[name=playerId]') && !document.querySelector('#join input[name=name]')"));assertEquals("[40,42,30]",js(s,"[KaliRules.deck(4).length,KaliRules.deck(6).length,KaliRules.points('3S')]"));
+    js(s,"window.resumeRepairs=0;window.kaliReconnect=()=>window.resumeRepairs++;reduced=true;renderNow()");
+    // Quiesce rendering before ActivityScenario's idle-wait, then exercise the real lifecycle.
+    onlineUi(a->web(a.getWindow().getDecorView()).onPause());s.moveToState(androidx.lifecycle.Lifecycle.State.CREATED);s.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED);
+    assertEquals("true",js(s,"window.resumeRepairs>0"));onlineUi(a->{WebView w=web(a.getWindow().getDecorView());assertFalse(w.getSettings().getAllowFileAccess());assertFalse(w.getSettings().getAllowContentAccess());assertTrue(w.getUrl().startsWith("https://appassets.androidplatform.net/assets/kali/"));});
+   }finally{onlineUi(android.app.Activity::finish);}
+  }
+ }
  @Test public void rotationKeepsTheOnlineWebViewAndJavascriptState()throws Exception{
   try(ActivityScenario<OnlineGameActivity> s=ActivityScenario.launch(OnlineGameActivity.class)){
    long end=System.currentTimeMillis()+45000;while(System.currentTimeMillis()<end&&!"true".equals(js(s,"typeof KaliRules!=='undefined'")))Thread.sleep(300);
@@ -87,7 +109,7 @@ public class OnlineGameTest {
    }
   }
  }
- @Test public void invitationPrefillsRoomCodeInBundledTable()throws Exception{Intent intent=new Intent(InstrumentationRegistry.getInstrumentation().getTargetContext(),OnlineGameActivity.class).putExtra("roomCode","ABCDEFGH");try(ActivityScenario<OnlineGameActivity>s=ActivityScenario.launch(intent)){long until=System.currentTimeMillis()+45000;boolean loaded=false;while(System.currentTimeMillis()<until){if("\"ABCDEFGH\"".equals(js(s,"document.querySelector('#join input[name=code]')?.value"))){loaded=true;break;}Thread.sleep(300);}assertTrue("Invite retained",loaded);}}
+ @Test public void invitationPrefillsRoomCodeInBundledTable()throws Exception{Intent intent=new Intent(InstrumentationRegistry.getInstrumentation().getTargetContext(),OnlineGameActivity.class).putExtra("roomCode","ABCDEFGH");try(ActivityScenario<OnlineGameActivity>s=ActivityScenario.launch(intent)){try{long until=System.currentTimeMillis()+45000;boolean loaded=false;while(System.currentTimeMillis()<until){if("\"ABCDEFGH\"".equals(js(s,"document.querySelector('#join input[name=code]')?.value"))){loaded=true;break;}Thread.sleep(300);}assertTrue("Invite retained",loaded);}finally{onlineUi(android.app.Activity::finish);}}}
  @Test public void nativeAndEmbeddedAuthRestoreExactlyTheSameIdentity()throws Exception{
   org.junit.Assume.assumeTrue("Full online emulator required", "true".equals(InstrumentationRegistry.getArguments().getString("kaliOnlineBackend")));
   try(ActivityScenario<OnlineGameActivity> scenario=ActivityScenario.launch(OnlineGameActivity.class)){

@@ -1,7 +1,5 @@
 name: Focused Round save verification
 on:
-  push:
-    branches: [verify/round-save-release]
   workflow_dispatch:
 permissions:
   contents: read

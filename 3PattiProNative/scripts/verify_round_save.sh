@@ -8,6 +8,7 @@ prefix='com.hozefa.threepattipro.nativeapp.'
 tests=['NativeRoundSaveTest','NativeVoiceTest#confirmedVoiceRoundCreatesExactlyOneSandboxRecord','NativeVoiceTest#offlineConfirmationCannotChangeOrSaveManualDraft','OnlineGameTest#sharedTableLoadsInsideSamePackageWithSafeWebSettings','OnlineGameTest#invitationPrefillsRoomCodeInBundledTable']
 import os
 if os.environ.get('KALI_API')=='26': tests.append('NativeDialogTest#largeFontLandscapeKeepsHistoryAndShareActionsOnScreen')
+if os.environ.get('KALI_WEBVIEW_ONLY')=='true': tests=[t for t in tests if t.startswith('OnlineGameTest#')]
 print(','.join(prefix+t for t in tests))
 PY
 )
