@@ -1,7 +1,7 @@
 name: Save/delete latency verification
 on:
   push:
-    branches: [perf/write-delete-baseline-v24]
+    branches: [fix/write-delete-latency]
     paths:
       - '3PattiProNative/**'
       - '.github/workflows/session-auth-verification.yml'
@@ -18,6 +18,8 @@ jobs:
         include:
           - api: 30
             gpu: software
+          - api: 35
+            gpu: lavapipe
     env:
       JAVA_TOOL_OPTIONS: -Xmx768m
       NODE_OPTIONS: --max-old-space-size=512
