@@ -1,40 +1,34 @@
-name: Verify stable release update
+name: Verify signed v2.7.27 upgrade
 on:
+  push:
+    branches: [verification-v2.7.27]
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 jobs:
   upgrade:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: ubuntu-22.04
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
-      - name: Download existing release and private candidate
+      - name: Verify the candidate and fetch previous signed release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download three-patti-pro-v2.7.12 -p '*.apk' -D previous
-          gh release download three-patti-pro-v2.7.13 -p '*.apk' -D candidate
+          sha256sum -c release-candidates/SHA256SUMS.txt
+          gh release download three-patti-pro-v2.7.26 -p '*.apk' -D previous
+          echo '21139b88e6a56ed06126b57e1bf09fe8be816f45946748e6ab82ed3139acea98  previous/3-Patti-PRO-v2.7.26.apk' | sha256sum -c -
       - run: sudo chmod 666 /dev/kvm
       - uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
           arch: x86_64
-          target: default
+          target: google_apis
           disable-animations: true
-          script: |
-            adb root
-            adb wait-for-device
-            adb shell svc wifi disable
-            adb shell svc data disable
-            adb install previous/*.apk
-            adb shell am start -n com.hozefa.threepattipro.nativeapp/.MainActivity
-            sleep 5
-            adb shell mkdir -p /data/user/0/com.hozefa.threepattipro.nativeapp/files
-            adb shell touch /data/user/0/com.hozefa.threepattipro.nativeapp/files/upgrade-verification-marker
-            adb install -r candidate/*.apk
-            adb shell test -f /data/user/0/com.hozefa.threepattipro.nativeapp/files/upgrade-verification-marker
-            adb shell am start -n com.hozefa.threepattipro.nativeapp/.MainActivity
-            sleep 8
-            adb shell pidof com.hozefa.threepattipro.nativeapp
-            adb shell dumpsys package com.hozefa.threepattipro.nativeapp | grep 'versionName=2.7.13'
+          emulator-options: -no-window -gpu software -memory 2048 -no-snapshot -noaudio -no-boot-anim
+          script: bash release-candidates/run-upgrade.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: signed-v27-upgrade-evidence
+          path: upgrade-evidence/
