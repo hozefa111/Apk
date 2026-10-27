@@ -51,7 +51,8 @@ public class FirebaseGatewayEmulatorTest {
         for(String id:Arrays.asList("a","b","c"))request("PATCH","/players/"+id,new JSONObject().put("fields",new JSONObject().put("name",new JSONObject().put("stringValue","Player "+id)).put("active",new JSONObject().put("booleanValue",true))));
         startGateway();
     }
-    private void startGateway()throws Exception{
+    private void startGateway()throws Exception{startGateway(true);}
+    private void startGateway(boolean signIn)throws Exception{
         live.set(false);busy.set(false);admin.set(false);
         Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
         CountDownLatch started=new CountDownLatch(1);
@@ -64,7 +65,7 @@ public class FirebaseGatewayEmulatorTest {
                 public void syncState(boolean value){syncEvent.set(System.currentTimeMillis());live.set(value);}
             },"demo-key",System::currentTimeMillis,batchSize);gateway.start();gateway.refresh();started.countDown();
         });assertTrue(started.await(5,TimeUnit.SECONDS));await(()->live.get()&&players.get().size()>=3);
-        gateway.signIn("tester@example.test","test-password-123");await(()->admin.get()&&live.get()&&!busy.get());ready(()->{});
+        if(signIn)gateway.signIn("tester@example.test","test-password-123");await(()->admin.get()&&live.get()&&!busy.get());ready(()->{});
     }
     @After public void cleanup()throws Exception{if(gateway!=null)InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.stop());}
     @Test public void delayedCacheCallbackAfterShutdownCannotCrashOrRestartQueries()throws Exception{
@@ -379,6 +380,49 @@ public class FirebaseGatewayEmulatorTest {
             h.put("mode",new JSONObject().put("stringValue","prepare")).put("enforced",new JSONObject().put("booleanValue",false));
             request("PATCH","/trackerSync/state",new JSONObject().put("fields",h));request("DELETE","/rounds/"+id,null);
         }
+    }
+
+    private com.google.firebase.auth.FirebaseAuth testAuth(){return com.google.firebase.auth.FirebaseAuth.getInstance(com.google.firebase.FirebaseApp.getInstance("three-patti-native"));}
+    private com.google.firebase.firestore.FirebaseFirestore testDb(){return com.google.firebase.firestore.FirebaseFirestore.getInstance(com.google.firebase.FirebaseApp.getInstance("three-patti-native"));}
+    @Test public void authRoleRefreshNeverPublishesTemporaryLogoutOrDuplicatesWrites()throws Exception{
+        FirebaseGateway.AdminRoleLookup original=gateway.adminRoleLookup;CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1),done=new CountDownLatch(1);AtomicBoolean once=new AtomicBoolean();AtomicInteger calls=new AtomicInteger();ExecutorService worker=Executors.newSingleThreadExecutor();
+        gateway.adminRoleLookup=(uid,source)->{if(once.compareAndSet(false,true)){entered.countDown();assertTrue(release.await(15,TimeUnit.SECONDS));}return original.read(uid,source);};
+        try{
+            java.lang.reflect.Method refresh=FirebaseGateway.class.getDeclaredMethod("ensureIdToken");refresh.setAccessible(true);Future<?> refreshing=worker.submit(()->{try{refresh.invoke(gateway);}catch(Exception e){throw new RuntimeException(e);}});assertTrue(entered.await(15,TimeUnit.SECONDS));
+            assertTrue("Toolbar retains last authenticated admin",admin.get());assertTrue("Role lookup must not temporarily clear gateway authorization",gateway.loggedIn());
+            ready(()->{gateway.write("First saved",token->{assertNotNull(token);calls.incrementAndGet();},done::countDown,()->fail("Valid admin was rejected: "+notice.get()));gateway.write("Duplicate",token->calls.incrementAndGet());});
+            release.countDown();refreshing.get(30,TimeUnit.SECONDS);completed(done,"authorized save during refresh");await(()->!busy.get()&&live.get());assertEquals(1,calls.get());assertFalse(notice.get().contains("Please log in"));
+        }finally{release.countDown();gateway.adminRoleLookup=original;worker.shutdownNow();}
+    }
+    @Test public void pendingAuthProofIsRevalidatedBeforeWritingAndSurvivesReopen()throws Exception{
+        java.lang.reflect.Field proof=FirebaseGateway.class.getDeclaredField("adminSession");proof.setAccessible(true);proof.set(gateway,null);assertTrue("UI still has last admin callback",admin.get());assertFalse(gateway.loggedIn());
+        CountDownLatch done=new CountDownLatch(1);AtomicInteger calls=new AtomicInteger();ready(()->gateway.write("Revalidated",token->calls.incrementAndGet(),done::countDown,()->fail(notice.get())));completed(done,"pending authorization");assertEquals(1,calls.get());await(()->!busy.get()&&live.get());
+        String uid=testAuth().getCurrentUser().getUid();InstrumentationRegistry.getInstrumentation().runOnMainSync(()->gateway.stop());startGateway(false);assertEquals(uid,testAuth().getCurrentUser().getUid());assertTrue(gateway.loggedIn());
+        com.google.android.gms.tasks.Tasks.await(testDb().disableNetwork());await(()->!live.get());com.google.android.gms.tasks.Tasks.await(testDb().enableNetwork());await(()->live.get()&&gateway.loggedIn());CountDownLatch recovered=new CountDownLatch(1);ready(()->gateway.write("After reconnect",token->calls.incrementAndGet(),recovered::countDown,()->fail(notice.get())));completed(recovered,"reconnect");assertEquals(2,calls.get());
+    }
+    @Test public void revokedAdminAndExpiredAuthenticationNeverInvokeMutation()throws Exception{
+        String uid=testAuth().getCurrentUser().getUid();AtomicInteger calls=new AtomicInteger();FirebaseGateway.AdminRoleLookup original=gateway.adminRoleLookup;
+        try{
+            request("DELETE","/admins/"+uid,null);CountDownLatch denied=new CountDownLatch(1);ready(()->gateway.write("Must not save",token->calls.incrementAndGet(),()->fail("Revoked admin wrote"),denied::countDown));completed(denied,"revoked role");await(()->!admin.get()&&!busy.get());assertEquals(0,calls.get());assertTrue(notice.get(),notice.get().contains("administrator access"));
+            request("PATCH","/admins/"+uid,new JSONObject().put("fields",SdkDocuments.fields(FirebaseGateway.map("role","admin"))));gateway.signIn("tester@example.test","test-password-123");await(()->admin.get()&&live.get()&&!busy.get());
+            gateway.adminRoleLookup=(id,source)->{throw new com.google.firebase.auth.FirebaseAuthInvalidUserException("ERROR_USER_TOKEN_EXPIRED","Synthetic expired session");};CountDownLatch expired=new CountDownLatch(1);ready(()->gateway.write("Must not save",token->calls.incrementAndGet(),()->fail("Expired auth wrote"),expired::countDown));completed(expired,"expired auth");await(()->!admin.get()&&!busy.get());assertEquals(0,calls.get());assertFalse(gateway.loggedIn());assertTrue(notice.get(),notice.get().contains("Login expired"));
+        }finally{gateway.adminRoleLookup=original;request("PATCH","/admins/"+uid,new JSONObject().put("fields",SdkDocuments.fields(FirebaseGateway.map("role","admin"))));}
+    }
+    @Test public void authNetworkFailureIsNotMisreportedAsLogoutAndSignoutIsBlocked()throws Exception{
+        FirebaseGateway.AdminRoleLookup original=gateway.adminRoleLookup;AtomicInteger calls=new AtomicInteger();
+        try{
+            gateway.adminRoleLookup=(uid,source)->{throw new com.google.firebase.firestore.FirebaseFirestoreException("Synthetic connection unavailable",com.google.firebase.firestore.FirebaseFirestoreException.Code.UNAVAILABLE);};CountDownLatch failed=new CountDownLatch(1);ready(()->gateway.write("Must not save",token->calls.incrementAndGet(),()->fail("Unavailable role wrote"),failed::countDown));completed(failed,"network failure");await(()->!busy.get());assertTrue(admin.get());assertTrue(gateway.loggedIn());assertFalse(notice.get(),notice.get().contains("log in"));assertEquals(0,calls.get());
+            gateway.adminRoleLookup=original;await(()->live.get());CountDownLatch done=new CountDownLatch(1);ready(()->gateway.write("Recovered",token->calls.incrementAndGet(),done::countDown,()->fail(notice.get())));completed(done,"network recovery");await(()->!busy.get()&&live.get());gateway.signOut();await(()->testAuth().getCurrentUser()==null&&!admin.get()&&!busy.get());CountDownLatch denied=new CountDownLatch(1);gateway.write("Must not save",token->calls.incrementAndGet(),()->fail("Signed out wrote"),denied::countDown);completed(denied,"signout");assertEquals(1,calls.get());assertTrue(notice.get(),notice.get().contains("Please log in"));
+        }finally{gateway.adminRoleLookup=original;}
+    }
+    private int scoreA(){int total=0;for(Map<String,Object> r:rounds.get()){Object value=((Map<?,?>)r.getOrDefault("scoreChanges",Collections.emptyMap())).get("a");if(value instanceof Number)total+=((Number)value).intValue();}return total;}
+    @Test public void manualSessionCascadePreservesBackupAndExactScoresAfterRepeatedDelete()throws Exception{
+        Assume.assumeTrue("true".equals(InstrumentationRegistry.getArguments().getString("kaliOnlineBackend")));String id="manual-auth-"+UUID.randomUUID();
+        Map<String,Object> fields=FirebaseGateway.map("sessionName",id,"startTime",new com.google.firebase.Timestamp(2000000000,0),"endTime",new com.google.firebase.Timestamp(2000000100,0));request("PATCH","/sessions/"+id,new JSONObject().put("fields",SdkDocuments.fields(fields)));
+        for(int i=0;i<2;i++)request("PATCH","/rounds/"+id+i,new JSONObject().put("fields",SdkDocuments.fields(FirebaseGateway.map("sessionId",id,"timestamp",new com.google.firebase.Timestamp(2000000001+i,0),"type","hukum","scoreChanges",FirebaseGateway.map("a",i==0?360:-155,"b",i==0?180:-78)))));
+        await(()->sessions.get().stream().anyMatch(r->id.equals(r.get("id")))&&rounds.get().stream().filter(r->id.equals(r.get("sessionId"))).count()==2&&live.get()&&!busy.get());int before=scoreA();JSONObject unrelated=request("GET","/rounds/fixture-round",null);Map<String,Object> session=sessions.get().stream().filter(r->id.equals(r.get("id"))).findFirst().get();CountDownLatch inspected=new CountDownLatch(1);AtomicReference<JSONObject> preview=new AtomicReference<>();ready(()->gateway.previewSessionDeletion(session,p->{preview.set(p);inspected.countDown();}));completed(inspected,"manual preview");assertEquals(2,preview.get().getInt("roundCount"));assertEquals(before,scoreA());
+        ready(()->gateway.deleteSessionRounds(session,preview.get()));await(()->sessions.get().stream().noneMatch(r->id.equals(r.get("id")))&&rounds.get().stream().noneMatch(r->id.equals(r.get("sessionId")))&&live.get()&&!busy.get());assertEquals(before-205,scoreA());assertTrue(BulkWritePlan.sameJson(unrelated,request("GET","/rounds/fixture-round",null)));java.io.File[] backups=new java.io.File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"recovery").listFiles((d,n)->n.endsWith(".json"));assertNotNull(backups);assertTrue(backups.length>0);boolean archived=false;for(java.io.File f:backups)if(new String(java.nio.file.Files.readAllBytes(f.toPath()),java.nio.charset.StandardCharsets.UTF_8).contains(id+"0"))archived=true;assertTrue("Deleted rounds must be in the device backup",archived);
+        notice.set("");ready(()->gateway.deleteSessionRounds(session,preview.get()));await(()->!notice.get().isEmpty()&&!busy.get());assertEquals(before-205,scoreA());assertTrue(BulkWritePlan.sameJson(unrelated,request("GET","/rounds/fixture-round",null)));
     }
 
 }

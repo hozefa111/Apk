@@ -101,8 +101,17 @@ public final class FirebaseGateway {
     private long animationSnapshotAt;
     private volatile boolean signingOut=false;
     private final Runnable liveRefresh=()->{if(!this.freshSnapshot)queueLoad(true);};
-    private volatile String idToken;
-    private volatile boolean administrator;
+    private static final class AdminSession {
+        final String uid,token;final boolean administrator;
+        AdminSession(String uid,String token,boolean administrator){this.uid=uid;this.token=token;this.administrator=administrator;}
+    }
+    private volatile AdminSession adminSession;
+    interface AdminRoleLookup {boolean read(String uid,Source source)throws Exception;}
+    AdminRoleLookup adminRoleLookup=this::readAdminRole;
+    private boolean readAdminRole(String uid,Source source)throws Exception{
+        DocumentSnapshot role=Tasks.await(firestore.collection("admins").document(uid).get(source),20,TimeUnit.SECONDS);
+        return role.exists()&&!role.getMetadata().hasPendingWrites();
+    }
     private volatile boolean running;
     private final AtomicBoolean stopped=new AtomicBoolean();
     private volatile boolean freshSnapshot=false;
@@ -159,8 +168,11 @@ public final class FirebaseGateway {
         authObserver=state->{
             if(!running)return;
             animationContinuity=false;liveRevision.incrementAndGet();freshSnapshot=false;listener.syncState(false);
-            if(state.getCurrentUser()==null){idToken=null;listener.authChanged(false);}
-            else dispatch(()->{try{ensureIdToken();}catch(Exception expired){idToken=null;ui.post(()->{if(running)listener.authChanged(false);});}});
+            if(state.getCurrentUser()==null){adminSession=null;listener.authChanged(false);}
+            else {if(!loggedIn())listener.authChanged(false);dispatch(()->{try{ensureIdToken();}catch(Exception failure){
+                if(invalidAuthentication(failure))adminSession=null;
+                publishAuthentication();
+            }});}
             removeSubscriptions();startSubscriptions();scheduleNext();
         };
         auth.addAuthStateListener(authObserver);
@@ -359,24 +371,36 @@ public final class FirebaseGateway {
         if(!doc.exists())throw new IOException("Record not found");
         return new JSONObject().put("fields",SdkDocuments.fields(doc.getData()));
     }
-    private void ensureIdToken() throws Exception {
-        if(signingOut || auth.getCurrentUser()==null){idToken=null;return;}
-        com.google.firebase.auth.GetTokenResult result=Tasks.await(auth.getCurrentUser().getIdToken(false),20,TimeUnit.SECONDS);
-        idToken=result.getToken();
-        administrator=false;
-        if(!auth.getCurrentUser().isAnonymous()) {
-            administrator=Boolean.TRUE.equals(result.getClaims().get("admin"));
-            if(!administrator){
-                // Restore the previously server-verified role when reopening offline.
-                // Pending local role writes are never trusted; mutations additionally
-                // require a fresh live snapshot and server rules check authorization.
-                DocumentSnapshot role=Tasks.await(firestore.collection("admins").document(auth.getCurrentUser().getUid()).get(Source.DEFAULT),20,TimeUnit.SECONDS);
-                administrator=role.exists()&&!role.getMetadata().hasPendingWrites();
-            }
-        }
-        ui.post(()->{if(running)listener.authChanged(loggedIn());});
+    private static boolean invalidAuthentication(Throwable error){
+        for(Throwable cause=error;cause!=null;cause=cause.getCause())if(cause instanceof com.google.firebase.auth.FirebaseAuthInvalidUserException||cause instanceof com.google.firebase.auth.FirebaseAuthInvalidCredentialsException)return true;
+        return false;
     }
-    public boolean loggedIn(){return !signingOut && auth.getCurrentUser()!=null && idToken!=null && administrator;}
+    private void publishAuthentication(){ui.post(()->{if(running)listener.authChanged(loggedIn());});}
+    private void ensureIdToken()throws Exception{ensureIdToken(false);}
+    private AdminSession ensureIdToken(boolean verifyWrite)throws Exception{
+        com.google.firebase.auth.FirebaseUser user=auth.getCurrentUser();
+        if(signingOut||user==null){adminSession=null;publishAuthentication();return null;}
+        try{
+            com.google.firebase.auth.GetTokenResult result=Tasks.await(user.getIdToken(verifyWrite),20,TimeUnit.SECONDS);
+            // Build the replacement privately: a role lookup must not temporarily revoke the published session.
+            boolean administrator=!user.isAnonymous()&&(Boolean.TRUE.equals(result.getClaims().get("admin"))||adminRoleLookup.read(user.getUid(),verifyWrite?Source.SERVER:Source.DEFAULT));
+            com.google.firebase.auth.FirebaseUser current=auth.getCurrentUser();
+            if(signingOut||current==null||!user.getUid().equals(current.getUid()))throw new IOException("Your account changed. Please log in again before saving changes.");
+            AdminSession next=new AdminSession(user.getUid(),result.getToken(),administrator);
+            adminSession=next;publishAuthentication();return next;
+        }catch(Exception failure){if(invalidAuthentication(failure)){adminSession=null;publishAuthentication();}throw failure;}
+    }
+    public boolean loggedIn(){
+        AdminSession session=adminSession;com.google.firebase.auth.FirebaseUser user=auth.getCurrentUser();
+        return !signingOut&&session!=null&&session.administrator&&session.token!=null&&user!=null&&!user.isAnonymous()&&session.uid.equals(user.getUid());
+    }
+    private AdminSession authorizeWrite(String uid,boolean refresh)throws Exception{
+        AdminSession session=ensureIdToken(refresh);
+        if(session==null||signingOut)throw new IOException("Login expired. Please log in again before saving changes.");
+        if(!session.uid.equals(uid))throw new IOException("Your account changed. Please log in again before saving changes.");
+        if(!session.administrator)throw new IOException("This account no longer has administrator access. Please log in with an authorized admin account.");
+        return session;
+    }
     public void signIn(String email,String password){
         setBusy(true);
         dispatch(()->{
@@ -389,9 +413,9 @@ public final class FirebaseGateway {
     }
     public void signOut(){
         // Block new mutations immediately, before the serialized work queue runs.
-        signingOut=true;freshSnapshot=false;
+        signingOut=true;adminSession=null;freshSnapshot=false;
         ui.post(()->{if(running)listener.authChanged(false);});
-        dispatch(()->{auth.signOut();idToken=null;signingOut=false;load();notify("Logged out");});
+        dispatch(()->{auth.signOut();adminSession=null;signingOut=false;load();notify("Logged out");});
     }
     public boolean refresh() {
         if(!running)return false;
@@ -790,7 +814,8 @@ public final class FirebaseGateway {
     public void deleteSessionRounds(Map<String,Object> session,JSONObject preview){
         write("Session, rounds and their points deleted",token->{
             preserveBackup();JSONObject result;
-            do{ensureIdToken();result=sessionRequest(session,"delete",null,idToken,preview);if(result.optBoolean("pending"))Thread.sleep(1000);}while(result.optBoolean("pending"));
+            String owner=bulkOwner();
+            do{result=sessionRequest(session,"delete",null,authorizeWrite(owner,false).token,preview);if(result.optBoolean("pending"))Thread.sleep(1000);}while(result.optBoolean("pending"));
         });
     }
     public interface Action { void run(String token) throws Exception; }
@@ -801,8 +826,9 @@ public final class FirebaseGateway {
         write(success,action,onSuccess,onFailure,false);
     }
     private void write(String success,Action action,Runnable onSuccess,Runnable onFailure,boolean resumeBulk) {
-        if(!loggedIn()){
-            notify("Please log in before saving changes");
+        com.google.firebase.auth.FirebaseUser user=auth.getCurrentUser();
+        if(signingOut||user==null||user.isAnonymous()){
+            adminSession=null;publishAuthentication();notify("Please log in before saving changes");
             onUi(onFailure);
             return;
         }
@@ -816,22 +842,23 @@ public final class FirebaseGateway {
             onUi(onFailure);
             return;
         }
+        final String expectedUid=user.getUid();
         setBusy(true);
         dispatch(() -> {
             try {
-                ensureIdToken();
-                if(idToken==null || signingOut){throw new IOException("Login expired");}
+                AdminSession authorized=authorizeWrite(expectedUid,true);
                 if(!freshSnapshot || System.currentTimeMillis()-snapshotAt>60000){load();}
                 if(!freshSnapshot)throw new IOException("Data changed. Refresh and retry.");
                 if(hasPendingBulkOperation()&&!resumeBulk)throw new IOException("An interrupted data operation needs attention in Settings before other changes");
-                action.run(idToken);journalLatestHead=null;
+                if(!loggedIn()||!expectedUid.equals(auth.getCurrentUser().getUid()))throw new IOException("Your account changed. Please log in again before saving changes.");
+                action.run(authorized.token);journalLatestHead=null;
                 if(success!=null&&!success.isEmpty())notify(success);
                 onUi(onSuccess);
                 load();
             }catch(Exception error){
                 freshSnapshot=false;
                 ui.post(()->{if(running)listener.syncState(false);});
-                notify("Not saved: "+error.getMessage());
+                notify(invalidAuthentication(error)?"Login expired. Please log in again before saving changes.":"Not saved: "+error.getMessage());
                 if(running)ui.postDelayed(liveRefresh,200);
                 onUi(onFailure);
             }finally{
