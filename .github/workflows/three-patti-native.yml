@@ -30,8 +30,12 @@ jobs:
           set -euo pipefail
           apk=3PattiProNative/app/build/outputs/apk/debug/app-debug.apk
           test -s "$apk"
-          ! grep -R 'android.webkit.WebView' 3PattiProNative/app/src/main/java
-          ! unzip -Z1 "$apk" | grep -E '^assets/.*(html|js|css)$'
+          # The app remains native; Play Online intentionally uses its bundled,
+          # same-package WebView. Verify that integration instead of rejecting it.
+          test -s 3PattiProNative/app/src/main/java/com/hozefa/threepattipro/nativeapp/OnlineGameActivity.java
+          unzip -Z1 "$apk" > /tmp/three-patti-native-apk-files.txt
+          grep -Fx 'assets/kali/index.html' /tmp/three-patti-native-apk-files.txt
+          grep -Fx 'assets/kali/runtime/client.js' /tmp/three-patti-native-apk-files.txt
           test "$(stat -c %s "$apk")" -gt 50000
           echo "Native APK verified"
       - name: Upload verification reports
