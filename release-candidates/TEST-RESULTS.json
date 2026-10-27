@@ -146,5 +146,10 @@
   "gameAssetFilesUnchanged": 18,
   "physicalPhoneTesting": false,
   "apkSha256": "21139b88e6a56ed06126b57e1bf09fe8be816f45946748e6ab82ed3139acea98",
-  "signerSha256": "dc0697a03526612bc54c3d9ad0b4a10e9ed9b3b6ad22e4e53269f904a72ba9b4"
+  "signerSha256": "dc0697a03526612bc54c3d9ad0b4a10e9ed9b3b6ad22e4e53269f904a72ba9b4",
+  "signedUpgradeRun": "https://github.com/hozefa111/Apk/actions/runs/40504220494",
+  "signedUpgrades": {
+    "2.7.23": "PASS; retained cache/marker, install -r, visible saved scores and session/Big Scoreboard navigation",
+    "2.7.25": "PASS; retained cache/marker, install -r, visible saved scores and session/Big Scoreboard navigation"
+  }
 }

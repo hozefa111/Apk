@@ -1,56 +1,34 @@
-name: Verify signed v2.7.26 upgrade
+name: Publish verified v2.7.26
 on:
   push:
     branches: [verification-v2.7.26]
+  workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
   actions: read
 jobs:
-  upgrade:
+  publish:
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        previous: ['2.7.23', '2.7.25']
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Reuse exact passed save checks and resolved WebView cases
+      - name: Reuse exact passed save checks, WebView checks and signed upgrades
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           test "$(gh run view 40503129609 --json conclusion --jq .conclusion)" = success
           test "$(gh run view 40503129609 --json headSha --jq .headSha)" = 04ef681afe453f65ea8e177026ec93862b9fd4ab
-          test "$(gh api repos/hozefa111/Apk/actions/jobs/122177973708 --jq .conclusion)" = success
-          test "$(gh api repos/hozefa111/Apk/actions/jobs/122177974140 --jq .conclusion)" = success
-          gh run download 40500883711 -n round-save-26 -D prior-android8
-          python3 - <<'CHECK'
-          from pathlib import Path
-          import xml.etree.ElementTree as E
-          required={'manualSaveRetainsPlayersResetsFieldsAndAcceptsNextRound','failedSaveRetainsOriginalDraftAndRetriesOnce','lostConfirmationRetryUsesAlreadyCommittedIdWithoutDuplicate','confirmedVoiceRoundCreatesExactlyOneSandboxRecord','offlineConfirmationCannotChangeOrSaveManualDraft','largeFontLandscapeKeepsHistoryAndShareActionsOnScreen'}
-          found=set()
-          for p in Path('prior-android8').rglob('TEST-*.xml'):
-              for t in E.parse(p).getroot().iter('testcase'):
-                  if t.get('name') in required:
-                      assert t.find('failure') is None and t.find('skipped') is None
-                      found.add(t.get('name'))
-          assert found==required, found
-          CHECK
-          git fetch origin 04d8958580c2682f51b84203d5f24b9d376a1c48 04ef681afe453f65ea8e177026ec93862b9fd4ab --depth=1
-          git diff --exit-code 04d8958580c2682f51b84203d5f24b9d376a1c48 04ef681afe453f65ea8e177026ec93862b9fd4ab -- 3PattiProNative/app/src/main 3PattiProNative/app/build.gradle.kts
+          test "$(gh run view 40504220494 --json conclusion --jq .conclusion)" = success
+          test "$(gh run view 40504220494 --json headSha --jq .headSha)" = 5555a9bc2c1cd278e5c62354dede2dc2126389f9
           sha256sum -c release-candidates/SHA256SUMS.txt
-          gh release download three-patti-pro-v${{ matrix.previous }} -p '*.apk' -D previous
-      - run: sudo chmod 666 /dev/kvm
-      - name: Preserve installed app and data during signed upgrade
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 30
-          arch: x86_64
-          target: default
-          disable-animations: true
-          script: bash release-candidates/run-upgrade.sh
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: v2.7.26-upgrade-${{ matrix.previous }}
-          path: upgrade-evidence/
+          echo '21139b88e6a56ed06126b57e1bf09fe8be816f45946748e6ab82ed3139acea98  release-candidates/3-Patti-PRO-v2.7.26.apk' | sha256sum -c -
+          git fetch origin 04ef681afe453f65ea8e177026ec93862b9fd4ab 5555a9bc2c1cd278e5c62354dede2dc2126389f9 --depth=1
+          git diff --exit-code 04ef681afe453f65ea8e177026ec93862b9fd4ab HEAD -- 3PattiProNative/app/src/main 3PattiProNative/app/build.gradle.kts
+          git diff --exit-code 5555a9bc2c1cd278e5c62354dede2dc2126389f9 HEAD -- release-candidates/3-Patti-PRO-v2.7.26.apk
+      - name: Publish the exact verified APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sed 's@release-candidates/@@' release-candidates/SHA256SUMS.txt > /tmp/release.sha256
+          cp /tmp/release.sha256 release-candidates/SHA256SUMS.txt
+          gh release create three-patti-pro-v2.7.26 release-candidates/3-Patti-PRO-v2.7.26.apk release-candidates/SHA256SUMS.txt release-candidates/TEST-RESULTS.json --target 04ef681afe453f65ea8e177026ec93862b9fd4ab --latest --title '3 Patti PRO v2.7.26 — Stay on Round after saving' --notes-file release-candidates/NOTES.md
