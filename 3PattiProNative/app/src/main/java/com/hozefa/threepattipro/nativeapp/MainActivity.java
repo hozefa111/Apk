@@ -1031,7 +1031,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             public void changed(){if(!resumed||!ranksSessions||(tab!=3&&tab!=10))return;render(false);}
             public void removed(String id){removedSessionIds.add(id);if(id.equals(selectedSessionId)){selectedSessionId="";settings.edit().remove("ranks_session_id").apply();}if(resumed){render(false);}}
         });if(!sessionScreenVisible){sessionScreenVisible=true;sessionScores.resume();sessionScores.discover(false);}Map<String,Object> selected=selectedRankSession();if(selected==null&&!selectedSessionId.isEmpty()&&hasData){selectedSessionId="";settings.edit().remove("ranks_session_id").apply();}sessionScores.select(SessionLeaderboard.needsLive(selected,gameRounds(),sessions,sessionScores.boards.get(selectedSessionId))?selected:null);}
-        else if(sessionScreenVisible&&sessionScores!=null){sessionScreenVisible=false;sessionScores.pause();}
+        else if(sessionScreenVisible&&sessionScores!=null){sessionScreenVisible=false;sessionScores.pauseAfterDelay();}
     }
     private boolean selectedSessionLive(Map<String,Object> session){if(!SessionLeaderboard.active(session))return false;if(!SessionLeaderboard.online(session))return liveConnected;return sessionScores!=null&&selectedSessionId.equals(SessionLeaderboard.id(session))&&sessionScores.connected;}
     private void rankSessionControls(LinearLayout target){

@@ -1,15 +1,19 @@
 name: Session opening latency verification
 on:
   push:
-    branches: [perf/session-baseline-v23]
+    branches: [fix/session-open-delay]
 permissions:
   contents: read
 jobs:
-  baseline:
+  latency:
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [30, 35]
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     env:
-      KALI_TEST_CLASSES: com.hozefa.threepattipro.nativeapp.SessionDelayTest#delayedCatalogDoesNotBlockSelectedScoreboardFrame
+      KALI_TEST_CLASSES: com.hozefa.threepattipro.nativeapp.SessionDelayTest,com.hozefa.threepattipro.nativeapp.SessionLeaderboardUiTest
       KALI_REQUIRE_APP_EVIDENCE: '0'
     steps:
       - uses: actions/checkout@v4
@@ -28,14 +32,14 @@ jobs:
       - name: Measure original worker queue and first displayed scoreboard frame
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 30
+          api-level: ${{ matrix.api }}
           arch: x86_64
           disable-animations: true
           script: bash 3PattiProNative/scripts/measure_session_delay.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: session-delay-baseline
+          name: session-delay-${{ matrix.api }}
           path: |
             3PattiProNative/app/build/reports/
             3PattiProNative/app/build/outputs/androidTest-results/
