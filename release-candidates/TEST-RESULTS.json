@@ -1,0 +1,324 @@
+{
+  "version": "2.7.27",
+  "versionCode": 48,
+  "applicationId": "com.hozefa.threepattipro.nativeapp",
+  "certificateSha256": "dc0697a03526612bc54c3d9ad0b4a10e9ed9b3b6ad22e4e53269f904a72ba9b4",
+  "apkSha256": "18da8f7d3b1ddfb0999b3a228071cc361ee2a8ba3efa2fe269e29ea7fc1107bd",
+  "source": "756a2831e4f852bfeadc450e386cb5d025bc8c3e",
+  "testedRuntimeSource": "d410d64280de3bab120133e2cf27d22265652517",
+  "tests": {
+    "nativeJvm": {
+      "pass": 213,
+      "fail": 0
+    },
+    "webUnits": {
+      "pass": 124,
+      "fail": 0
+    },
+    "nativeFocused": {
+      "runId": 40546071015,
+      "api26": 20,
+      "api30": 20,
+      "api35": 20,
+      "fail": 0,
+      "skipped": 0
+    },
+    "manualGuardEmulator": {
+      "pass": 7,
+      "fail": 0
+    },
+    "browser": [
+      "real server commit followed by lost response, reload and retry",
+      "one stable round and one journal revision",
+      "offline blocks new intent and reconnect recovers",
+      "exact corrected manual summary after deletion",
+      "unchanged refresh retains DOM/scroll and avoids complete cache writes"
+    ],
+    "incrementalEmulator": {
+      "pass": 9,
+      "fail": 0
+    },
+    "liveSqliteWebSocket": {
+      "pass": 2,
+      "fail": 0,
+      "modes": [
+        4,
+        6
+      ],
+      "coverage": [
+        "Firestore quota outage",
+        "lost response and idempotent retry",
+        "restart/reconnect",
+        "private hands and secret partners",
+        "scoring and export tombstones",
+        "mixed human/bot alarms"
+      ]
+    },
+    "releaseLint": "PASS",
+    "bundledAssetByteMatches": 16,
+    "signedUpgradeOver26": {
+      "status": "PASS",
+      "runId": 40548210236,
+      "source": "834bf6ee5be4e4618a5e2e6676e46f816fd63a24",
+      "checks": [
+        "adb install -r accepted unchanged signing identity",
+        "cache bytes identical immediately after install",
+        "private marker retained",
+        "saved player and score visible offline",
+        "session selection and Big Scoreboard retain correct score"
+      ]
+    },
+    "broaderWebBackend": {
+      "status": "PASS",
+      "runId": 40547384604,
+      "source": "78322b5dd0fd310a3e55684a2cf3de8f55d9174f",
+      "includes": [
+        "all node/engine/bot tests",
+        "64-seed bot comparison (AI unchanged)",
+        "full backend tests and Worker deploy dry-run",
+        "Firebase security tests",
+        "4-human complete game through browser controls",
+        "6-player human/bot complete game",
+        "bid250 direct/final choice",
+        "lobby scroll and touch/double tap",
+        "presence/reconnect, privacy and deletion"
+      ]
+    },
+    "dedicatedSafetyCi": {
+      "status": "PASS",
+      "runId": 40547271467,
+      "guardAndIncrementalTests": 16,
+      "journalAndOutboxTests": 2
+    }
+  },
+  "syncComparison": {
+    "scope": "Node CPU/in-memory transport; same 3000 rows and 30 unchanged verifications, not WAN/phone timing",
+    "before": {
+      "rows": 3000,
+      "checks": 30,
+      "completeCacheWrites": 30,
+      "fullDataCallbacks": 30,
+      "headReads": 30,
+      "p50Ms": 32.809169999999995,
+      "p95Ms": 50.491004000000004
+    },
+    "after": {
+      "rows": 3000,
+      "checks": 30,
+      "completeCacheWrites": 0,
+      "fullDataCallbacks": 0,
+      "headReads": 30,
+      "p50Ms": 17.86406399999987,
+      "p95Ms": 42.147287000000006
+    }
+  },
+  "nativeComparison": {
+    "scope": "Android emulator renderer CPU; animations off; codecs on instrumentation worker; not WAN or physical-phone latency",
+    "fixtureRounds": 3000,
+    "api": 30,
+    "analyticsFirstReadyMs": 263.511347,
+    "views": {
+      "Home": {
+        "before": {
+          "samples": 12,
+          "p50Ms": 137.245763,
+          "p95Ms": 170.062472
+        },
+        "after": {
+          "samples": 12,
+          "p50Ms": 7.479544,
+          "p95Ms": 23.361207
+        }
+      },
+      "Round and preview": {
+        "before": {
+          "samples": 12,
+          "p50Ms": 6.414944,
+          "p95Ms": 8.964398
+        },
+        "after": {
+          "samples": 12,
+          "p50Ms": 4.422282,
+          "p95Ms": 6.14529
+        }
+      },
+      "History rounds": {
+        "before": {
+          "samples": 12,
+          "p50Ms": 39.836372,
+          "p95Ms": 44.431504
+        },
+        "after": {
+          "samples": 12,
+          "p50Ms": 20.841993,
+          "p95Ms": 32.515452
+        }
+      },
+      "Lifetime ranks": {
+        "before": {
+          "samples": 12,
+          "p50Ms": 128.523768,
+          "p95Ms": 167.214069
+        },
+        "after": {
+          "samples": 12,
+          "p50Ms": 21.572881,
+          "p95Ms": 33.624852
+        }
+      },
+      "Big Scoreboard": {
+        "before": {
+          "samples": 12,
+          "p50Ms": 109.823281,
+          "p95Ms": 122.527857
+        },
+        "after": {
+          "samples": 12,
+          "p50Ms": 3.243031,
+          "p95Ms": 4.189082
+        }
+      },
+      "Player profile": {
+        "before": {
+          "samples": 12,
+          "p50Ms": 27.233632,
+          "p95Ms": 32.179024
+        },
+        "after": {
+          "samples": 12,
+          "p50Ms": 16.819652,
+          "p95Ms": 20.853911
+        }
+      },
+      "Analytics": {
+        "before": {
+          "samples": 12,
+          "p50Ms": 223.302873,
+          "p95Ms": 268.354723
+        },
+        "after": {
+          "samples": 12,
+          "p50Ms": 12.52377,
+          "p95Ms": 17.103312
+        }
+      },
+      "Settings": {
+        "before": {
+          "samples": 12,
+          "p50Ms": 5.567365,
+          "p95Ms": 15.996859
+        },
+        "after": {
+          "samples": 12,
+          "p50Ms": 3.196301,
+          "p95Ms": 12.078802
+        }
+      },
+      "Session history": {
+        "before": {
+          "samples": 12,
+          "p50Ms": 24.030997,
+          "p95Ms": 33.38915
+        },
+        "after": {
+          "samples": 12,
+          "p50Ms": 11.766963,
+          "p95Ms": 61.959492
+        }
+      },
+      "Backup serialize worker": {
+        "before": {
+          "samples": 12,
+          "p50Ms": 139.579372,
+          "p95Ms": 164.159454
+        },
+        "after": {
+          "samples": 12,
+          "p50Ms": 58.437589,
+          "p95Ms": 67.439149
+        }
+      },
+      "Restore validation worker": {
+        "before": {
+          "samples": 12,
+          "p50Ms": 2106.230622,
+          "p95Ms": 2183.800007
+        },
+        "after": {
+          "samples": 12,
+          "p50Ms": 259.498296,
+          "p95Ms": 286.542856
+        }
+      }
+    },
+    "notes": [
+      "12 renders per screen; p95 includes cold visits",
+      "Hosted emulator CPU/hardware variance; timings are not physical-device/WAN guarantees",
+      "Analytics now calculates off main; render timing is distinct from first full report readiness",
+      "Completed manual summaries now recompute correctly: History cold p95 increased from 33 to 62 ms; initial 1255 ms regression fixed",
+      "Backup serialization code unchanged; do not attribute runner variance to an optimization"
+    ]
+  },
+  "liveMeasurements": {
+    "4": {
+      "scope": "Local actual SQLite Durable Objects/WebSockets; mocked identity and Firestore transport, no production traffic",
+      "mode": 4,
+      "sqliteRowsReadPerHumanHand": 1063,
+      "sqliteRowsWrittenPerHumanHand": 241,
+      "alarmApiCallsPerHand": {
+        "reads": 131,
+        "writes": 3
+      },
+      "liveFirestoreCalls": 0,
+      "exportOutageAttempts": 1,
+      "dbReads": 31,
+      "dbWrites": 31,
+      "commandSamples": 60,
+      "p50Ms": 13.58151399999997,
+      "p95Ms": 30.536450999999943,
+      "apiRequests": 127
+    },
+    "6": {
+      "scope": "Local actual SQLite Durable Objects/WebSockets; mocked identity and Firestore transport, no production traffic",
+      "mode": 6,
+      "sqliteRowsReadPerHumanHand": 1358,
+      "sqliteRowsWrittenPerHumanHand": 273,
+      "alarmApiCallsPerHand": {
+        "reads": 149,
+        "writes": 2
+      },
+      "liveFirestoreCalls": 0,
+      "exportOutageAttempts": 1,
+      "dbReads": 34,
+      "dbWrites": 35,
+      "commandSamples": 61,
+      "p50Ms": 8.905956000002334,
+      "p95Ms": 18.986692999998922,
+      "apiRequests": 142
+    }
+  },
+  "rollout": {
+    "rules": "conditional manual guard deployed; Incremental Sync unchanged",
+    "manualGuardPointer": null,
+    "web": "DEPLOYED; five changed client files byte-matched hosted content",
+    "webCommit": "13a7318e3e6be6ad7475c3f52504d14ca92793ce",
+    "webDeploymentRun": 40549819758,
+    "ruleset": "b83d463b-bb3d-4c44-9eee-ac79def96e02",
+    "incrementalState": {
+      "mode": "incremental",
+      "enforced": true,
+      "epoch": 1793036617672,
+      "observedRevision": 372
+    }
+  },
+  "limitations": [
+    "No physical-phone verification",
+    "Local emulator CPU/transport measurements, not WAN guarantees",
+    "Hosted emulator hardware varies between runs",
+    "Session History p95 is 62 ms versus prior 33 ms due to corrected summaries; initial 1255 ms regression removed",
+    "No change/reduction to Firestore head reads in unchanged-refresh benchmark: 30 vs 30",
+    "Strict mixed-version session guard requires owner-approved opt-in after editor update confirmation",
+    "No claim of permanent quota resolution"
+  ],
+  "payloadSource": "0314a516eb45d1697946b9044284d067848a5065"
+}

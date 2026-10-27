@@ -1,34 +1,40 @@
-name: Verify signed v2.7.27 upgrade
+name: Publish verified v2.7.27
 on:
   push:
     branches: [verification-v2.7.27]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
+  actions: read
 jobs:
-  upgrade:
+  publish:
     runs-on: ubuntu-22.04
-    timeout-minutes: 18
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Verify the candidate and fetch previous signed release
+      - name: Verify passed tests, upgrade, web deployment and exact candidate
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           sha256sum -c release-candidates/SHA256SUMS.txt
-          gh release download three-patti-pro-v2.7.26 -p '*.apk' -D previous
-          echo '21139b88e6a56ed06126b57e1bf09fe8be816f45946748e6ab82ed3139acea98  previous/3-Patti-PRO-v2.7.26.apk' | sha256sum -c -
-      - run: sudo chmod 666 /dev/kvm
-      - uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 30
-          arch: x86_64
-          target: google_apis
-          disable-animations: true
-          emulator-options: -no-window -gpu software -memory 2048 -no-snapshot -noaudio -no-boot-anim
-          script: bash release-candidates/run-upgrade.sh
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: signed-v27-upgrade-evidence
-          path: upgrade-evidence/
+          echo '18da8f7d3b1ddfb0999b3a228071cc361ee2a8ba3efa2fe269e29ea7fc1107bd  release-candidates/3-Patti-PRO-v2.7.27.apk' | sha256sum -c -
+          test "$(gh run view 40546071015 --json conclusion --jq .conclusion)" = success
+          test "$(gh run view 40546071015 --json headSha --jq .headSha)" = d410d64280de3bab120133e2cf27d22265652517
+          test "$(gh run view 40546075622 --json conclusion --jq .conclusion)" = success
+          test "$(gh run view 40548210236 --json conclusion --jq .conclusion)" = success
+          test "$(gh run view 40548210236 --json headSha --jq .headSha)" = 834bf6ee5be4e4618a5e2e6676e46f816fd63a24
+          test "$(gh run view 40547271467 -R hozefa111/hh --json conclusion --jq .conclusion)" = success
+          test "$(gh run view 40547384604 -R hozefa111/hh --json conclusion --jq .conclusion)" = success
+          test "$(gh run view 40549819758 -R hozefa111/hh --json conclusion --jq .conclusion)" = success
+          test "$(gh run view 40549819758 -R hozefa111/hh --json headSha --jq .headSha)" = 13a7318e3e6be6ad7475c3f52504d14ca92793ce
+          git fetch origin d410d64280de3bab120133e2cf27d22265652517 834bf6ee5be4e4618a5e2e6676e46f816fd63a24 756a2831e4f852bfeadc450e386cb5d025bc8c3e --depth=1
+          git diff --exit-code d410d64280de3bab120133e2cf27d22265652517 HEAD -- 3PattiProNative/app/src/main
+          git diff --exit-code 834bf6ee5be4e4618a5e2e6676e46f816fd63a24 HEAD -- release-candidates/3-Patti-PRO-v2.7.27.apk
+          git diff --exit-code 756a2831e4f852bfeadc450e386cb5d025bc8c3e HEAD -- 3PattiProNative/app/src/main 3PattiProNative/app/build.gradle.kts
+      - name: Publish the exact verified signed APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sed 's@release-candidates/@@' release-candidates/SHA256SUMS.txt > /tmp/three-patti.sha256
+          cp /tmp/three-patti.sha256 release-candidates/SHA256SUMS.txt
+          gh release create three-patti-pro-v2.7.27 release-candidates/3-Patti-PRO-v2.7.27.apk release-candidates/SHA256SUMS.txt release-candidates/TEST-RESULTS.json --target 756a2831e4f852bfeadc450e386cb5d025bc8c3e --latest --title '3 Patti PRO v2.7.27 — Accurate summaries and smoother tracker' --notes-file release-candidates/NOTES.md
