@@ -16,8 +16,8 @@ android {
         buildConfigField("int", "FIRESTORE_PAGE_SIZE", (providers.gradleProperty("firebasePageSize").orNull ?: "150").also {
             require(it.toInt() in 2..500) { "firebasePageSize must be 2–500" }
         })
-        versionCode = 43
-        versionName = "2.7.22"
+        versionCode = 44
+        versionName = "2.7.23"
     }
     testBuildType = "sandbox"
     buildFeatures { buildConfig = true }
