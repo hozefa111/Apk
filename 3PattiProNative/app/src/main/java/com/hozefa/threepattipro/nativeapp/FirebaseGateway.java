@@ -102,10 +102,24 @@ public final class FirebaseGateway {
     private volatile boolean signingOut=false;
     private final Runnable liveRefresh=()->{if(!this.freshSnapshot)queueLoad(true);};
     private static final class AdminSession {
-        final String uid,token;final boolean administrator;
-        AdminSession(String uid,String token,boolean administrator){this.uid=uid;this.token=token;this.administrator=administrator;}
+        final String uid,token;final boolean administrator,claimAdmin;final long expiresAt;
+        AdminSession(String uid,String token,boolean administrator,boolean claimAdmin,long expiresAt){this.uid=uid;this.token=token;this.administrator=administrator;this.claimAdmin=claimAdmin;this.expiresAt=expiresAt;}
     }
     private volatile AdminSession adminSession;
+    interface TokenLookup {com.google.android.gms.tasks.Task<com.google.firebase.auth.GetTokenResult> get(com.google.firebase.auth.FirebaseUser user,boolean force);}
+    TokenLookup tokenLookup=(user,force)->user.getIdToken(force);
+    okhttp3.EventListener sessionEvents=okhttp3.EventListener.NONE;
+    int sessionClientCreations;private okhttp3.OkHttpClient sessionHttp;
+    private synchronized okhttp3.OkHttpClient sessionClient(){if(sessionHttp==null){sessionClientCreations++;sessionHttp=new okhttp3.OkHttpClient.Builder().callTimeout(25,TimeUnit.SECONDS).eventListener(sessionEvents).build();}return sessionHttp;}
+    private final ExecutorService authRoleWorker=Executors.newSingleThreadExecutor();
+    private static final class JournalEncoding {
+        final Map<String,Object> source;final JSONObject document;final String version,cached;
+        JournalEncoding(Map<String,Object> source,JSONObject document,String version,String cached){this.source=source;this.document=document;this.version=version;this.cached=cached;}
+    }
+    private Map<String,JournalEncoding> journalEncodings=Collections.emptyMap();
+    private long journalProjections,journalNoopReuses,journalEncodedRows,journalReusedRows;private boolean journalProjectionReady;
+    private Map<String,List<Map<String,Object>>> journalViewGroups;
+    long[] journalWorkCounters(){return new long[]{journalProjections,journalNoopReuses,journalEncodedRows,journalReusedRows};}
     interface AdminRoleLookup {boolean read(String uid,Source source)throws Exception;}
     AdminRoleLookup adminRoleLookup=this::readAdminRole;
     private boolean readAdminRole(String uid,Source source)throws Exception{
@@ -185,7 +199,7 @@ public final class FirebaseGateway {
         journalHead=firestore.document("trackerSync/state").addSnapshotListener(MetadataChanges.INCLUDE,(head,error)->{
             if(!running||generation!=subscriptionGeneration)return;
             if(error!=null){onListenFailure(error);return;}
-            if(head.getMetadata().isFromCache()||head.getMetadata().hasPendingWrites()){freshSnapshot=false;listener.syncState(false);return;}
+            if(head.getMetadata().isFromCache()||head.getMetadata().hasPendingWrites()){journalLatestHead=null;freshSnapshot=false;listener.syncState(false);return;}
             journalLatestHead=TrackerJournalSync.head(head);
             journalHeadKnown=true;boolean active="incremental".equals(journalLatestHead.get("mode"))&&Boolean.TRUE.equals(journalLatestHead.get("enforced"));
             if(active!=journalActive){journalActive=active;legacyEpoch++;synchronized(snapshotLock){liveCollections.clear();collectionComplete.clear();liveBoundaries.clear();}listener.syncState(false);for(PagedFirestoreCollection p:subscriptions)snapshotDispatch.execute(p::close);subscriptions.clear();freshSnapshot=false;}
@@ -251,7 +265,7 @@ public final class FirebaseGateway {
         publishProblem(message);removeSubscriptions();scheduleNext();
     }
     private void removeSubscriptions(){
-        if(journalHead!=null){journalHead.remove();journalHead=null;}journalHeadKnown=false;
+        if(journalHead!=null){journalHead.remove();journalHead=null;}journalHeadKnown=false;journalLatestHead=null;
         if(recentPreview!=null){recentPreview.remove();recentPreview=null;}
         subscriptionGeneration++;
         for(PagedFirestoreCollection registration:subscriptions)snapshotDispatch.execute(registration::close);
@@ -279,7 +293,7 @@ public final class FirebaseGateway {
     public void stop() { if(!stopped.compareAndSet(false,true))return;running=false;
         if(authObserver!=null)auth.removeAuthStateListener(authObserver);
         removeSubscriptions();ui.removeCallbacksAndMessages(null);
-        snapshotExecutor.shutdown();executor.execute(()->{flushCache();trackerCache.close();});executor.shutdown();
+        snapshotExecutor.shutdown();executor.execute(()->{flushCache();trackerCache.close();authRoleWorker.shutdown();});executor.shutdown();
     }
     private boolean dispatch(Runnable task){
         if(!running||stopped.get())return false;
@@ -380,15 +394,25 @@ public final class FirebaseGateway {
     private AdminSession ensureIdToken(boolean verifyWrite)throws Exception{
         com.google.firebase.auth.FirebaseUser user=auth.getCurrentUser();
         if(signingOut||user==null){adminSession=null;publishAuthentication();return null;}
+        java.util.concurrent.Future<Boolean> role=null;
         try{
-            com.google.firebase.auth.GetTokenResult result=Tasks.await(user.getIdToken(verifyWrite),20,TimeUnit.SECONDS);
-            // Build the replacement privately: a role lookup must not temporarily revoke the published session.
-            boolean administrator=!user.isAnonymous()&&(Boolean.TRUE.equals(result.getClaims().get("admin"))||adminRoleLookup.read(user.getUid(),verifyWrite?Source.SERVER:Source.DEFAULT));
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);
+            com.google.android.gms.tasks.Task<com.google.firebase.auth.GetTokenResult> token=tokenLookup.get(user,verifyWrite);
+            AdminSession prior=adminSession;
+            // Overlap only when the SDK already has a valid token for this same UID.
+            // Both fresh-token and server-role results are still required before mutation.
+            if(verifyWrite&&!user.isAnonymous()&&prior!=null&&prior.uid.equals(user.getUid())&&!prior.claimAdmin&&prior.expiresAt>System.currentTimeMillis()+60000)
+                role=authRoleWorker.submit(()->adminRoleLookup.read(user.getUid(),Source.SERVER));
+            com.google.firebase.auth.GetTokenResult result=Tasks.await(token,20,TimeUnit.SECONDS);
+            boolean claimAdmin=Boolean.TRUE.equals(result.getClaims().get("admin"));
+            boolean administrator=!user.isAnonymous()&&(claimAdmin||(role!=null?role.get(Math.max(1,deadline-System.nanoTime()),TimeUnit.NANOSECONDS):adminRoleLookup.read(user.getUid(),verifyWrite?Source.SERVER:Source.DEFAULT)));
             com.google.firebase.auth.FirebaseUser current=auth.getCurrentUser();
             if(signingOut||current==null||!user.getUid().equals(current.getUid()))throw new IOException("Your account changed. Please log in again before saving changes.");
-            AdminSession next=new AdminSession(user.getUid(),result.getToken(),administrator);
+            AdminSession next=new AdminSession(user.getUid(),result.getToken(),administrator,claimAdmin,result.getExpirationTimestamp()*1000L);
             adminSession=next;publishAuthentication();return next;
-        }catch(Exception failure){if(invalidAuthentication(failure)){adminSession=null;publishAuthentication();}throw failure;}
+        }catch(java.util.concurrent.TimeoutException timedOut){throw new IOException("Authentication verification timed out. Check your connection and retry.",timedOut);}
+        catch(Exception failure){if(invalidAuthentication(failure)){adminSession=null;publishAuthentication();}throw failure;}
+        finally{if(role!=null&&!role.isDone())role.cancel(true);}
     }
     public boolean loggedIn(){
         AdminSession session=adminSession;com.google.firebase.auth.FirebaseUser user=auth.getCurrentUser();
@@ -513,16 +537,31 @@ public final class FirebaseGateway {
             TrackerJournalSync.Result result=engine.pull(journalDocuments,journalEpoch,journalRevision,supplied,()->!running||!foreground||generation!=subscriptionGeneration);
             if(result==null){journalActive=false;ui.post(this::startSubscriptions);return;}
             if(!running||!foreground||generation!=subscriptionGeneration||!journalActive)return;
+            // A successful pull can verify an unchanged, already-complete in-memory ledger.
+            // Startup must build the projection; reuse still requires a successful server pull and identical epoch/revision/data.
+            if(journalProjectionReady&&result.epoch==journalEpoch&&result.revision==journalRevision&&result.documents.equals(journalDocuments)){
+                boolean reseed=!freshSnapshot;final Map<String,List<Map<String,Object>>> views=journalViewGroups;
+                journalNoopReuses++;queryStarts+=engine.queries;snapshotAt=System.currentTimeMillis();freshSnapshot=true;retry.succeeded();retryStore.edit().clear().apply();
+                ui.post(()->{if(running&&generation==subscriptionGeneration){listener.syncProblem(null,0,false);if(reseed&&views!=null)listener.dataUpdated(new ArrayList<>(views.get("players")),new ArrayList<>(views.get("rounds")),new ArrayList<>(views.get("sessions")));listener.syncTimestamp(snapshotAt);listener.syncState(true);}});return;
+            }
+            journalProjections++;
             Map<String,List<Map<String,Object>>> groups=new HashMap<>();for(String col:TrackerJournalSync.COLLECTIONS)groups.put(col,new ArrayList<>());
             Map<String,String> rows=new LinkedHashMap<>(),newVersions=new HashMap<>();Map<String,JSONObject> documents=new HashMap<>();
+            Map<String,JournalEncoding> encodings=new LinkedHashMap<>();
             for(Map.Entry<String,Map<String,Object>> item:result.documents.entrySet()){
-                String path=item.getKey();JSONObject fields=SdkDocuments.fields(item.getValue());String token=DocumentVersion.of(fields);Map<String,Object> row=decodeFields(fields);row.put("id",path.substring(path.indexOf('/')+1));row.put("_updateTime",token);
-                groups.get(path.substring(0,path.indexOf('/'))).add(row);JSONObject saved=new JSONObject(row);saved.put("_journalFields",fields.toString());rows.put(path,saved.toString());newVersions.put(path,token);documents.put(path,new JSONObject().put("name",documentRoot+"/"+path).put("fields",fields).put("updateTime",token));
+                String path=item.getKey();JournalEncoding encoded=journalEncodings.get(path);
+                boolean reuse=encoded!=null&&encoded.source==item.getValue();
+                JSONObject fields=reuse?encoded.document.getJSONObject("fields"):SdkDocuments.fields(item.getValue());String token=reuse?encoded.version:DocumentVersion.of(fields);
+                // UI receives a fresh decoded row; cached source/JSON never becomes editable UI state.
+                Map<String,Object> row=decodeFields(fields);row.put("id",path.substring(path.indexOf('/')+1));row.put("_updateTime",token);groups.get(path.substring(0,path.indexOf('/'))).add(row);
+                if(!reuse){JSONObject saved=new JSONObject(row);saved.put("_journalFields",fields.toString());encoded=new JournalEncoding(item.getValue(),new JSONObject().put("name",documentRoot+"/"+path).put("fields",fields).put("updateTime",token),token,saved.toString());journalEncodedRows++;}else journalReusedRows++;
+                encodings.put(path,encoded);rows.put(path,encoded.cached);newVersions.put(path,encoded.version);documents.put(path,encoded.document);
             }
             long now=System.currentTimeMillis();ui.removeCallbacks(cacheFlush);cacheRows=null;
             cacheRecordWrites+=trackerCache.write(rows,Collections.emptyMap(),now,result.epoch,result.revision);
             if(!running||generation!=subscriptionGeneration||!journalActive)return;
-            journalDocuments=result.documents;journalEpoch=result.epoch;journalRevision=result.revision;
+            journalEncodings=encodings;journalViewGroups=new HashMap<>();for(String col:TrackerJournalSync.COLLECTIONS)journalViewGroups.put(col,new ArrayList<>(groups.get(col)));
+            journalDocuments=result.documents;journalEpoch=result.epoch;journalRevision=result.revision;journalProjectionReady=true;
             if(journalLatestHead==null||TrackerJournalSync.number(journalLatestHead,"revision")<result.revision)journalLatestHead=TrackerJournalSync.values("mode","incremental","enforced",true,"epoch",result.epoch,"revision",result.revision);versions=newVersions;rawDocuments=documents;snapshotAt=now;freshSnapshot=true;retry.succeeded();retryStore.edit().clear().apply();queryStarts+=engine.queries;
             ui.post(()->{if(!running||generation!=subscriptionGeneration)return;listener.historyDeferred(false);listener.syncProblem(null,0,false);listener.dataUpdated(groups.get("players"),groups.get("rounds"),groups.get("sessions"));listener.syncTimestamp(snapshotAt);listener.syncState(true);});
         }catch(java.util.concurrent.CancellationException cancelled){/* Resume keeps the durable checkpoint. */}
@@ -530,7 +569,7 @@ public final class FirebaseGateway {
     }
     /** Preserve the SDK status: its deepest cause may be a transport IOException. */
     void handleJournalFailure(Exception failure){
-        freshSnapshot=false;
+        journalLatestHead=null;freshSnapshot=false;
         if(failure.getMessage()!=null&&failure.getMessage().contains("journal gap")){journalEpoch=-1;journalRevision=-1;}
         Throwable cause=failure;
         while(!(cause instanceof FirebaseFirestoreException)&&cause.getCause()!=null)cause=cause.getCause();
@@ -798,7 +837,7 @@ public final class FirebaseGateway {
         JSONObject payload=new JSONObject().put("clientProtocol",2).put("operation","sessionHistory").put("sessionId",String.valueOf(session.get("id")))
                 .put("action",action).put("name",name==null?JSONObject.NULL:name).put("expectedName",session.get("sessionName")).put("commandId",UUID.randomUUID().toString());
         if(preview!=null)payload.put("deleteRounds",true).put("previewToken",preview.getString("previewToken"));
-        okhttp3.OkHttpClient http=new okhttp3.OkHttpClient.Builder().callTimeout(25,TimeUnit.SECONDS).build();
+        okhttp3.OkHttpClient http=sessionClient();
         okhttp3.Request request=new okhttp3.Request.Builder().url(endpoint).header("Authorization","Bearer "+token)
                 .post(okhttp3.RequestBody.create(payload.toString(),okhttp3.MediaType.get("application/json"))).build();
         try(okhttp3.Response response=http.newCall(request).execute()){
@@ -815,7 +854,9 @@ public final class FirebaseGateway {
         write("Session, rounds and their points deleted",token->{
             preserveBackup();JSONObject result;
             String owner=bulkOwner();
-            do{result=sessionRequest(session,"delete",null,authorizeWrite(owner,false).token,preview);if(result.optBoolean("pending"))Thread.sleep(1000);}while(result.optBoolean("pending"));
+            do{result=sessionRequest(session,"delete",null,authorizeWrite(owner,false).token,preview);// CF2 deletion is alarm-driven; its status polls must stay bounded.
+                // Legacy/manual responses execute a durable step themselves, so no idle wait is needed.
+                if(result.optBoolean("pending")&&String.valueOf(session.get("id")).startsWith("cf2_"))Thread.sleep(1000);}while(result.optBoolean("pending"));
         });
     }
     public interface Action { void run(String token) throws Exception; }
