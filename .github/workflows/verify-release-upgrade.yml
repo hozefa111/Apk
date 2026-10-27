@@ -1,35 +1,33 @@
-name: Verify signed v2.7.22 update
+name: Publish verified v2.7.22
 on:
   push:
     branches: [verification-v2.7.22]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
   actions: read
 jobs:
-  upgrade:
+  publish:
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Verify focused tests and candidate checksum
+      - name: Reuse exact passed tests and signed upgrade
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run view 40448052172 --repo hozefa111/Apk --json conclusion --jq .conclusion | grep -x success
+          test "$(gh run view 40448052172 --json conclusion --jq .conclusion)" = success
+          test "$(gh run view 40448792504 --json conclusion --jq .conclusion)" = success
+          test "$(gh run view 40448792504 --json headSha --jq .headSha)" = 5a78c45a83879e8bd13e503857f91e1d73bcfa31
           sha256sum -c release-candidates/SHA256SUMS.txt
-          gh release download three-patti-pro-v2.7.21-rc.1 -p '*.apk' -D previous
-      - run: sudo chmod 666 /dev/kvm
-      - name: Retain installed v2.7.21 data during signed update
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 30
-          arch: x86_64
-          target: default
-          disable-animations: true
-          script: bash release-candidates/run-upgrade.sh
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: v2.7.22-signed-upgrade-proof
-          path: upgrade-evidence/
+          echo '88b4a11afbc543faaab58e67a2cda721ac8a81baaacb04f156e1df14859d1e67  release-candidates/3-Patti-PRO-v2.7.22.apk' | sha256sum -c -
+          git fetch origin 93645c5ead5d33d67cdf900c5f6b4aff2280985d 5a78c45a83879e8bd13e503857f91e1d73bcfa31 --depth=1
+          git diff --exit-code 93645c5ead5d33d67cdf900c5f6b4aff2280985d HEAD -- 3PattiProNative/app/src/main 3PattiProNative/app/build.gradle.kts
+          git diff --exit-code 5a78c45a83879e8bd13e503857f91e1d73bcfa31 HEAD -- release-candidates/3-Patti-PRO-v2.7.22.apk
+      - name: Publish the exact verified APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp release-candidates/SHA256SUMS.txt /tmp/candidate.sha256
+          sed 's@release-candidates/@@' /tmp/candidate.sha256 > release-candidates/SHA256SUMS.txt
+          gh release create three-patti-pro-v2.7.22 release-candidates/3-Patti-PRO-v2.7.22.apk release-candidates/SHA256SUMS.txt --target 93645c5ead5d33d67cdf900c5f6b4aff2280985d --latest --title '3 Patti PRO v2.7.22 — Sync status fix' --notes-file release-candidates/NOTES.md
