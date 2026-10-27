@@ -31,7 +31,7 @@ public final class BackupArchive {
         if(!name.startsWith(prefix))throw new IOException("Backup belongs to another Firebase project");
         String path=name.substring(prefix.length());String[] parts=path.split("/",-1);
         if(parts.length!=2 || !Arrays.asList("players","rounds","sessions").contains(parts[0]) || parts[1].isEmpty() || parts[1].equals(".") || parts[1].equals(".."))throw new IOException("Invalid backup document path");
-        if(utf8(parts[1])>1500||parts[1].matches("__.*__"))throw new IOException("Invalid Firestore document ID");
+        if(utf8(parts[1])>1500||RESERVED.matcher(parts[1]).matches())throw new IOException("Invalid Firestore document ID");
         return path;
     }
     public static String fingerprint(byte[] bytes,String project)throws Exception{
@@ -61,15 +61,23 @@ public final class BackupArchive {
         }
         return result;
     }
+    private static final java.util.regex.Pattern RESERVED=java.util.regex.Pattern.compile("__.*__");
+    private static final java.util.regex.Pattern INTEGER=java.util.regex.Pattern.compile("-?(0|[1-9][0-9]*)");
     private static int utf8(String value)throws IOException{
-        if(!StandardCharsets.UTF_8.newEncoder().canEncode(value))throw new IOException("Invalid Unicode in backup");
-        return value.getBytes(StandardCharsets.UTF_8).length;
+        int size=0;
+        for(int i=0;i<value.length();i++){
+            char c=value.charAt(i);
+            if(c<0x80)size++;else if(c<0x800)size+=2;
+            else if(Character.isHighSurrogate(c)){if(i+1>=value.length()||!Character.isLowSurrogate(value.charAt(++i)))throw new IOException("Invalid Unicode in backup");size+=4;}
+            else if(Character.isLowSurrogate(c))throw new IOException("Invalid Unicode in backup");else size+=3;
+        }
+        return size;
     }
     private static long validateFields(JSONObject fields,int depth)throws Exception{
         if(depth>20)throw new IOException("Backup nesting is too deep");
         Iterator<String> keys=fields.keys();long size=0;
         while(keys.hasNext()){
-            String key=keys.next();if(key.isEmpty()||utf8(key)>1500||key.matches("__.*__"))throw new IOException("Invalid Firestore field name");
+            String key=keys.next();if(key.isEmpty()||utf8(key)>1500||RESERVED.matcher(key).matches())throw new IOException("Invalid Firestore field name");
             size+=utf8(key)+1L+validateValue(fields.getJSONObject(key),depth,false);
         }
         return size;
@@ -84,7 +92,7 @@ public final class BackupArchive {
                 if(!(raw instanceof String))throw new IOException("Invalid string field");return utf8((String)raw)+1L;
             case "integerValue":
                 if(!(raw instanceof String)&&!(raw instanceof Number))throw new IOException("Invalid integer field");
-                String integer=String.valueOf(raw);if(!integer.matches("-?(0|[1-9][0-9]*)"))throw new IOException("Invalid integer field");
+                String integer=String.valueOf(raw);if(!INTEGER.matcher(integer).matches())throw new IOException("Invalid integer field");
                 try{Long.parseLong(integer);}catch(NumberFormatException e){throw new IOException("Integer outside Firestore range",e);}return 8;
             case "doubleValue":
                 if(!(raw instanceof Number)&&!Arrays.asList("NaN","Infinity","-Infinity").contains(raw))throw new IOException("Invalid floating-point field");return 8;

@@ -1,7 +1,7 @@
 name: Controlled native data audit benchmark
 on:
   push:
-    branches: [benchmark/tracker-v26]
+    branches: [benchmark/tracker-v26, benchmark/tracker-v27]
   workflow_dispatch:
 permissions:
   contents: read

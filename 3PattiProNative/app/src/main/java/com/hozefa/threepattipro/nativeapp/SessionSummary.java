@@ -5,6 +5,20 @@ import java.util.*;
 /** HH endSession statistics, independent of Android views and Firebase writes. */
 public final class SessionSummary {
     private SessionSummary(){}
+    /** Saved metadata is an archive; corrected manual views follow the same rounds as Ranks. */
+    public static Map<String,Object> corrected(Map<String,Object> session,List<Map<String,Object>> players,List<Map<String,Object>> all,List<Map<String,Object>> catalog){
+        if(session.get("endTime")==null||SessionLeaderboard.online(session))return session;
+        List<Map<String,Object>> sessions=new ArrayList<>();for(Map<String,Object> s:catalog)if(!SessionLeaderboard.id(s).equals(SessionLeaderboard.id(session)))sessions.add(s);sessions.add(session);
+        List<Map<String,Object>> selected=SessionLeaderboard.rounds(all,sessions,SessionLeaderboard.id(session));Collections.reverse(selected);
+        Map<String,Map<String,Object>> roster=new LinkedHashMap<>();for(Map<String,Object> p:players)roster.put(text(p,"id"),p);
+        for(Map<String,Object> p:SessionLeaderboard.maps(session.get("leaderboard"))){String id=text(p,"id");if(id.isEmpty())id=text(p,"playerId");if(!id.isEmpty())roster.putIfAbsent(id,row("id",id,"name",p.get("name")));}
+        for(Map<String,Object> r:selected){
+            String h=text(r,"hukumId");if(!h.isEmpty())roster.putIfAbsent(h,row("id",h,"name",r.getOrDefault("hukumName",h)));
+            for(String role:new String[]{"partner","nonPartner"}){List<?> ids=list(r.get(role+"Ids")),names=list(r.get(role+"Names"));for(int i=0;i<ids.size();i++){String id=String.valueOf(ids.get(i));roster.putIfAbsent(id,row("id",id,"name",i<names.size()?names.get(i):id));}}
+            for(Object raw:scores(r).keySet()){String id=String.valueOf(raw);roster.putIfAbsent(id,row("id",id,"name",id));}
+        }
+        Map<String,Object> result=new LinkedHashMap<>(session);result.putAll(compute(new ArrayList<>(roster.values()),selected));return result;
+    }
     private static String text(Map<String,Object> row,String key){Object value=row.get(key);return value==null?"":String.valueOf(value);}
     private static int number(Object value){return value instanceof Number?((Number)value).intValue():0;}
     private static List<?> list(Object value){return value instanceof List?(List<?>)value:Collections.emptyList();}

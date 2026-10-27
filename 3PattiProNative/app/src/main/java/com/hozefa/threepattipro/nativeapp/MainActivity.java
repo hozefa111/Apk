@@ -64,6 +64,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private final List<Map<String,Object>> sessions = new ArrayList<>();
     private LinearLayout root, content, navigation, toolbar;
     private ScrollView scroll;
+    private final Map<String,Map<String,Object>> correctedManualSessions=new HashMap<>();
+    private final Map<String,ScoreboardModel> savedScoreboardModels=new HashMap<>();
+    private String analyticsCacheKey;private AdvancedAnalytics.Report analyticsCache;
     private boolean loggedIn=false, busy=false, hasData=false, liveConnected=false, historyDeferred=true;
     private long lastSyncedAt=0;
     private String syncProblem;
@@ -151,7 +154,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         boolean freshRound=motionEvents.update(timestamps,liveConnected&&resumed,System.currentTimeMillis());
         // A no-op coherent refresh still seeds motion after resume/reconnect.
         if(hasData && players.equals(p) && rounds.equals(r) && sessions.equals(s)) return;
+        correctedManualSessions.clear();
         ScoreboardModel oldBoard=hasData?scoreboardModel(tab==0):null;
+        savedScoreboardModels.clear();analyticsCache=null;analyticsCacheKey=null;
         motion.cancelTree(content);
         scoreMotion=freshRound?motion.capture(content):null;
         List<Map<String,Object>> oldRanks=rankedFor(filteredRounds());
@@ -996,7 +1001,10 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     private ScoreboardModel scoreboardModel(boolean home){
         if(!home&&ranksSessions)return SessionLeaderboard.model(players,gameRounds(),sessions,selectedRankSession(),sessionScores==null?null:sessionScores.boards.get(selectedSessionId));
-        return new ScoreboardModel(players,scoreboardSource(home),AdvancedAnalytics.scope(gameRounds(),sessions,"current"));
+        // Live/session projections stay uncached. Saved all-time models change only
+        // when the coherent tracker dataset changes, which clears this bounded map.
+        String key=home?"home:"+scoreboardScope:"lifetime";
+        return savedScoreboardModels.computeIfAbsent(key,k->new ScoreboardModel(players,scoreboardSource(home),AdvancedAnalytics.scope(gameRounds(),sessions,"current")));
     }
     private String scoreboardContext(boolean home){
         if(!home)return ranksSessions?"session:"+selectedSessionId:"lifetime";
@@ -1107,7 +1115,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             if(sessions.isEmpty())empty("No previous sessions yet.");
             int count=Math.min(visibleSessionCount,sessions.size());
             for(int i=0;i<count;i++) {
-                Map<String,Object> s=sessions.get(i);
+                Map<String,Object> s=effectiveSession(sessions.get(i));
                 LinearLayout card=panel();
                 card.addView(text(str(s,"sessionName").isEmpty()?"Game Session":str(s,"sessionName"),17,WHITE,true));
                 gap(card,10);
@@ -1562,7 +1570,12 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         return nameOf(pid);
     }
     private void showSessionSummary(Map<String,Object> session) {showSessionSummary(session,false);}
-    private void showSessionSummary(Map<String,Object> session,boolean celebrate) {
+    private Map<String,Object> effectiveSession(Map<String,Object> session){
+        if(!hasData||historyDeferred||session.get("endTime")==null||SessionLeaderboard.online(session))return session;
+        return correctedManualSessions.computeIfAbsent(id(session),key->SessionSummary.corrected(session,players,gameRounds(),sessions));
+    }
+    private void showSessionSummary(Map<String,Object> source,boolean celebrate) {
+        Map<String,Object> session=effectiveSession(source);
         ScrollView scroller=new DialogUi.BoundedScroll(this);
         scroller.setFillViewport(false);
         LinearLayout display=column();pad(display,18,14,18,18);
@@ -1776,7 +1789,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         NativeImageShare.round(this,when(round.get("timestamp")),str(round,"hukumName"),
                 str(round,"result"),num(round.get("bid")),rows);
     }
-    private void shareSession(Map<String,Object> session) {
+    private void shareSession(Map<String,Object> source) {
+        Map<String,Object> session=effectiveSession(source);
         List<NativeImageShare.AwardRow> awards=new ArrayList<>();
         Map<String,Object> mvp=map(session.get("mvp"));
         if(!mvp.isEmpty())awards.add(new NativeImageShare.AwardRow("🏅 MVP",str(mvp,"name")+"  "+str(mvp,"score")));
@@ -1842,8 +1856,10 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         title(content,"Table Analytics","Explore player form, partnerships, bids and session records");
         dateFilterBar(content);
         if(!hasData){empty("Analytics needs a loaded or saved table.");content.addView(text("Connect to your shared table once to build analytics. Your last saved table works offline.",14,MUTED,false));return;}
-        List<Map<String,Object>> scope=AdvancedAnalytics.scope(AdvancedAnalytics.dates(gameRounds(),rankFilter,Instant.now(),ZoneId.systemDefault(),customStart,customEnd),sessions,analyticsState.scope);
-        AdvancedAnalytics.Report report=new AdvancedAnalytics.Report(players,scope,sessions);
+        Instant now=Instant.now();ZoneId zone=ZoneId.systemDefault();DateRange range=DateRange.of(rankFilter,now,zone,customStart,customEnd);
+        String key=rankFilter+"|"+range.start+"|"+range.end+"|"+zone.getId()+"|"+analyticsState.scope;
+        if(analyticsCache==null||!key.equals(analyticsCacheKey)){List<Map<String,Object>> scope=AdvancedAnalytics.scope(AdvancedAnalytics.dates(gameRounds(),rankFilter,now,zone,customStart,customEnd),sessions,analyticsState.scope);analyticsCache=new AdvancedAnalytics.Report(players,scope,sessions);analyticsCacheKey=key;}
+        AdvancedAnalytics.Report report=analyticsCache;
         new AdvancedAnalyticsPage(this,content,analyticsState,report,sessions,PANEL,GOLD,GREEN,RED,BLUE,new AdvancedAnalyticsPage.Host(){
             public void choose(String title,String[] labels,java.util.function.IntConsumer action){
                 if(labels.length==0){Toast.makeText(MainActivity.this,"No other options in this scope",Toast.LENGTH_SHORT).show();return;}
