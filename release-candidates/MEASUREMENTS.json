@@ -1,0 +1,92 @@
+{
+  "baseline": {
+    "metrics": [
+      {
+        "kind": "SESSION_DELAY",
+        "baseline": true,
+        "catalogDelayMs": 3500,
+        "firstVerifiedScoreFrameMs": 4519,
+        "catalogRequests": 1,
+        "ticketRequests": 1
+      }
+    ],
+    "instrumentation": [
+      {
+        "name": "com.hozefa.threepattipro.nativeapp.SessionDelayTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      }
+    ]
+  },
+  "fixed-30": {
+    "metrics": [
+      {
+        "kind": "SESSION_DELAY",
+        "baseline": false,
+        "catalogDelayMs": 3500,
+        "firstVerifiedScoreFrameMs": 281,
+        "catalogRequests": 1,
+        "ticketRequests": 1
+      },
+      {
+        "kind": "SESSION_CACHE",
+        "records": 3000,
+        "cachedFrameMs": [
+          135,
+          131,
+          125
+        ],
+        "liveFrameMs": 238,
+        "catalogRequests": 1,
+        "ticketsBeforeBackground": 1,
+        "ticketsAfterBackground": 2
+      }
+    ],
+    "instrumentation": [
+      {
+        "name": "com.hozefa.threepattipro.nativeapp.SessionDelayTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      }
+    ]
+  },
+  "fixed-35": {
+    "metrics": [
+      {
+        "kind": "SESSION_DELAY",
+        "baseline": false,
+        "catalogDelayMs": 3500,
+        "firstVerifiedScoreFrameMs": 281,
+        "catalogRequests": 1,
+        "ticketRequests": 1
+      },
+      {
+        "kind": "SESSION_CACHE",
+        "records": 3000,
+        "cachedFrameMs": [
+          136,
+          132,
+          138
+        ],
+        "liveFrameMs": 266,
+        "catalogRequests": 1,
+        "ticketsBeforeBackground": 1,
+        "ticketsAfterBackground": 2
+      }
+    ],
+    "instrumentation": [
+      {
+        "name": "com.hozefa.threepattipro.nativeapp.SessionDelayTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      }
+    ]
+  },
+  "relativeImprovementPercent": 93.78181013498562
+}
