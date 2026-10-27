@@ -106,6 +106,11 @@ public final class FirebaseGateway {
         AdminSession(String uid,String token,boolean administrator){this.uid=uid;this.token=token;this.administrator=administrator;}
     }
     private volatile AdminSession adminSession;
+    interface TokenLookup {com.google.android.gms.tasks.Task<com.google.firebase.auth.GetTokenResult> get(com.google.firebase.auth.FirebaseUser user,boolean force);}
+    TokenLookup tokenLookup=(user,force)->user.getIdToken(force);
+    okhttp3.EventListener sessionEvents=okhttp3.EventListener.NONE;
+    int sessionClientCreations;
+    private okhttp3.OkHttpClient sessionClient(){sessionClientCreations++;return new okhttp3.OkHttpClient.Builder().callTimeout(25,TimeUnit.SECONDS).eventListener(sessionEvents).build();}
     interface AdminRoleLookup {boolean read(String uid,Source source)throws Exception;}
     AdminRoleLookup adminRoleLookup=this::readAdminRole;
     private boolean readAdminRole(String uid,Source source)throws Exception{
@@ -381,7 +386,7 @@ public final class FirebaseGateway {
         com.google.firebase.auth.FirebaseUser user=auth.getCurrentUser();
         if(signingOut||user==null){adminSession=null;publishAuthentication();return null;}
         try{
-            com.google.firebase.auth.GetTokenResult result=Tasks.await(user.getIdToken(verifyWrite),20,TimeUnit.SECONDS);
+            com.google.firebase.auth.GetTokenResult result=Tasks.await(tokenLookup.get(user,verifyWrite),20,TimeUnit.SECONDS);
             // Build the replacement privately: a role lookup must not temporarily revoke the published session.
             boolean administrator=!user.isAnonymous()&&(Boolean.TRUE.equals(result.getClaims().get("admin"))||adminRoleLookup.read(user.getUid(),verifyWrite?Source.SERVER:Source.DEFAULT));
             com.google.firebase.auth.FirebaseUser current=auth.getCurrentUser();
@@ -798,7 +803,7 @@ public final class FirebaseGateway {
         JSONObject payload=new JSONObject().put("clientProtocol",2).put("operation","sessionHistory").put("sessionId",String.valueOf(session.get("id")))
                 .put("action",action).put("name",name==null?JSONObject.NULL:name).put("expectedName",session.get("sessionName")).put("commandId",UUID.randomUUID().toString());
         if(preview!=null)payload.put("deleteRounds",true).put("previewToken",preview.getString("previewToken"));
-        okhttp3.OkHttpClient http=new okhttp3.OkHttpClient.Builder().callTimeout(25,TimeUnit.SECONDS).build();
+        okhttp3.OkHttpClient http=sessionClient();
         okhttp3.Request request=new okhttp3.Request.Builder().url(endpoint).header("Authorization","Bearer "+token)
                 .post(okhttp3.RequestBody.create(payload.toString(),okhttp3.MediaType.get("application/json"))).build();
         try(okhttp3.Response response=http.newCall(request).execute()){
