@@ -112,9 +112,14 @@ public final class FirebaseGateway {
     int sessionClientCreations;private okhttp3.OkHttpClient sessionHttp;
     private synchronized okhttp3.OkHttpClient sessionClient(){if(sessionHttp==null){sessionClientCreations++;sessionHttp=new okhttp3.OkHttpClient.Builder().callTimeout(25,TimeUnit.SECONDS).eventListener(sessionEvents).build();}return sessionHttp;}
     private final ExecutorService authRoleWorker=Executors.newSingleThreadExecutor();
-    private long journalProjections,journalNoopReuses;private boolean journalProjectionReady;
+    private static final class JournalEncoding {
+        final Map<String,Object> source;final JSONObject document;final String version,cached;
+        JournalEncoding(Map<String,Object> source,JSONObject document,String version,String cached){this.source=source;this.document=document;this.version=version;this.cached=cached;}
+    }
+    private Map<String,JournalEncoding> journalEncodings=Collections.emptyMap();
+    private long journalProjections,journalNoopReuses,journalEncodedRows,journalReusedRows;private boolean journalProjectionReady;
     private Map<String,List<Map<String,Object>>> journalViewGroups;
-    long[] journalWorkCounters(){return new long[]{journalProjections,journalNoopReuses};}
+    long[] journalWorkCounters(){return new long[]{journalProjections,journalNoopReuses,journalEncodedRows,journalReusedRows};}
     interface AdminRoleLookup {boolean read(String uid,Source source)throws Exception;}
     AdminRoleLookup adminRoleLookup=this::readAdminRole;
     private boolean readAdminRole(String uid,Source source)throws Exception{
@@ -542,14 +547,20 @@ public final class FirebaseGateway {
             journalProjections++;
             Map<String,List<Map<String,Object>>> groups=new HashMap<>();for(String col:TrackerJournalSync.COLLECTIONS)groups.put(col,new ArrayList<>());
             Map<String,String> rows=new LinkedHashMap<>(),newVersions=new HashMap<>();Map<String,JSONObject> documents=new HashMap<>();
+            Map<String,JournalEncoding> encodings=new LinkedHashMap<>();
             for(Map.Entry<String,Map<String,Object>> item:result.documents.entrySet()){
-                String path=item.getKey();JSONObject fields=SdkDocuments.fields(item.getValue());String token=DocumentVersion.of(fields);Map<String,Object> row=decodeFields(fields);row.put("id",path.substring(path.indexOf('/')+1));row.put("_updateTime",token);
-                groups.get(path.substring(0,path.indexOf('/'))).add(row);JSONObject saved=new JSONObject(row);saved.put("_journalFields",fields.toString());rows.put(path,saved.toString());newVersions.put(path,token);documents.put(path,new JSONObject().put("name",documentRoot+"/"+path).put("fields",fields).put("updateTime",token));
+                String path=item.getKey();JournalEncoding encoded=journalEncodings.get(path);
+                boolean reuse=encoded!=null&&encoded.source==item.getValue();
+                JSONObject fields=reuse?encoded.document.getJSONObject("fields"):SdkDocuments.fields(item.getValue());String token=reuse?encoded.version:DocumentVersion.of(fields);
+                // UI receives a fresh decoded row; cached source/JSON never becomes editable UI state.
+                Map<String,Object> row=decodeFields(fields);row.put("id",path.substring(path.indexOf('/')+1));row.put("_updateTime",token);groups.get(path.substring(0,path.indexOf('/'))).add(row);
+                if(!reuse){JSONObject saved=new JSONObject(row);saved.put("_journalFields",fields.toString());encoded=new JournalEncoding(item.getValue(),new JSONObject().put("name",documentRoot+"/"+path).put("fields",fields).put("updateTime",token),token,saved.toString());journalEncodedRows++;}else journalReusedRows++;
+                encodings.put(path,encoded);rows.put(path,encoded.cached);newVersions.put(path,encoded.version);documents.put(path,encoded.document);
             }
             long now=System.currentTimeMillis();ui.removeCallbacks(cacheFlush);cacheRows=null;
             cacheRecordWrites+=trackerCache.write(rows,Collections.emptyMap(),now,result.epoch,result.revision);
             if(!running||generation!=subscriptionGeneration||!journalActive)return;
-            journalViewGroups=new HashMap<>();for(String col:TrackerJournalSync.COLLECTIONS)journalViewGroups.put(col,new ArrayList<>(groups.get(col)));
+            journalEncodings=encodings;journalViewGroups=new HashMap<>();for(String col:TrackerJournalSync.COLLECTIONS)journalViewGroups.put(col,new ArrayList<>(groups.get(col)));
             journalDocuments=result.documents;journalEpoch=result.epoch;journalRevision=result.revision;journalProjectionReady=true;
             if(journalLatestHead==null||TrackerJournalSync.number(journalLatestHead,"revision")<result.revision)journalLatestHead=TrackerJournalSync.values("mode","incremental","enforced",true,"epoch",result.epoch,"revision",result.revision);versions=newVersions;rawDocuments=documents;snapshotAt=now;freshSnapshot=true;retry.succeeded();retryStore.edit().clear().apply();queryStarts+=engine.queries;
             ui.post(()->{if(!running||generation!=subscriptionGeneration)return;listener.historyDeferred(false);listener.syncProblem(null,0,false);listener.dataUpdated(groups.get("players"),groups.get("rounds"),groups.get("sessions"));listener.syncTimestamp(snapshotAt);listener.syncState(true);});
