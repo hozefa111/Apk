@@ -1,40 +1,35 @@
-name: Verify stable release update
+name: Verify signed v2.7.25 upgrade
 on:
-  workflow_dispatch:
+  push:
+    branches: [verification-v2.7.25]
 permissions:
-  contents: write
+  contents: read
+  actions: read
 jobs:
   upgrade:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Download existing release and private candidate
+      - name: Reuse passed Android 11 and 15 save-delete gates
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download three-patti-pro-v2.7.12 -p '*.apk' -D previous
-          gh release download three-patti-pro-v2.7.13 -p '*.apk' -D candidate
+          test "$(gh run view 40479455400 --json conclusion --jq .conclusion)" = success
+          test "$(gh run view 40474919311 --json conclusion --jq .conclusion)" = success
+          sha256sum -c release-candidates/SHA256SUMS.txt
+          gh release download three-patti-pro-v2.7.24 -p '*.apk' -D previous
       - run: sudo chmod 666 /dev/kvm
-      - uses: reactivecircus/android-emulator-runner@v2
+      - name: Preserve v2.7.24 installation and data during signed upgrade
+        uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
           arch: x86_64
           target: default
           disable-animations: true
-          script: |
-            adb root
-            adb wait-for-device
-            adb shell svc wifi disable
-            adb shell svc data disable
-            adb install previous/*.apk
-            adb shell am start -n com.hozefa.threepattipro.nativeapp/.MainActivity
-            sleep 5
-            adb shell mkdir -p /data/user/0/com.hozefa.threepattipro.nativeapp/files
-            adb shell touch /data/user/0/com.hozefa.threepattipro.nativeapp/files/upgrade-verification-marker
-            adb install -r candidate/*.apk
-            adb shell test -f /data/user/0/com.hozefa.threepattipro.nativeapp/files/upgrade-verification-marker
-            adb shell am start -n com.hozefa.threepattipro.nativeapp/.MainActivity
-            sleep 8
-            adb shell pidof com.hozefa.threepattipro.nativeapp
-            adb shell dumpsys package com.hozefa.threepattipro.nativeapp | grep 'versionName=2.7.13'
+          script: bash release-candidates/run-upgrade.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v2.7.25-upgrade-proof
+          path: upgrade-evidence/
