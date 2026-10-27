@@ -1,0 +1,150 @@
+{
+  "sourceCommit": "04d8958580c2682f51b84203d5f24b9d376a1c48",
+  "run": "https://github.com/hozefa111/Apk/actions/runs/40500883711",
+  "results": [
+    {
+      "api": 26,
+      "class": "com.hozefa.threepattipro.nativeapp.NativeRoundSaveTest",
+      "test": "manualSaveRetainsPlayersResetsFieldsAndAcceptsNextRound",
+      "status": "PASS"
+    },
+    {
+      "api": 26,
+      "class": "com.hozefa.threepattipro.nativeapp.NativeRoundSaveTest",
+      "test": "failedSaveRetainsOriginalDraftAndRetriesOnce",
+      "status": "PASS"
+    },
+    {
+      "api": 26,
+      "class": "com.hozefa.threepattipro.nativeapp.NativeRoundSaveTest",
+      "test": "lostConfirmationRetryUsesAlreadyCommittedIdWithoutDuplicate",
+      "status": "PASS"
+    },
+    {
+      "api": 26,
+      "class": "com.hozefa.threepattipro.nativeapp.NativeVoiceTest",
+      "test": "confirmedVoiceRoundCreatesExactlyOneSandboxRecord",
+      "status": "PASS"
+    },
+    {
+      "api": 26,
+      "class": "com.hozefa.threepattipro.nativeapp.NativeVoiceTest",
+      "test": "offlineConfirmationCannotChangeOrSaveManualDraft",
+      "status": "PASS"
+    },
+    {
+      "api": 26,
+      "class": "com.hozefa.threepattipro.nativeapp.OnlineGameTest",
+      "test": "sharedTableLoadsInsideSamePackageWithSafeWebSettings",
+      "status": "FAIL"
+    },
+    {
+      "api": 26,
+      "class": "com.hozefa.threepattipro.nativeapp.OnlineGameTest",
+      "test": "invitationPrefillsRoomCodeInBundledTable",
+      "status": "FAIL"
+    },
+    {
+      "api": 26,
+      "class": "com.hozefa.threepattipro.nativeapp.NativeDialogTest",
+      "test": "largeFontLandscapeKeepsHistoryAndShareActionsOnScreen",
+      "status": "PASS"
+    },
+    {
+      "api": 30,
+      "class": "com.hozefa.threepattipro.nativeapp.NativeRoundSaveTest",
+      "test": "manualSaveRetainsPlayersResetsFieldsAndAcceptsNextRound",
+      "status": "PASS"
+    },
+    {
+      "api": 30,
+      "class": "com.hozefa.threepattipro.nativeapp.NativeRoundSaveTest",
+      "test": "failedSaveRetainsOriginalDraftAndRetriesOnce",
+      "status": "PASS"
+    },
+    {
+      "api": 30,
+      "class": "com.hozefa.threepattipro.nativeapp.NativeRoundSaveTest",
+      "test": "lostConfirmationRetryUsesAlreadyCommittedIdWithoutDuplicate",
+      "status": "PASS"
+    },
+    {
+      "api": 30,
+      "class": "com.hozefa.threepattipro.nativeapp.NativeVoiceTest",
+      "test": "confirmedVoiceRoundCreatesExactlyOneSandboxRecord",
+      "status": "PASS"
+    },
+    {
+      "api": 30,
+      "class": "com.hozefa.threepattipro.nativeapp.NativeVoiceTest",
+      "test": "offlineConfirmationCannotChangeOrSaveManualDraft",
+      "status": "PASS"
+    },
+    {
+      "api": 30,
+      "class": "com.hozefa.threepattipro.nativeapp.OnlineGameTest",
+      "test": "sharedTableLoadsInsideSamePackageWithSafeWebSettings",
+      "status": "PASS"
+    },
+    {
+      "api": 30,
+      "class": "com.hozefa.threepattipro.nativeapp.OnlineGameTest",
+      "test": "invitationPrefillsRoomCodeInBundledTable",
+      "status": "PASS"
+    },
+    {
+      "api": 35,
+      "class": "com.hozefa.threepattipro.nativeapp.NativeRoundSaveTest",
+      "test": "manualSaveRetainsPlayersResetsFieldsAndAcceptsNextRound",
+      "status": "PASS"
+    },
+    {
+      "api": 35,
+      "class": "com.hozefa.threepattipro.nativeapp.NativeRoundSaveTest",
+      "test": "failedSaveRetainsOriginalDraftAndRetriesOnce",
+      "status": "PASS"
+    },
+    {
+      "api": 35,
+      "class": "com.hozefa.threepattipro.nativeapp.NativeRoundSaveTest",
+      "test": "lostConfirmationRetryUsesAlreadyCommittedIdWithoutDuplicate",
+      "status": "PASS"
+    },
+    {
+      "api": 35,
+      "class": "com.hozefa.threepattipro.nativeapp.NativeVoiceTest",
+      "test": "confirmedVoiceRoundCreatesExactlyOneSandboxRecord",
+      "status": "PASS"
+    },
+    {
+      "api": 35,
+      "class": "com.hozefa.threepattipro.nativeapp.NativeVoiceTest",
+      "test": "offlineConfirmationCannotChangeOrSaveManualDraft",
+      "status": "PASS"
+    },
+    {
+      "api": 35,
+      "class": "com.hozefa.threepattipro.nativeapp.OnlineGameTest",
+      "test": "sharedTableLoadsInsideSamePackageWithSafeWebSettings",
+      "status": "PASS"
+    },
+    {
+      "api": 35,
+      "class": "com.hozefa.threepattipro.nativeapp.OnlineGameTest",
+      "test": "invitationPrefillsRoomCodeInBundledTable",
+      "status": "PASS"
+    }
+  ],
+  "releaseVersion": "2.7.26",
+  "versionCode": 47,
+  "originalFocusedRun": "20 passed, 2 test-harness timeouts, 0 skipped",
+  "webviewRecoveryRun": "https://github.com/hozefa111/Apk/actions/runs/40503129609",
+  "webviewRecovery": "2 passed, 0 skipped",
+  "originalRuntimeMatchesFinalRuntime": true,
+  "runtimeCommit": "04ef681afe453f65ea8e177026ec93862b9fd4ab",
+  "fullHistoricalSuiteRerun": false,
+  "gameAssetFilesUnchanged": 18,
+  "physicalPhoneTesting": false,
+  "apkSha256": "21139b88e6a56ed06126b57e1bf09fe8be816f45946748e6ab82ed3139acea98",
+  "signerSha256": "dc0697a03526612bc54c3d9ad0b4a10e9ed9b3b6ad22e4e53269f904a72ba9b4"
+}
