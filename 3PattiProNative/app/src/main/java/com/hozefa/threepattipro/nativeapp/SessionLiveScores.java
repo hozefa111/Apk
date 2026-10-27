@@ -8,11 +8,12 @@ import java.util.*;import java.util.concurrent.*;
 /** One selected read-only score subscription. Never joins a room or changes presence. */
 final class SessionLiveScores {
  interface Listener {void changed();void removed(String id);}
- private final Context context;private final Listener listener;private final Handler ui=new Handler(Looper.getMainLooper());private final ExecutorService worker=Executors.newSingleThreadExecutor();
+ private final Context context;private final Listener listener;private final String testEndpoint;private final Handler ui=new Handler(Looper.getMainLooper());private final ExecutorService worker=Executors.newSingleThreadExecutor();
  private final OkHttpClient http=new OkHttpClient.Builder().callTimeout(25,TimeUnit.SECONDS).pingInterval(20,TimeUnit.SECONDS).build();
  final Map<String,Map<String,Object>> boards=new LinkedHashMap<>();final Set<String> discoveredLive=new HashSet<>();
  private WebSocket socket;private ListenerRegistration legacy;private int generation,failures;private boolean foreground=true,opening,discovering;boolean connected;String selected="",message="";JSONObject next;private String owner="";
- SessionLiveScores(Context c,Listener l){context=c;listener=l;identity();}
+ SessionLiveScores(Context c,Listener l){this(c,l,null);}
+ SessionLiveScores(Context c,Listener l,String endpoint){if(endpoint!=null&&!BuildConfig.USE_EMULATORS)throw new IllegalArgumentException("Test endpoint requires isolated build");context=c;listener=l;testEndpoint=endpoint;identity();}
  private FirebaseAuth auth(){return FirebaseAuth.getInstance(FirebaseApp.getInstance("three-patti-native"));}
  private String uid(){try{FirebaseUser u=auth().getCurrentUser();return u==null?"":u.getUid();}catch(IllegalStateException absent){return "";}}
  private String cacheKey(){return "session_boards_"+owner;}
@@ -31,7 +32,7 @@ final class SessionLiveScores {
  });}catch(Exception error){ui.post(()->{if(gen!=generation)return;opening=false;if(String.valueOf(error.getMessage()).contains("Session was deleted")){forget(id);listener.removed(id);}else if(String.valueOf(error.getMessage()).contains("Not a room participant")||String.valueOf(error.getMessage()).contains("Sign in")){connected=false;message="Live access unavailable · showing saved history";listener.changed();}else if(socket==null){connected=false;message=error.getMessage();retry(gen);}});}});}
  private void retry(int gen){if(!foreground||selected.isEmpty())return;message="Saved session scores · reconnecting";listener.changed();ui.postDelayed(()->{if(gen==generation)connect();},Math.min(30000,1000L<<Math.min(failures++,5)));}
  private JSONObject api(JSONObject body)throws Exception{FirebaseUser user=auth().getCurrentUser();if(user==null)throw new IllegalStateException("Sign in to view live session scores");body.put("clientProtocol",2);for(int attempt=0;attempt<2;attempt++){String token=Tasks.await(user.getIdToken(attempt>0),25,TimeUnit.SECONDS).getToken();Request req=new Request.Builder().url(endpoint()).header("Authorization","Bearer "+token).post(RequestBody.create(body.toString(),MediaType.get("application/json"))).build();try(Response res=http.newCall(req).execute()){JSONObject data=new JSONObject(res.body().string());if(res.code()==401&&attempt==0)continue;if(!res.isSuccessful())throw new IllegalStateException(data.optString("error","Session connection unavailable"));return data;}}throw new IllegalStateException("Sign in again to reconnect");}
- private String endpoint()throws Exception{if(BuildConfig.USE_EMULATORS)return "http://10.0.2.2:5001/demo-three-patti/asia-south1/kaliApi";try(java.io.Reader in=new java.io.InputStreamReader(context.getAssets().open("kali/config.js"),java.nio.charset.StandardCharsets.UTF_8)){StringBuilder s=new StringBuilder();char[] b=new char[1024];int n;while((n=in.read(b))!=-1)s.append(b,0,n);return OnlineEndpoint.api(s.toString());}}
+ private String endpoint()throws Exception{if(testEndpoint!=null)return testEndpoint;if(BuildConfig.USE_EMULATORS)return "http://10.0.2.2:5001/demo-three-patti/asia-south1/kaliApi";try(java.io.Reader in=new java.io.InputStreamReader(context.getAssets().open("kali/config.js"),java.nio.charset.StandardCharsets.UTF_8)){StringBuilder s=new StringBuilder();char[] b=new char[1024];int n;while((n=in.read(b))!=-1)s.append(b,0,n);return OnlineEndpoint.api(s.toString());}}
  void pause(){foreground=false;disconnect();discoveredLive.clear();}
  void resume(){foreground=true;identity();}
  void disconnect(){generation++;ui.removeCallbacksAndMessages(null);if(socket!=null){socket.close(1000,"Score view closed");socket=null;}if(legacy!=null){legacy.remove();legacy=null;}connected=false;opening=false;selected="";message="";}

@@ -1,0 +1,46 @@
+package com.hozefa.threepattipro.nativeapp;
+
+import android.view.*;import android.widget.*;import android.os.SystemClock;
+import androidx.test.core.app.ActivityScenario;import androidx.test.platform.app.InstrumentationRegistry;
+import com.google.firebase.FirebaseApp;import com.google.firebase.auth.FirebaseAuth;import com.google.android.gms.tasks.Tasks;
+import java.util.*;import java.util.concurrent.*;import java.util.concurrent.atomic.*;import java.net.*;import java.io.*;import java.nio.charset.StandardCharsets;import java.security.MessageDigest;
+import org.json.*;import org.junit.*;import static org.junit.Assert.*;
+
+/** Real loopback HTTP/WebSocket timing; fake public scoreboards, demo Firebase only. */
+public class SessionDelayTest {
+ private static final String ROOM="cf2_delay";
+ private Object get(Object a,String n){try{java.lang.reflect.Field f=a.getClass().getDeclaredField(n);f.setAccessible(true);return f.get(a);}catch(Exception e){throw new AssertionError(e);}}
+ private void set(Object a,String n,Object v){try{java.lang.reflect.Field f=a.getClass().getDeclaredField(n);f.setAccessible(true);f.set(a,v);}catch(Exception e){throw new AssertionError(e);}}
+ private void render(MainActivity a){try{java.lang.reflect.Method m=MainActivity.class.getDeclaredMethod("render",boolean.class);m.setAccessible(true);m.invoke(a,false);}catch(Exception e){throw new AssertionError(e);}}
+ private Map<String,Object> m(Object... p){return FirebaseGateway.map(p);}
+ private Map<String,Object> session(String id,boolean active){return m("id",id,"sessionName",id,"source",id.startsWith("cf2_")?"online":"manual","startTime","2026-10-20T00:00:00Z","endTime",active?null:"2026-10-20T11:00:00Z","status",active?"playing":"stopped","totalRounds",1);}
+ private boolean hasText(View v,String s){if(v instanceof TextView&&s.equals(((TextView)v).getText().toString()))return true;if(v instanceof ViewGroup){ViewGroup g=(ViewGroup)v;for(int i=0;i<g.getChildCount();i++)if(hasText(g.getChildAt(i),s))return true;}return false;}
+ private void await(java.util.function.BooleanSupplier condition)throws Exception{long end=SystemClock.elapsedRealtime()+12000;while(SystemClock.elapsedRealtime()<end){if(condition.getAsBoolean())return;Thread.sleep(20);}fail("Timed out awaiting scoreboard");}
+ @Before public void isolated(){assertTrue(BuildConfig.USE_EMULATORS);InstrumentationRegistry.getInstrumentation().getTargetContext().getSharedPreferences("preferences",0).edit().remove("ranks_sessions").remove("ranks_session_id").putString("motion","off").commit();}
+ private void initialize(MainActivity a){((FirebaseGateway)get(a,"api")).stop();set(a,"tab",3);set(a,"ranksSessions",false);List<Map<String,Object>> records=new ArrayList<>(),sessions=new ArrayList<>();sessions.add(session(ROOM,true));for(int n=0;n<40;n++)sessions.add(session("manual-"+n,false));for(int n=0;n<3000;n++)records.add(m("id","r"+n,"type","hukum","source","manual","sessionId","manual-"+(n%40),"timestamp","2026-10-20T10:00:00Z","playerIds",Arrays.asList("a"),"scoreChanges",m("a",10)));a.dataUpdated(new ArrayList<>(Arrays.asList(m("id","a","name","Alpha","active",true))),records,sessions);a.syncState(true);}
+ private void login()throws Exception{FirebaseAuth auth=FirebaseAuth.getInstance(FirebaseApp.getInstance("three-patti-native"));if(auth.getCurrentUser()==null)Tasks.await(auth.signInAnonymously(),15,TimeUnit.SECONDS);}
+ @Test public void delayedCatalogDoesNotBlockSelectedScoreboardFrame()throws Exception{
+  boolean baseline="true".equals(InstrumentationRegistry.getArguments().getString("sessionBaseline"));
+  try(Wire wire=new Wire(3500);ActivityScenario<MainActivity> activity=ActivityScenario.launch(MainActivity.class)){
+   NativeTestUi.awaitMotionIdle(activity);login();AtomicLong start=new AtomicLong(),drawn=new AtomicLong();AtomicReference<SessionLiveScores> ref=new AtomicReference<>();
+   activity.onActivity(a->{initialize(a);SessionLiveScores live=new SessionLiveScores(a,new SessionLiveScores.Listener(){public void changed(){render(a);}public void removed(String id){}},wire.endpoint());ref.set(live);set(a,"sessionScores",live);set(a,"selectedSessionId",ROOM);set(a,"ranksSessions",true);View view=(View)get(a,"content");view.getViewTreeObserver().addOnDrawListener(()->{if(live.connected&&hasText(view,"+310"))drawn.compareAndSet(0,SystemClock.elapsedRealtime());});start.set(SystemClock.elapsedRealtime());render(a);});
+   await(()->drawn.get()>0);long elapsed=drawn.get()-start.get();System.out.println("SESSION_DELAY "+new JSONObject().put("baseline",baseline).put("catalogDelayMs",3500).put("firstVerifiedScoreFrameMs",elapsed).put("catalogRequests",wire.catalog.get()).put("ticketRequests",wire.tickets.get()));
+   if(baseline)assertTrue("Fixture must reproduce serialized blocking",elapsed>=3300);else assertTrue("Selected scores must not wait for catalog: "+elapsed,elapsed<1000);
+   activity.onActivity(a->ref.get().close());
+  }
+ }
+ static final class Wire implements AutoCloseable {
+  final ServerSocket server;final ExecutorService tasks=Executors.newCachedThreadPool();final Set<Socket>sockets=ConcurrentHashMap.newKeySet();final int delay;final AtomicInteger catalog=new AtomicInteger(),tickets=new AtomicInteger(),connections=new AtomicInteger();
+  Wire(int delay)throws Exception{this.delay=delay;server=new ServerSocket(0,20,InetAddress.getByName("127.0.0.1"));tasks.execute(()->{while(!server.isClosed())try{Socket s=server.accept();sockets.add(s);tasks.execute(()->serve(s));}catch(IOException stopped){break;}});}
+  String endpoint(){return "http://127.0.0.1:"+server.getLocalPort()+"/kaliApi";}
+  private int byteFrom(InputStream in)throws IOException{int b=in.read();if(b<0)throw new EOFException();return b;}
+  private byte[] bytes(InputStream in,int n)throws IOException{byte[] b=new byte[n];for(int offset=0;offset<n;){int count=in.read(b,offset,n-offset);if(count<0)throw new EOFException();offset+=count;}return b;}
+  private void frame(OutputStream out,int opcode,byte[] b)throws IOException{out.write(opcode);if(b.length<126)out.write(b.length);else{out.write(126);out.write(b.length>>8);out.write(b.length&255);}out.write(b);out.flush();}
+  void serve(Socket socket){try(Socket s=socket){InputStream in=new BufferedInputStream(s.getInputStream());OutputStream out=s.getOutputStream();ByteArrayOutputStream header=new ByteArrayOutputStream();int end=0;while(end!=0x0d0a0d0a){int b=byteFrom(in);header.write(b);end=(end<<8)|b;if(header.size()>20000)throw new IOException("Header too long");}String text=header.toString("UTF-8"),target=text.split(" ")[1];Map<String,String>headers=new HashMap<>();for(String line:text.split("\\r\\n")){int colon=line.indexOf(':');if(colon>0)headers.put(line.substring(0,colon).toLowerCase(Locale.ROOT),line.substring(colon+1).trim());}
+    if(target.startsWith("/kaliSocket")){String key=headers.get("sec-websocket-key");String accept=Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-1").digest((key+"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").getBytes(StandardCharsets.US_ASCII)));out.write(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "+accept+"\r\n\r\n").getBytes(StandardCharsets.US_ASCII));out.flush();connections.incrementAndGet();String room=target.substring(target.indexOf("roomId=")+7);JSONObject board=new JSONObject().put("id",room).put("roomId",room).put("source","online").put("sessionName",room).put("status","playing").put("startTime","2026-10-20T00:00:00Z").put("endTime",JSONObject.NULL).put("revision",10).put("totalRounds",1).put("pendingExports",1).put("leaderboard",new JSONArray().put(new JSONObject().put("id","a").put("name","Alpha").put("score",310).put("roundsPlayed",1).put("last",310)));frame(out,0x81,new JSONObject().put("scoreboard",board).toString().getBytes(StandardCharsets.UTF_8));
+     for(;;){int opcode=byteFrom(in)&15,second=byteFrom(in),len=second&127;if(len==126)len=(byteFrom(in)<<8)|byteFrom(in);byte[]mask=(second&128)!=0?bytes(in,4):null,payload=bytes(in,len);if(mask!=null)for(int n=0;n<len;n++)payload[n]^=mask[n%4];if(opcode==8){frame(out,0x88,payload);break;}if(opcode==9)frame(out,0x8a,payload);}
+    }else{JSONObject body=new JSONObject(new String(bytes(in,Integer.parseInt(headers.getOrDefault("content-length","0"))),StandardCharsets.UTF_8)),reply;if("scoreboardRooms".equals(body.optString("operation"))){catalog.incrementAndGet();Thread.sleep(delay);reply=new JSONObject().put("rooms",new JSONArray());}else{tickets.incrementAndGet();reply=new JSONObject().put("ticket","synthetic");}byte[] b=reply.toString().getBytes(StandardCharsets.UTF_8);out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "+b.length+"\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));out.write(b);out.flush();}
+   }catch(Exception stopped){}finally{sockets.remove(socket);}}
+  public void close()throws Exception{server.close();for(Socket s:sockets)s.close();tasks.shutdownNow();}
+ }
+}
