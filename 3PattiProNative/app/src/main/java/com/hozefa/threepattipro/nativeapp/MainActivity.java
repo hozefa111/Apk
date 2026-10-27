@@ -1454,7 +1454,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             roundSaving=true;if(tab==2)updateRoundForm();
             final String savedId=pendingRoundId;
             api.addRoundWithId(savedId,body,()->{
-                roundSaving=false;resetRound();tab=0;render(true);
+                roundSaving=false;resetRound(true);tab=2;render(true);
                 Set<String> acknowledged=new LinkedHashSet<>(settings.getStringSet("motion_acknowledged_rounds",Collections.emptySet()));
                 boolean first=acknowledged.add(savedId);while(acknowledged.size()>128)acknowledged.remove(acknowledged.iterator().next());
                 settings.edit().putStringSet("motion_acknowledged_rounds",acknowledged).apply();
@@ -1470,8 +1470,12 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         new MotionDialogBuilder(this,motion).setTitle("Round saved successfully").setMessage("Your round is saved. Share its image?").setView(display)
             .setNegativeButton("Not Now",null).setPositiveButton("Share Result",(d,w)->shareRound(preview)).show();
     }
-    private void resetRound(){playing=null;partners.clear();hukum=null;outcome=null;bid=155;
-        pendingRoundId=null;pendingRoundKey=null;pendingRoundTimestamp=null;pendingRoundJson=null;persistDraft();}
+    private void resetRound(){resetRound(false);}
+    private void resetRound(boolean keepPlayers){
+        if(!keepPlayers)playing=null;
+        partners.clear();hukum=null;outcome=null;bid=155;
+        pendingRoundId=null;pendingRoundKey=null;pendingRoundTimestamp=null;pendingRoundJson=null;persistDraft();
+    }
     private void addPlayerDialog() {
         EditText name=new EditText(this);
         name.setSingleLine(true);name.setHint("Player name");pad(name,20,10,20,10);
