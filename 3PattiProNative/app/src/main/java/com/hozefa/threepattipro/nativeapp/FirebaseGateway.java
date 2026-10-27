@@ -193,7 +193,7 @@ public final class FirebaseGateway {
         journalHead=firestore.document("trackerSync/state").addSnapshotListener(MetadataChanges.INCLUDE,(head,error)->{
             if(!running||generation!=subscriptionGeneration)return;
             if(error!=null){onListenFailure(error);return;}
-            if(head.getMetadata().isFromCache()||head.getMetadata().hasPendingWrites()){freshSnapshot=false;listener.syncState(false);return;}
+            if(head.getMetadata().isFromCache()||head.getMetadata().hasPendingWrites()){journalLatestHead=null;freshSnapshot=false;listener.syncState(false);return;}
             journalLatestHead=TrackerJournalSync.head(head);
             journalHeadKnown=true;boolean active="incremental".equals(journalLatestHead.get("mode"))&&Boolean.TRUE.equals(journalLatestHead.get("enforced"));
             if(active!=journalActive){journalActive=active;legacyEpoch++;synchronized(snapshotLock){liveCollections.clear();collectionComplete.clear();liveBoundaries.clear();}listener.syncState(false);for(PagedFirestoreCollection p:subscriptions)snapshotDispatch.execute(p::close);subscriptions.clear();freshSnapshot=false;}
@@ -259,7 +259,7 @@ public final class FirebaseGateway {
         publishProblem(message);removeSubscriptions();scheduleNext();
     }
     private void removeSubscriptions(){
-        if(journalHead!=null){journalHead.remove();journalHead=null;}journalHeadKnown=false;
+        if(journalHead!=null){journalHead.remove();journalHead=null;}journalHeadKnown=false;journalLatestHead=null;
         if(recentPreview!=null){recentPreview.remove();recentPreview=null;}
         subscriptionGeneration++;
         for(PagedFirestoreCollection registration:subscriptions)snapshotDispatch.execute(registration::close);
@@ -555,7 +555,7 @@ public final class FirebaseGateway {
     }
     /** Preserve the SDK status: its deepest cause may be a transport IOException. */
     void handleJournalFailure(Exception failure){
-        freshSnapshot=false;
+        journalLatestHead=null;freshSnapshot=false;
         if(failure.getMessage()!=null&&failure.getMessage().contains("journal gap")){journalEpoch=-1;journalRevision=-1;}
         Throwable cause=failure;
         while(!(cause instanceof FirebaseFirestoreException)&&cause.getCause()!=null)cause=cause.getCause();
