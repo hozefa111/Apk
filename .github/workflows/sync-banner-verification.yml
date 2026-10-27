@@ -1,0 +1,38 @@
+name: Focused sync banner verification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  banner:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [30, 35]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - run: gradle -p 3PattiProNative assembleSandbox assembleSandboxAndroidTest lintDebug
+      - run: sudo chmod 666 /dev/kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: gradle -p 3PattiProNative connectedSandboxAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.hozefa.threepattipro.nativeapp.SyncBannerTest
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sync-banner-api-${{ matrix.api }}
+          path: |
+            3PattiProNative/app/build/reports/
+            3PattiProNative/app/build/outputs/androidTest-results/

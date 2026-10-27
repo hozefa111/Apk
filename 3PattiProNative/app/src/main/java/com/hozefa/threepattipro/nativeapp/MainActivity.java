@@ -68,7 +68,9 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private long lastSyncedAt=0;
     private String syncProblem;
     private String syncProgress="Connecting to your shared table";
-    private TextView syncProgressView;
+    private TextView syncProgressView,toolbarSyncTimestamp;
+    private LinearLayout syncBannerSlot;
+    private String syncBannerSignature;
     private long syncRetryAt;
     private boolean quotaPaused;
     private int tab=0, historyTab=0;
@@ -205,7 +207,11 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(!loggedIn && tab==2) tab=0;
         render(false);
     }
-    @Override public void syncTimestamp(long timestamp){lastSyncedAt=timestamp;}
+    @Override public void syncTimestamp(long timestamp){
+        lastSyncedAt=timestamp;
+        if(toolbarSyncTimestamp!=null){toolbarSyncTimestamp.setText(lastSyncLabel());toolbarSyncTimestamp.setVisibility(timestamp>0?View.VISIBLE:View.GONE);}
+        updateSyncBanner();
+    }
     @Override public void historyDeferred(boolean deferred){if(historyDeferred!=deferred){historyDeferred=deferred;render(false);}}
     @Override public void snapshotContinuity(boolean continuous){if(!continuous)motionEvents.invalidate();}
     @Override public void dataLoading(String collection,int loaded){
@@ -216,13 +222,17 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(liveConnected==online)return;
         liveConnected=online;
 
-        updateToolbar();if(tab==10||tab==3&&ranksSessions)render(false);
+        updateToolbar();updateSyncBanner();if(tab==10||tab==3&&ranksSessions)render(false);
         if(tab==2&&roundSaveView!=null&&roundHintView!=null&&roundPreviewSection!=null)updateRoundForm();
     }
     @Override public void syncProblem(String message,long retryAt,boolean quota){
         boolean changed=!Objects.equals(syncProblem,message)||syncRetryAt!=retryAt||quotaPaused!=quota;
         syncProblem=message;syncRetryAt=retryAt;quotaPaused=quota;
-        if(changed){updateToolbar();render(false);}
+        if(changed){
+            updateToolbar();
+            if(hasData)updateSyncBanner();else render(false);
+            if(tab==2&&roundSaveView!=null&&roundHintView!=null&&roundPreviewSection!=null)updateRoundForm();
+        }
     }
     @Override public void notice(String msg) {
         if("Session started".equals(msg))sessionStartRevealUntil=resumed?android.os.SystemClock.uptimeMillis()+10000:0;
@@ -440,9 +450,10 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         appName.setMaxLines(1);appName.setAutoSizeTextTypeUniformWithConfiguration(14,21,1,android.util.TypedValue.COMPLEX_UNIT_SP);
         heading.addView(appName);
         gap(heading,5);
-        heading.addView(text(liveConnected?"●  LIVE SYNC":quotaPaused?"○  SYNC PAUSED · LIMIT REACHED":hasData?"○  SAVED SCORES · SYNCING":"○  SYNCING YOUR TABLE",9,
-                liveConnected?GREEN:MUTED,true));
-        if(lastSyncedAt>0)heading.addView(text("Last synced "+new java.text.SimpleDateFormat("dd MMM, h:mm a",java.util.Locale.ENGLISH).format(new java.util.Date(lastSyncedAt)),9,MUTED,false));
+        boolean verified=verifiedSync();
+        heading.addView(text(verified?"●  LIVE SYNC":quotaPaused?"○  SYNC PAUSED · LIMIT REACHED":hasData?"○  SAVED SCORES · SYNCING":"○  SYNCING YOUR TABLE",9,
+                verified?GREEN:MUTED,true));
+        toolbarSyncTimestamp=text(lastSyncLabel(),9,MUTED,false);toolbarSyncTimestamp.setVisibility(lastSyncedAt>0?View.VISIBLE:View.GONE);heading.addView(toolbarSyncTimestamp);
         toolbar.addView(heading,largeText?lp(-1,-2):new LinearLayout.LayoutParams(0,-2,1));
         LinearLayout actions=largeText?row():toolbar;
         if(largeText){gap(toolbar,8);toolbar.addView(actions,lp(-1,-2));}
@@ -475,6 +486,28 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private String retryDescription(){
         return syncRetryAt>0?"\nNext retry: "+DateTimeFormatter.ofPattern("dd MMM, hh:mm a").withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(syncRetryAt))+". Refresh does not bypass this wait.":"";
     }
+    private boolean verifiedSync(){return liveConnected&&syncProblem==null&&!quotaPaused;}
+    private String lastSyncLabel(){return lastSyncedAt>0?"Last synced "+new java.text.SimpleDateFormat("dd MMM, h:mm a",java.util.Locale.ENGLISH).format(new java.util.Date(lastSyncedAt)):"";}
+    // Only this status slot changes on connectivity callbacks. Keep screen/form/scroll views intact.
+    private void updateSyncBanner(){
+        if(syncBannerSlot==null)return;
+        String signature=verifiedSync()?"live":hasData+"|"+lastSyncedAt+"|"+quotaPaused+"|"+syncProblem+"|"+syncRetryAt;
+        if(Objects.equals(signature,syncBannerSignature))return;
+        syncBannerSignature=signature;syncBannerSlot.removeAllViews();
+        syncBannerSlot.setVisibility(verifiedSync()?View.GONE:View.VISIBLE);
+        if(verifiedSync())return;
+        if(syncProblem==null){
+            LinearLayout saved=panel();saved.addView(text(hasData?"Saved scores · synchronizing":"Synchronizing your scores…",16,GOLD,true));gap(saved,8);
+            saved.addView(text((lastSyncedAt>0?lastSyncLabel()+". ":"")+"Verification runs automatically. Play Online works independently.",13,MUTED,false));gap(saved,10);
+            syncBannerSlot.addView(saved);gap(syncBannerSlot,14);
+        }else{
+            LinearLayout banner=panel();
+            banner.addView(text(quotaPaused?"Sync paused · Firebase limit":"Connection unavailable",16,GOLD,true));gap(banner,10);
+            banner.addView(text(syncProblem+retryDescription(),13,MUTED,false));
+            if(hasData){gap(banner,8);banner.addView(text("Showing the last saved table. Changes are disabled until live sync returns.",13,WHITE,false));}
+            syncBannerSlot.addView(banner);gap(syncBannerSlot,14);
+        }
+    }
     private void render(boolean reset) {
         syncSessionView();
         if(content==null||navigation==null)return;
@@ -487,18 +520,8 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         int prev=reset?0:scroll.getScrollY();
         content.removeAllViews();
         navigation.removeAllViews();
-        if(!liveConnected&&syncProblem==null){
-            LinearLayout saved=panel();saved.addView(text(hasData?"Saved scores · synchronizing":"Synchronizing your scores…",16,GOLD,true));gap(saved,8);
-            saved.addView(text((lastSyncedAt>0?"Last synced "+new java.text.SimpleDateFormat("dd MMM, h:mm a",java.util.Locale.ENGLISH).format(new java.util.Date(lastSyncedAt))+". ":"")+"Verification runs automatically. Play Online works independently.",13,MUTED,false));gap(saved,10);
-            content.addView(saved);gap(content,14);
-        }
-        if(syncProblem!=null){
-            LinearLayout banner=panel();
-            banner.addView(text(quotaPaused?"Sync paused · Firebase limit":"Connection unavailable",16,GOLD,true));gap(banner,10);
-            banner.addView(text(syncProblem+retryDescription(),13,MUTED,false));
-            if(hasData){gap(banner,8);banner.addView(text("Showing the last saved table. Changes are disabled until live sync returns.",13,WHITE,false));}
-            content.addView(banner);gap(content,14);
-        }
+        syncBannerSlot=column();syncBannerSlot.setTag("sync-status-banner");
+        syncBannerSignature=null;content.addView(syncBannerSlot);updateSyncBanner();
         if(!hasData && tab==0){
             TextView onlineFallback=button("♠  Play Online · Kali Ki Tidi",true,()->startActivity(new Intent(this,OnlineGameActivity.class)));onlineFallback.setContentDescription("Play Online Kali Ki Tidi");content.addView(onlineFallback);gap(content,16);
         }
