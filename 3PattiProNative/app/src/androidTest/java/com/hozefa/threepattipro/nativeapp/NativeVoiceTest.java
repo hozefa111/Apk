@@ -31,6 +31,8 @@ public class NativeVoiceTest {
     private void open(ActivityScenario<MainActivity> scenario)throws Exception{
         await("Table Status");
         Tasks.await(FirebaseAuth.getInstance(FirebaseApp.getInstance("three-patti-native")).signInWithEmailAndPassword("tester@example.test","test-password-123"),20,TimeUnit.SECONDS);await("ADMIN");
+        long end=System.currentTimeMillis()+30000;java.util.concurrent.atomic.AtomicBoolean ready=new java.util.concurrent.atomic.AtomicBoolean();
+        while(System.currentTimeMillis()<end){scenario.onActivity(a->ready.set((Boolean)field(a,"liveConnected")&&!(Boolean)field(a,"busy")&&((List<?>)field(a,"players")).size()==3));if(ready.get())break;Thread.sleep(100);}assertTrue("Verified three-player voice fixture",ready.get());
         idle(scenario);onView(withContentDescription("Round")).perform(click());idle(scenario);
         onView(withText("🎙  Voice se round add karo")).perform(scrollTo(),click());await("Voice Round · PLAYERS");
     }
@@ -96,7 +98,9 @@ public class NativeVoiceTest {
             Map<?,?> scores=(Map<?,?>)d.get("scoreChanges");assertEquals(340L,((Number)scores.get("a")).longValue());assertEquals(170L,((Number)scores.get("b")).longValue());
             Intent duplicate=new Intent().putStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS,new ArrayList<>(Arrays.asList("save karo")));s.onActivity(a->a.onActivityResult(VoiceRoundGuide.REQUEST,Activity.RESULT_OK,duplicate));
             assertEquals(after.size(),Tasks.await(store.collection("rounds").get(Source.SERVER),20,TimeUnit.SECONDS).size());
-            onView(withText("Not Now")).perform(click());Tasks.await(d.getReference().delete(),20,TimeUnit.SECONDS);
+            onView(withText("Not Now")).perform(click());
+            s.onActivity(a->{assertEquals(2,field(a,"tab"));assertEquals(new LinkedHashSet<>(Arrays.asList("a","b","c")),field(a,"playing"));assertEquals(155,field(a,"bid"));assertNull(field(a,"hukum"));assertNull(field(a,"outcome"));assertTrue(((Set<?>)field(a,"partners")).isEmpty());assertNull(field(a,"pendingRoundId"));});
+            onView(withText("New Hukum Round")).check(matches(isDisplayed()));Tasks.await(d.getReference().delete(),20,TimeUnit.SECONDS);
         }
     }
 }
