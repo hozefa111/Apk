@@ -113,6 +113,7 @@ public final class FirebaseGateway {
     private synchronized okhttp3.OkHttpClient sessionClient(){if(sessionHttp==null){sessionClientCreations++;sessionHttp=new okhttp3.OkHttpClient.Builder().callTimeout(25,TimeUnit.SECONDS).eventListener(sessionEvents).build();}return sessionHttp;}
     private final ExecutorService authRoleWorker=Executors.newSingleThreadExecutor();
     private long journalProjections,journalNoopReuses;private boolean journalProjectionReady;
+    private Map<String,List<Map<String,Object>>> journalViewGroups;
     long[] journalWorkCounters(){return new long[]{journalProjections,journalNoopReuses};}
     interface AdminRoleLookup {boolean read(String uid,Source source)throws Exception;}
     AdminRoleLookup adminRoleLookup=this::readAdminRole;
@@ -534,8 +535,9 @@ public final class FirebaseGateway {
             // A successful pull can verify an unchanged, already-complete in-memory ledger.
             // Startup must build the projection; reuse still requires a successful server pull and identical epoch/revision/data.
             if(journalProjectionReady&&result.epoch==journalEpoch&&result.revision==journalRevision&&result.documents.equals(journalDocuments)){
-                journalNoopReuses++;queryStarts+=engine.queries;snapshotAt=System.currentTimeMillis();retry.succeeded();retryStore.edit().clear().apply();
-                ui.post(()->{if(running&&generation==subscriptionGeneration){listener.syncProblem(null,0,false);listener.syncTimestamp(snapshotAt);listener.syncState(true);}});return;
+                boolean reseed=!freshSnapshot;final Map<String,List<Map<String,Object>>> views=journalViewGroups;
+                journalNoopReuses++;queryStarts+=engine.queries;snapshotAt=System.currentTimeMillis();freshSnapshot=true;retry.succeeded();retryStore.edit().clear().apply();
+                ui.post(()->{if(running&&generation==subscriptionGeneration){listener.syncProblem(null,0,false);if(reseed&&views!=null)listener.dataUpdated(new ArrayList<>(views.get("players")),new ArrayList<>(views.get("rounds")),new ArrayList<>(views.get("sessions")));listener.syncTimestamp(snapshotAt);listener.syncState(true);}});return;
             }
             journalProjections++;
             Map<String,List<Map<String,Object>>> groups=new HashMap<>();for(String col:TrackerJournalSync.COLLECTIONS)groups.put(col,new ArrayList<>());
@@ -547,6 +549,7 @@ public final class FirebaseGateway {
             long now=System.currentTimeMillis();ui.removeCallbacks(cacheFlush);cacheRows=null;
             cacheRecordWrites+=trackerCache.write(rows,Collections.emptyMap(),now,result.epoch,result.revision);
             if(!running||generation!=subscriptionGeneration||!journalActive)return;
+            journalViewGroups=new HashMap<>();for(String col:TrackerJournalSync.COLLECTIONS)journalViewGroups.put(col,new ArrayList<>(groups.get(col)));
             journalDocuments=result.documents;journalEpoch=result.epoch;journalRevision=result.revision;journalProjectionReady=true;
             if(journalLatestHead==null||TrackerJournalSync.number(journalLatestHead,"revision")<result.revision)journalLatestHead=TrackerJournalSync.values("mode","incremental","enforced",true,"epoch",result.epoch,"revision",result.revision);versions=newVersions;rawDocuments=documents;snapshotAt=now;freshSnapshot=true;retry.succeeded();retryStore.edit().clear().apply();queryStarts+=engine.queries;
             ui.post(()->{if(!running||generation!=subscriptionGeneration)return;listener.historyDeferred(false);listener.syncProblem(null,0,false);listener.dataUpdated(groups.get("players"),groups.get("rounds"),groups.get("sessions"));listener.syncTimestamp(snapshotAt);listener.syncState(true);});
