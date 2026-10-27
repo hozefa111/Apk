@@ -1,5 +1,10 @@
 name: Focused sync banner verification
 on:
+  push:
+    branches: [fix/stale-sync-banner]
+    paths:
+      - "3PattiProNative/app/src/**"
+      - ".github/workflows/sync-banner-verification.yml"
   workflow_dispatch:
 permissions:
   contents: read
