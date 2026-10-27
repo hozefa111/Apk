@@ -1,34 +1,33 @@
-name: Verify signed v2.7.23 upgrade
+name: Publish verified v2.7.23
 on:
   push:
     branches: [verification-v2.7.23]
+  workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
   actions: read
 jobs:
-  upgrade:
+  publish:
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Verify focused tests and exact signed artifact
+      - name: Reuse exact passed tests and signed upgrade
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           test "$(gh run view 40459165853 --json conclusion --jq .conclusion)" = success
+          test "$(gh run view 40459996285 --json conclusion --jq .conclusion)" = success
+          test "$(gh run view 40459996285 --json headSha --jq .headSha)" = d40412d6a23d8d48da55390b7f0dfc2a9b0e7137
           sha256sum -c release-candidates/SHA256SUMS.txt
-          gh release download three-patti-pro-v2.7.21-rc.1 -p '*.apk' -D previous
-      - run: sudo chmod 666 /dev/kvm
-      - name: Preserve v2.7.21 installation and data during signed upgrade
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 30
-          arch: x86_64
-          target: default
-          disable-animations: true
-          script: bash release-candidates/run-upgrade.sh
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: v2.7.23-upgrade-proof
-          path: upgrade-evidence/
+          echo '88706a3f61b39f44406cbca6756695acb1dc17d467fa4890c7159630e8a4e0c9  release-candidates/3-Patti-PRO-v2.7.23.apk' | sha256sum -c -
+          git fetch origin 6857e850866555e5c1858c3e8faaa598498c5422 d40412d6a23d8d48da55390b7f0dfc2a9b0e7137 --depth=1
+          git diff --exit-code 6857e850866555e5c1858c3e8faaa598498c5422 HEAD -- 3PattiProNative/app/src/main 3PattiProNative/app/build.gradle.kts
+          git diff --exit-code d40412d6a23d8d48da55390b7f0dfc2a9b0e7137 HEAD -- release-candidates/3-Patti-PRO-v2.7.23.apk
+      - name: Publish the exact verified APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp release-candidates/SHA256SUMS.txt /tmp/candidate.sha256
+          sed 's@release-candidates/@@' /tmp/candidate.sha256 > release-candidates/SHA256SUMS.txt
+          gh release create three-patti-pro-v2.7.23 release-candidates/3-Patti-PRO-v2.7.23.apk release-candidates/SHA256SUMS.txt --target 6857e850866555e5c1858c3e8faaa598498c5422 --latest --title '3 Patti PRO v2.7.23 — Session delete authentication fix' --notes-file release-candidates/NOTES.md
