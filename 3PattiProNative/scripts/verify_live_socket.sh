@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "$0")/.."
-export KALI_ONLINE_BACKEND=1
-firebase emulators:exec --project demo-three-patti --only auth,firestore,database,functions --config tests/online-backend/firebase.json \
- 'python3 scripts/seed_emulator.py && gradle --max-workers=2 -Dorg.gradle.jvmargs="-Xmx1024m -Dfile.encoding=UTF-8" -Pandroid.testInstrumentationRunnerArguments.kaliOnlineBackend=true -Pandroid.testInstrumentationRunnerArguments.timeout_msec=120000 -Pandroid.testInstrumentationRunnerArguments.class=com.hozefa.threepattipro.nativeapp.HybridWebViewTest connectedSandboxAndroidTest'
+export KALI_TEST_CLASS=com.hozefa.threepattipro.nativeapp.HybridWebViewTest
+# Reuse the established awake/keyguard/failure-diagnostic harness. Android 15
+# rejects targeted pointer injection when the launcher/dream owns the window.
+exec bash "$(dirname "$0")/verify_online_android.sh"

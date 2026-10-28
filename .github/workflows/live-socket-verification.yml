@@ -48,3 +48,4 @@ jobs:
           path: |
             3PattiProNative/app/build/reports/
             3PattiProNative/app/build/outputs/androidTest-results/
+            3PattiProNative/app/build/verification/
