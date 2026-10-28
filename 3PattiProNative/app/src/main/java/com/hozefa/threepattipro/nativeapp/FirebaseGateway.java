@@ -110,7 +110,7 @@ public final class FirebaseGateway {
     TokenLookup tokenLookup=(user,force)->user.getIdToken(force);
     okhttp3.EventListener sessionEvents=okhttp3.EventListener.NONE;
     int sessionClientCreations;private okhttp3.OkHttpClient sessionHttp;
-    private synchronized okhttp3.OkHttpClient sessionClient(){if(sessionHttp==null){sessionClientCreations++;sessionHttp=new okhttp3.OkHttpClient.Builder().callTimeout(25,TimeUnit.SECONDS).eventListener(sessionEvents).build();}return sessionHttp;}
+    private synchronized okhttp3.OkHttpClient sessionClient(){if(sessionHttp==null){sessionClientCreations++;sessionHttp=SessionHistoryHttp.clientBuilder().eventListener(sessionEvents).build();}return sessionHttp;}
     private final ExecutorService authRoleWorker=Executors.newSingleThreadExecutor();
     private static final class JournalEncoding {
         final Map<String,Object> source;final JSONObject document;final String version,cached;
@@ -838,6 +838,9 @@ public final class FirebaseGateway {
     }
     /** Metadata and destructive session actions share server-side authority. */
     private JSONObject sessionRequest(Map<String,Object> session,String action,String name,String token,JSONObject preview)throws Exception{
+        return sessionRequest(session,action,name,token,preview,UUID.randomUUID().toString());
+    }
+    private JSONObject sessionRequest(Map<String,Object> session,String action,String name,String token,JSONObject preview,String commandId)throws Exception{
         String endpoint;
         if(BuildConfig.USE_EMULATORS)endpoint="http://10.0.2.2:5001/demo-three-patti/asia-south1/kaliApi";
         else try(Reader reader=new InputStreamReader(context.getAssets().open("kali/config.js"),StandardCharsets.UTF_8)){
@@ -845,14 +848,12 @@ public final class FirebaseGateway {
             while((count=reader.read(buffer))!=-1)config.append(buffer,0,count);endpoint=OnlineEndpoint.api(config.toString());
         }
         JSONObject payload=new JSONObject().put("clientProtocol",2).put("operation","sessionHistory").put("sessionId",String.valueOf(session.get("id")))
-                .put("action",action).put("name",name==null?JSONObject.NULL:name).put("expectedName",session.get("sessionName")).put("commandId",UUID.randomUUID().toString());
+                .put("action",action).put("name",name==null?JSONObject.NULL:name).put("expectedName",session.get("sessionName")).put("commandId",commandId);
         if(preview!=null)payload.put("deleteRounds",true).put("previewToken",preview.getString("previewToken"));
         okhttp3.OkHttpClient http=sessionClient();
         okhttp3.Request request=new okhttp3.Request.Builder().url(endpoint).header("Authorization","Bearer "+token)
                 .post(okhttp3.RequestBody.create(payload.toString(),okhttp3.MediaType.get("application/json"))).build();
-        try(okhttp3.Response response=http.newCall(request).execute()){
-            JSONObject result=new JSONObject(response.body().string());if(!response.isSuccessful())throw new IOException(result.optString("error","Session update failed"));return result;
-        }
+        return SessionHistoryHttp.execute(http,request,action);
     }
     public void onlineSessionHistory(Map<String,Object> session,String action,String name){
         write("Session updated",token->sessionRequest(session,action,name,token,null));
@@ -863,8 +864,8 @@ public final class FirebaseGateway {
     public void deleteSessionRounds(Map<String,Object> session,JSONObject preview){
         write("Session, rounds and their points deleted",token->{
             preserveBackup();JSONObject result;
-            String owner=bulkOwner();
-            do{result=sessionRequest(session,"delete",null,authorizeWrite(owner,false).token,preview);// CF2 deletion is alarm-driven; its status polls must stay bounded.
+            String owner=bulkOwner(),commandId=UUID.randomUUID().toString();
+            do{result=sessionRequest(session,"delete",null,authorizeWrite(owner,false).token,preview,commandId);// CF2 deletion is alarm-driven; its status polls must stay bounded.
                 // Legacy/manual responses execute a durable step themselves, so no idle wait is needed.
                 if(result.optBoolean("pending")&&String.valueOf(session.get("id")).startsWith("cf2_"))Thread.sleep(1000);}while(result.optBoolean("pending"));
         });
@@ -909,7 +910,7 @@ public final class FirebaseGateway {
             }catch(Exception error){
                 freshSnapshot=false;
                 ui.post(()->{if(running)listener.syncState(false);});
-                notify(invalidAuthentication(error)?"Login expired. Please log in again before saving changes.":"Not saved: "+error.getMessage());
+                notify(invalidAuthentication(error)?"Login expired. Please log in again before saving changes.":error instanceof SessionHistoryHttp.PendingDeletion?error.getMessage():"Not saved: "+error.getMessage());
                 if(running)ui.postDelayed(liveRefresh,200);
                 onUi(onFailure);
             }finally{
