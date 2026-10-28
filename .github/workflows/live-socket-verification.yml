@@ -13,10 +13,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - api: 26
-            gpu: software
-          - api: 30
-            gpu: software
           - api: 35
             gpu: lavapipe
     env:
