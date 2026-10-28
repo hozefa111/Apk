@@ -1,20 +1,45 @@
 name: Verify stable release update
 on:
   workflow_dispatch:
+    inputs:
+      previous_tag:
+        description: Existing installed release tag
+        required: true
+        default: three-patti-pro-v2.7.28
+      candidate_tag:
+        description: Private draft release tag to verify
+        required: true
+      candidate_version:
+        description: Expected installed version name
+        required: true
+      candidate_sha256:
+        description: SHA-256 of the signed candidate APK
+        required: true
 permissions:
   contents: write
 jobs:
   upgrade:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      PREVIOUS_TAG: ${{ inputs.previous_tag }}
+      CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+      CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+      CANDIDATE_SHA256: ${{ inputs.candidate_sha256 }}
     steps:
       - uses: actions/checkout@v4
       - name: Download existing release and private candidate
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download three-patti-pro-v2.7.12 -p '*.apk' -D previous
-          gh release download three-patti-pro-v2.7.13 -p '*.apk' -D candidate
+          set -euo pipefail
+          [[ "$PREVIOUS_TAG" =~ ^three-patti-pro-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$CANDIDATE_TAG" =~ ^three-patti-pro-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$CANDIDATE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$CANDIDATE_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          gh release download "$PREVIOUS_TAG" -p '*.apk' -D previous
+          gh release download "$CANDIDATE_TAG" -p '*.apk' -D candidate
+          echo "$CANDIDATE_SHA256  $(find candidate -maxdepth 1 -name '*.apk' -print -quit)" | sha256sum --check
       - run: sudo chmod 666 /dev/kvm
       - uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -37,4 +62,6 @@ jobs:
             adb shell am start -n com.hozefa.threepattipro.nativeapp/.MainActivity
             sleep 8
             adb shell pidof com.hozefa.threepattipro.nativeapp
-            adb shell dumpsys package com.hozefa.threepattipro.nativeapp | grep 'versionName=2.7.13'
+            adb shell dumpsys package com.hozefa.threepattipro.nativeapp | grep -F "versionName=$CANDIDATE_VERSION"
+            python3 3PattiProNative/scripts/smoke_navigation.py
+            echo 'PASS: signed upgrade retained application data and native navigation works'
