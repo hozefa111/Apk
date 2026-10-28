@@ -1,0 +1,95 @@
+{
+  "release": "2.7.28",
+  "versionCode": 49,
+  "confirmedRecoveryGaps": [
+    "Silent OPEN socket had no prompt reply timeout and could wait until the four-minute renewal",
+    "CONNECTING socket without open/error/close callbacks prevented every subsequent reconnect",
+    "A stuck replacement handshake could prevent later proactive renewals"
+  ],
+  "fix": [
+    "Existing 10-second ping/pong traffic detects a silent socket after 25 seconds; the next tick triggers recovery",
+    "15-second opening deadline, existing bounded backoff and immediate browser-online/foreground recovery",
+    "Preserve a healthy channel during proactive renewal; ignore stale retired sockets",
+    "No new gameplay command, discarded pending command, replacement identity, Firestore polling, rule/timer/scoring change"
+  ],
+  "evidence": {
+    "productionWorkerVersion": "6a96a819-9e3e-44c2-acc3-b30b8785711f",
+    "checkedWindowUTC": "2026-10-28 04:45-05:30",
+    "workerRequestStatuses": {
+      "success": 176,
+      "responseStreamDisconnected": 5
+    },
+    "workerInvocationErrors": 0,
+    "caveat": "Not per-room evidence or Durable Object alarm errors. The reported room was stopped; its exact trigger cannot be confirmed."
+  },
+  "tests": {
+    "node": {
+      "passed": 129,
+      "failed": 0
+    },
+    "beforeRecoveryRegression": {
+      "passed": 2,
+      "failed": 3
+    },
+    "afterRecoveryRegression": {
+      "passed": 5,
+      "failed": 0
+    },
+    "browserRecoveryCases": 6,
+    "doubleTapBrowserChecks": 22,
+    "cardPlaybackBrowserChecks": 14,
+    "pendingCommandRecovery": "PASS: original ID/envelope, lost response, token refresh, retry cooldown",
+    "realWorkerBrowserGames": [
+      "4 seats: one human + three bots; 250 captured points",
+      "6 seats: two humans + four bots; 250 captured points"
+    ],
+    "liveFirestoreOperationsPerHand": 0,
+    "webCi": 40639349399,
+    "android8and11": {
+      "run": 40638975767,
+      "api26Job": 122652404652,
+      "api30Job": 122652404469,
+      "testsEach": 2,
+      "status": "PASS"
+    },
+    "android15": {
+      "status": "PASS",
+      "run": 40640417175,
+      "job": 122657003793,
+      "tests": 2,
+      "skipped": 0,
+      "notes": "First attempts exposed the emulator input-window/keyguard harness; established awake/focus/diagnostic harness reused. No card-play code was changed."
+    },
+    "signedUpgradeOver27": {
+      "status": "PASS",
+      "run": 40641209112,
+      "source": "99949dd0ec51144c7d4d6a9333cc497cafac8b72",
+      "cacheAndMarkerRetained": true,
+      "savedScoresVisible": true,
+      "sessionAndBigScoreboardChecks": "PASS"
+    },
+    "android35SandboxJvm": "PASS, established harness testSandboxUnitTest",
+    "releaseLint": "PASS",
+    "bundledAssets": {
+      "byteMatched": 16,
+      "testFixtureExcluded": true
+    }
+  },
+  "limitations": [
+    "No physical-phone verification",
+    "Network faults can still pause a game under the existing admin-resume rule",
+    "The closed original room cannot be conclusively attributed to the reproduced bugs"
+  ],
+  "sourceAndroid": "9d50d2a6c30e18b0298ed44bf7398f3a5e835acf",
+  "sourceWeb": "83470f6304bd7a7350467d2428e1595c895cbc70",
+  "rollout": {
+    "worker": "unchanged; 6a96a819-9e3e-44c2-acc3-b30b8785711f",
+    "rulesAndIncrementalSync": "unchanged",
+    "webPagesRun": 40640954312,
+    "apk": "Verified signed build, official certificate, retained-data upgrade PASS",
+    "webPagesStatus": "PASS, source and compiled runtime byte-matched hosted files"
+  },
+  "package": "com.hozefa.threepattipro.nativeapp",
+  "certificateSha256": "dc0697a03526612bc54c3d9ad0b4a10e9ed9b3b6ad22e4e53269f904a72ba9b4",
+  "apkSha256": "f1573482ede923c3db7307266ccb2a7706b7e23a49bf601987b4f1b5f8fc8276"
+}
