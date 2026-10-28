@@ -1,20 +1,80 @@
 name: Verify stable release update
 on:
   workflow_dispatch:
+    inputs:
+      previous_tag:
+        description: Existing installed release tag
+        required: true
+        default: three-patti-pro-v2.7.28
+      candidate_tag:
+        description: Private draft release tag to verify
+        required: true
+      candidate_version:
+        description: Expected installed version name
+        required: true
+      candidate_sha256:
+        description: SHA-256 of the signed candidate APK
+        required: true
+      candidate_blob_sha:
+        description: Optional encrypted candidate blob for runner-side upload
+        required: false
+      candidate_transfer_key:
+        description: Optional one-use candidate transfer key (not a signing key)
+        required: false
 permissions:
   contents: write
 jobs:
   upgrade:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      PREVIOUS_TAG: ${{ inputs.previous_tag }}
+      CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+      CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+      CANDIDATE_SHA256: ${{ inputs.candidate_sha256 }}
     steps:
       - uses: actions/checkout@v4
+      - name: Transfer encrypted candidate to its private draft
+        if: inputs.candidate_blob_sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, os, re, subprocess, tempfile
+          from pathlib import Path
+          data=json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())['inputs']
+          blob=data['candidate_blob_sha'];key=data['candidate_transfer_key']
+          tag=data['candidate_tag'];version=data['candidate_version'];sha=data['candidate_sha256']
+          assert re.fullmatch(r'[a-f0-9]{40}',blob) and re.fullmatch(r'[a-f0-9]{64}',key)
+          assert re.fullmatch(r'[a-f0-9]{64}',sha) and re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',version)
+          assert tag=='three-patti-pro-v'+version
+          print('::add-mask::'+key,flush=True)
+          repo=os.environ['GITHUB_REPOSITORY']
+          draft=subprocess.check_output(['gh','release','view',tag,'--repo',repo,'--json','isDraft','--jq','.isDraft'],text=True).strip()
+          assert draft=='true','Transfer is restricted to a private draft'
+          with tempfile.TemporaryDirectory() as folder:
+              root=Path(folder);password=root/'transfer-key';password.write_text(key+'\n');password.chmod(0o600)
+              result=json.loads(subprocess.check_output(['gh','api','repos/'+repo+'/git/blobs/'+blob],text=True))
+              encrypted=root/'candidate.enc';encrypted.write_bytes(base64.b64decode(result['content']))
+              apk=root/('3-Patti-PRO-v'+version+'.apk')
+              subprocess.run(['openssl','enc','-d','-aes-256-cbc','-pbkdf2','-iter','200000','-pass','file:'+str(password),'-in',str(encrypted),'-out',str(apk)],check=True)
+              assert hashlib.sha256(apk.read_bytes()).hexdigest()==sha,'Candidate checksum mismatch'
+              sums=root/'SHA256SUMS';sums.write_text(sha+'  '+apk.name+'\n')
+              subprocess.run(['gh','release','upload',tag,str(apk),str(sums),'--repo',repo],check=True)
+          print('Verified signed candidate transferred; installation checks follow')
+          PY
       - name: Download existing release and private candidate
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download three-patti-pro-v2.7.12 -p '*.apk' -D previous
-          gh release download three-patti-pro-v2.7.13 -p '*.apk' -D candidate
+          set -euo pipefail
+          [[ "$PREVIOUS_TAG" =~ ^three-patti-pro-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$CANDIDATE_TAG" =~ ^three-patti-pro-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$CANDIDATE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$CANDIDATE_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          gh release download "$PREVIOUS_TAG" -p '*.apk' -D previous
+          gh release download "$CANDIDATE_TAG" -p '*.apk' -D candidate
+          echo "$CANDIDATE_SHA256  $(find candidate -maxdepth 1 -name '*.apk' -print -quit)" | sha256sum --check
       - run: sudo chmod 666 /dev/kvm
       - uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -37,4 +97,6 @@ jobs:
             adb shell am start -n com.hozefa.threepattipro.nativeapp/.MainActivity
             sleep 8
             adb shell pidof com.hozefa.threepattipro.nativeapp
-            adb shell dumpsys package com.hozefa.threepattipro.nativeapp | grep 'versionName=2.7.13'
+            adb shell dumpsys package com.hozefa.threepattipro.nativeapp | grep -F "versionName=$CANDIDATE_VERSION"
+            python3 3PattiProNative/scripts/smoke_navigation.py
+            echo 'PASS: signed upgrade retained application data and native navigation works'
