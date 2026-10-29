@@ -19,6 +19,8 @@ public class MultipleDeleteUiTest {
         a.dataUpdated(list(FirebaseGateway.map("id","a","name","Alpha"),FirebaseGateway.map("id","b","name","Beta")),
             list(FirebaseGateway.map("id","r1","timestamp","2026-10-20T10:00:00Z","type","hukum","hukumName","Alpha","bid",155,"scoreChanges",FirebaseGateway.map("a",310)),FirebaseGateway.map("id","r2","timestamp","2026-10-20T11:00:00Z","type","hukum","hukumName","Beta","bid",180,"scoreChanges",FirebaseGateway.map("a",-180)),FirebaseGateway.map("id","r3","source","online","timestamp","2026-10-20T12:00:00Z","type","hukum","hukumName","Immutable online","bid",200,"scoreChanges",FirebaseGateway.map("a",400))),
             list(FirebaseGateway.map("id","s1","sessionName","First session","startTime","2026-10-20T10:00:00Z","endTime","2026-10-20T11:00:00Z"),FirebaseGateway.map("id","s2","sessionName","Second session","startTime","2026-10-21T10:00:00Z","endTime","2026-10-21T11:00:00Z"),FirebaseGateway.map("id","s3","sessionName","Active session","startTime","2026-10-22T10:00:00Z")));
+        // Tab navigation always renders, even when the fixture data is identical.
+        try{java.lang.reflect.Method render=MainActivity.class.getDeclaredMethod("render",boolean.class);render.setAccessible(true);render.invoke(a,false);}catch(Exception e){throw new AssertionError(e);}
     }
     @Before public void isolated(){Assume.assumeTrue(BuildConfig.USE_EMULATORS);InstrumentationRegistry.getInstrumentation().getTargetContext().getSharedPreferences("preferences",0).edit().putString("motion","off").apply();}
     @Test public void roundsSelectAllReviewExactPointEffectAndCancelWithoutDeletion()throws Exception{

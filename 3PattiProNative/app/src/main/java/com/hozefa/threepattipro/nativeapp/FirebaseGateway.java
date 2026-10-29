@@ -895,6 +895,9 @@ public final class FirebaseGateway {
         });
     }
     private void operationProgress(String message){ui.post(()->{if(running)listener.operationProgress(message);});}
+    private static final class PendingDataOperation extends IOException {
+        PendingDataOperation(String message,Exception cause){super(message,cause);}
+    }
     private android.util.AtomicFile sessionDeleteFile(){return new android.util.AtomicFile(new File(context.getFilesDir(),"pending-session-deletion.json"));}
     private boolean hasSessionDeletePlan(){File file=sessionDeleteFile().getBaseFile();return file.exists()||new File(file.getPath()+".bak").exists();}
     private void runSessionDeletes(SessionDeletePlan plan)throws Exception{
@@ -910,7 +913,7 @@ public final class FirebaseGateway {
                 plan=plan.acknowledged();atomicSave(sessionDeleteFile(),plan.bytes());
             }
             sessionDeleteFile().delete();if(hasSessionDeletePlan())throw new IOException("Cannot finish local deletion journal");
-        }catch(Exception error){throw new IOException("Deletion paused ("+(plan.total-plan.remaining.length())+"/"+plan.total+" confirmed). Retry in Settings with the same account. "+error.getMessage(),error);}
+        }catch(Exception error){throw new PendingDataOperation("Deletion paused ("+(plan.total-plan.remaining.length())+"/"+plan.total+" confirmed). Retry in Settings with the same account. Accepted deletions may still finish on the server. "+error.getMessage(),error);}
     }
     public interface Action { void run(String token) throws Exception; }
     public void write(String success,Action action) {
@@ -952,7 +955,7 @@ public final class FirebaseGateway {
             }catch(Exception error){
                 freshSnapshot=false;
                 ui.post(()->{if(running)listener.syncState(false);});
-                notify(invalidAuthentication(error)?"Login expired. Please log in again before saving changes.":error instanceof SessionHistoryHttp.PendingDeletion?error.getMessage():"Not saved: "+error.getMessage());
+                notify(invalidAuthentication(error)?"Login expired. Please log in again before saving changes.":error instanceof SessionHistoryHttp.PendingDeletion||error instanceof PendingDataOperation?error.getMessage():"Not saved: "+error.getMessage());
                 if(running)ui.postDelayed(liveRefresh,200);
                 onUi(onFailure);
             }finally{
@@ -1031,7 +1034,7 @@ public final class FirebaseGateway {
             bulkFile().delete();
             if(hasPendingBulkOperation())throw new IOException("Cannot finish local recovery journal");
         }catch(Exception error){
-            throw new IOException("Data operation paused ("+(plan.total-plan.remaining.length())+"/"+plan.total+" confirmed). Retry in Settings. Recovery backup is saved. "+error.getMessage(),error);
+            throw new PendingDataOperation("Data operation paused ("+(plan.total-plan.remaining.length())+"/"+plan.total+" confirmed). Retry in Settings. Recovery backup is saved. "+error.getMessage(),error);
         }
     }
     public void resumeBulkOperation(){
