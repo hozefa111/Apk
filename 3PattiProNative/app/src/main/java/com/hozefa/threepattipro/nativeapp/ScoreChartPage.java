@@ -38,5 +38,5 @@ final class ScoreChartPage {
         DialogUi.gap(card,10);card.addView(text(c,"Tap or drag horizontally to inspect a round. Scores carry forward when a player skips a round. Left/right keys and Previous/Next also work.",12,DialogUi.MUTED));
         chart.select(chart.cursor());
     }
-    private static String date(String value){try{return DateTimeFormatter.ofPattern("dd MMM, HH:mm").withZone(ZoneId.systemDefault()).format(Instant.parse(value));}catch(Exception unknown){return "Date unavailable";}}
+    private static String date(String value){try{return DateTimeFormatter.ofPattern("dd MMM, HH:mm",Locale.ENGLISH).withZone(ZoneId.systemDefault()).format(Instant.parse(value));}catch(Exception unknown){return "Date unavailable";}}
 }
