@@ -45,6 +45,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     private Map<String,Object> deferredRoundResult,deferredSessionSummary;
 
     private AlertDialog authDialog;
+    private AlertDialog operationDialog;
     private android.content.SharedPreferences settings;
     private final AdvancedAnalyticsPage.State analyticsState=new AdvancedAnalyticsPage.State();
     private String rosterFilter="all",searchQuery="";
@@ -143,6 +144,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         if(sessionScores!=null)sessionScores.close();if(sessionPicker!=null)sessionPicker.dismiss();
         if(voiceGuide!=null)voiceGuide.destroy();
         if(authDialog!=null){authDialog.dismiss();authDialog=null;}
+        if(operationDialog!=null){operationDialog.dismiss();operationDialog=null;}
         if(motion!=null)motion.close();
         clock.removeCallbacksAndMessages(null);
         analyticsWorker.shutdownNow();
@@ -253,10 +255,16 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
     }
     @Override public void busy(boolean b) {
         busy=b;
+        if(!b&&operationDialog!=null){operationDialog.dismiss();operationDialog=null;}
         updateToolbar();
         if(!b&&tab==9&&api!=null&&shownPendingBulk!=api.hasPendingBulkOperation())render(false);
         if(tab==2&&roundSaveView!=null&&roundPreviewSection!=null&&roundHintView!=null)
             updateRoundForm();
+    }
+    @Override public void operationProgress(String message){
+        if(isFinishing()||isDestroyed())return;
+        if(operationDialog==null){operationDialog=new MotionDialogBuilder(this,motion).setTitle("Please wait").setMessage(message).setCancelable(false).create();operationDialog.show();}
+        else operationDialog.setMessage(message);
     }
     @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putBoolean("ranksSessions",ranksSessions);state.putString("selectedSessionId",selectedSessionId);state.putString("scoreboardScope",scoreboardScope);state.putBoolean("bigKeepAwake",bigKeepAwake);state.putInt("bigOriginScroll",bigOriginScroll);if(voiceGuide!=null)voiceGuide.saveState(state);analyticsState.save(state);persistDraft();state.putInt("tab",tab);state.putInt("historyTab",historyTab);state.putString("rankFilter",rankFilter);state.putString("profileId",profileId);state.putLong("customStart",customStart);state.putLong("customEnd",customEnd);state.putString("searchQuery",searchQuery);}
     @Override protected void onResume(){
@@ -706,6 +714,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         title(content,"Players","Active and benched members of your table");
         if(loggedIn){
             content.addView(button("＋  Add a Player",true,this::addPlayerDialog));gap(content,18);
+            content.addView(button("Delete Multiple Players",false,()->selectMultipleDeletion("players",players)));gap(content,12);
         }
         if(players.isEmpty()){empty("No players yet. Add the first player as admin.");return;}
         LinearLayout filters=row();
@@ -1108,6 +1117,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
         LinearLayout.LayoutParams l1=new LinearLayout.LayoutParams(0,dp(48),1);l1.rightMargin=dp(10);
         toggle.addView(roundTab,l1);toggle.addView(sessionTab,new LinearLayout.LayoutParams(0,dp(48),1));
         content.addView(toggle);gap(content,18);
+        if(loggedIn){content.addView(button(historyTab==0?"Delete Multiple Rounds":"Delete Multiple Sessions",false,()->selectMultipleDeletion(historyTab==0?"rounds":"sessions",historyTab==0?gameRounds():sessions)));gap(content,12);}
         if(historyTab==0) {
             List<Map<String,Object>> history=gameRounds();
             if(history.isEmpty())empty("No rounds recorded yet.");
@@ -1571,6 +1581,49 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
                         }).show())
                 .show();
     }
+    private void selectMultipleDeletion(String collection,List<Map<String,Object>> source){
+        if(!loggedIn||busy)return;
+        final List<Map<String,Object>> eligible=new ArrayList<>();
+        for(Map<String,Object> record:source){
+            if("rounds".equals(collection)&&"online".equals(record.get("source")))continue;
+            if("sessions".equals(collection)&&record.get("endTime")==null)continue;
+            eligible.add(new HashMap<>(record));
+        }
+        if(eligible.isEmpty()){notice("sessions".equals(collection)?"Stop a session before deleting it.":"No removable "+collection+" available.");return;}
+        CharSequence[] labels=new CharSequence[eligible.size()];boolean[] checked=new boolean[eligible.size()];
+        for(int i=0;i<eligible.size();i++){Map<String,Object> r=eligible.get(i);labels[i]="players".equals(collection)?str(r,"name"):"sessions".equals(collection)?str(r,"sessionName")+" · "+when(r.get("startTime")):when(r.get("timestamp"))+" · "+str(r,"hukumName")+" · Bid "+num(r.get("bid"));}
+        final AlertDialog dialog=new MotionDialogBuilder(this,motion).setTitle("Select "+collection+" to delete")
+            .setMultiChoiceItems(labels,checked,(d,which,value)->{checked[which]=value;int n=0;for(boolean c:checked)if(c)n++;((AlertDialog)d).getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(n>0);((AlertDialog)d).getButton(AlertDialog.BUTTON_POSITIVE).setText("Review ("+n+")");})
+            .setNegativeButton("Cancel",null).setNeutralButton("Select all",null).setPositiveButton("Review",null).create();
+        dialog.setOnShowListener(d->{
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->{boolean all=true;for(boolean c:checked)all&=c;for(int i=0;i<checked.length;i++){checked[i]=!all;dialog.getListView().setItemChecked(i,!all);}dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(!all);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setText("Review ("+(all?0:checked.length)+")");});
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{List<Map<String,Object>> selected=new ArrayList<>();for(int i=0;i<checked.length;i++)if(checked[i])selected.add(eligible.get(i));if(selected.isEmpty())return;dialog.dismiss();reviewMultipleDeletion(collection,selected);});
+        });dialog.show();
+    }
+    private void reviewMultipleDeletion(String collection,List<Map<String,Object>> selected){
+        if("sessions".equals(collection)){
+            api.previewSessionDeletions(selected,previews->{
+                StringBuilder message=new StringBuilder();Map<String,Long> impacts=new LinkedHashMap<>();Map<String,String> names=new HashMap<>();long count=0;
+                for(int i=0;i<previews.size();i++){org.json.JSONObject p=previews.get(i);count+=p.optInt("roundCount");message.append("\n• ").append(str(selected.get(i),"sessionName")).append(" · ").append(p.optInt("roundCount")).append(" rounds");org.json.JSONArray changes=p.optJSONArray("impacts");if(changes!=null)for(int n=0;n<changes.length();n++){org.json.JSONObject c=changes.optJSONObject(n);if(c!=null){String id=c.optString("playerId");impacts.merge(id,c.optLong("lifetimeChange"),Long::sum);names.put(id,c.optString("name",id));}}}
+                message.insert(0,"Delete "+selected.size()+" sessions and ALL "+count+" rounds?\n");message.append("\n\nLifetime point changes:");for(Map.Entry<String,Long> c:impacts.entrySet())message.append("\n").append(names.get(c.getKey())).append(": ").append(c.getValue()>0?"+":"").append(c.getValue());
+                message.append("\n\nA recovery backup will be saved. Sessions are deleted one at a time. Interrupted operations can be resumed in Settings.");
+                confirmMultipleDeletion(message.toString(),()->api.deleteSessions(selected,previews));
+            });return;
+        }
+        StringBuilder message=new StringBuilder("Delete "+selected.size()+" selected "+collection+"?\n");Map<String,Long> impacts=new LinkedHashMap<>();
+        for(Map<String,Object> r:selected){message.append("\n• ").append("players".equals(collection)?str(r,"name"):when(r.get("timestamp"))+" · "+str(r,"hukumName"));if("rounds".equals(collection))for(Map.Entry<String,Object> change:map(r.get("scoreChanges")).entrySet())impacts.merge(change.getKey(),-(long)num(change.getValue()),Long::sum);}
+        if("players".equals(collection))message.append("\n\nOnly selected player profiles are removed. Saved rounds remain unchanged.");
+        else {message.append("\n\nLifetime point changes:");for(Map.Entry<String,Long> c:impacts.entrySet())message.append("\n").append(nameOf(c.getKey())).append(": ").append(c.getValue()>0?"+":"").append(c.getValue());}
+        message.append("\n\nA recovery backup will be saved. Newer edits are protected; interrupted operations can be resumed in Settings.");
+        confirmMultipleDeletion(message.toString(),()->api.deleteDocuments(collection,selected));
+    }
+    private void confirmMultipleDeletion(String message,Runnable remove){
+        new MotionDialogBuilder(this,motion).setTitle("Review selected deletions").setMessage(message).setNegativeButton("Keep",null)
+            .setPositiveButton("Continue",(d,w)->new MotionDialogBuilder(this,motion).setTitle("Final confirmation")
+                .setMessage("Permanently delete only the selected items? This cannot be undone without your recovery backup.")
+                .setNegativeButton("Cancel",null).setPositiveButton("Delete selected",(d2,w2)->remove.run()).show()).show();
+    }
     private String sessionParticipantName(Map<String,Object> session,String pid){
         Object board=session.get("leaderboard");
         if(board instanceof List)for(Object item:(List<?>)board){Map<String,Object> p=map(item);if(pid.equals(id(p))||pid.equals(str(p,"playerId")))return str(p,"name");}
@@ -1958,7 +2011,7 @@ public final class MainActivity extends Activity implements FirebaseGateway.List
             if(shownPendingBulk){
                 gap(content,12);content.addView(text("An interrupted data operation needs attention. Completed batches stay saved. Other changes are paused until you retry or stop it.",13,GOLD,false));
                 gap(content,12);content.addView(button("Retry interrupted data operation",true,api::resumeBulkOperation));
-                gap(content,12);content.addView(button("Stop interrupted operation",false,()->new MotionDialogBuilder(this,motion).setTitle("Stop remaining batches?").setMessage("Already completed batches stay in Firebase. Export the recovery backup before resolving a partial clear or restore. Stopping does not undo completed changes.").setNegativeButton("Keep pending",null).setPositiveButton("Stop remaining",(d,w)->api.abandonBulkOperation()).show()));
+                gap(content,12);content.addView(button("Stop interrupted operation",false,()->new MotionDialogBuilder(this,motion).setTitle("Stop remaining batches?").setMessage("Already completed batches stay in Firebase. Accepted session deletions will still finish on the server. Only remaining unsubmitted requests stop. Export the recovery backup before resolving a partial operation.").setNegativeButton("Keep pending",null).setPositiveButton("Stop remaining",(d,w)->api.abandonBulkOperation()).show()));
             }
             gap(content,12);content.addView(button("Restore backup / import HH legacy JSON",false,()->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/json");startActivityForResult(intent,702);}));
             gap(content,12);content.addView(button("Clear all rounds and sessions",false,this::clearHistoryDialog));

@@ -31,19 +31,19 @@ final class BulkWritePlan {
             .put("kind",kind).put("total",total).put("remaining",remaining).toString().getBytes(StandardCharsets.UTF_8);
     }
     private String path(JSONObject write)throws Exception{
-        String name="clear".equals(kind)?write.getString("delete"):write.getJSONObject("update").getString("name");
+        String name=isDelete()?write.getString("delete"):write.getJSONObject("update").getString("name");
         return BackupArchive.path(new JSONObject().put("name",name),project);
     }
     private void validate()throws Exception{
-        if(!Arrays.asList("clear","restore","rename").contains(kind)||owner.isEmpty()||total<remaining.length()||total<0)
+        if(!Arrays.asList("clear","delete","restore","rename").contains(kind)||owner.isEmpty()||total<remaining.length()||total<0)
             throw new IOException("Invalid recovery plan");
         Set<String> paths=new HashSet<>();
         for(int i=0;i<remaining.length();i++){
             JSONObject write=remaining.getJSONObject(i);String path=path(write);
             if(!paths.add(path))throw new IOException("Duplicate recovery target");
             JSONObject condition=write.getJSONObject("currentDocument");
-            if("clear".equals(kind)){
-                if(path.startsWith("players/")||condition.optString("updateTime").isEmpty()||write.length()!=2)
+            if(isDelete()){
+                if(("clear".equals(kind)?path.startsWith("players/"):!path.startsWith("players/")&&!path.startsWith("rounds/"))||condition.optString("updateTime").isEmpty()||write.length()!=2)
                     throw new IOException("Unsafe recovery delete");
             }else if("restore".equals(kind)){
                 if(condition.optBoolean("exists",true)||write.length()!=2||!write.getJSONObject("update").has("fields"))throw new IOException("Unsafe recovery restore");
@@ -64,8 +64,11 @@ final class BulkWritePlan {
         JSONArray pending=new JSONArray();
         for(int i=0;i<remaining.length();i++){
             JSONObject write=remaining.getJSONObject(i);String path=path(write);JSONObject existing=live.get(path);
-            if("clear".equals(kind)){
+            if(isDelete()){
                 if(existing==null)continue;
+                JSONObject fields=existing.optJSONObject("fields"),source=fields==null?null:fields.optJSONObject("source");
+                if("delete".equals(kind)&&path.startsWith("rounds/")&&source!=null&&"online".equals(source.optString("stringValue")))
+                    throw new IOException("Completed online hands are immutable. Delete their stopped session instead.");
                 if(!write.getJSONObject("currentDocument").getString("updateTime").equals(existing.optString("updateTime")))
                     throw new IOException("Newer record at "+path+". Kept unchanged; export recovery backup before resolving.");
             }else if("rename".equals(kind)){
@@ -86,6 +89,7 @@ final class BulkWritePlan {
         }
         return new BulkWritePlan(project,owner,kind,total,pending);
     }
+    private boolean isDelete(){return "clear".equals(kind)||"delete".equals(kind);}
     JSONArray batch()throws Exception{
         JSONArray batch=new JSONArray();int bytes=32;
         for(int i=0;i<remaining.length()&&batch.length()<BATCH_RECORDS;i++){

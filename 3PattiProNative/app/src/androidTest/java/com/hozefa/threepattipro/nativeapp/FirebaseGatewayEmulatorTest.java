@@ -417,6 +417,25 @@ public class FirebaseGatewayEmulatorTest {
         }finally{gateway.adminRoleLookup=original;}
     }
     private int scoreA(){int total=0;for(Map<String,Object> r:rounds.get()){Object value=((Map<?,?>)r.getOrDefault("scoreChanges",Collections.emptyMap())).get("a");if(value instanceof Number)total+=((Number)value).intValue();}return total;}
+    @Test public void multipleSessionsCascadeSeriallyAndSelectedRecordsDeleteWithoutTouchingOthers()throws Exception{
+        Assume.assumeTrue("true".equals(InstrumentationRegistry.getArguments().getString("kaliOnlineBackend")));
+        String prefix="multi-"+UUID.randomUUID();List<String> ids=Arrays.asList(prefix+"-manual",prefix+"-online");
+        for(int n=0;n<2;n++){
+            request("PATCH","/sessions/"+ids.get(n),new JSONObject().put("fields",SdkDocuments.fields(FirebaseGateway.map("sessionName",ids.get(n),"source",n==0?"manual":"online","startTime",new com.google.firebase.Timestamp(2000000200+n*200,0),"endTime",new com.google.firebase.Timestamp(2000000300+n*200,0)))));
+            request("PATCH","/rounds/"+ids.get(n),new JSONObject().put("fields",SdkDocuments.fields(FirebaseGateway.map("source",n==0?"manual":"online","sessionId",ids.get(n),"timestamp",new com.google.firebase.Timestamp(2000000201+n*200,0),"type","hukum","scoreChanges",FirebaseGateway.map("a",n==0?310:-155)))));
+        }
+        await(()->ids.stream().allMatch(id->sessions.get().stream().anyMatch(s->id.equals(s.get("id"))))&&ids.stream().allMatch(id->rounds.get().stream().anyMatch(r->id.equals(r.get("id"))))&&live.get()&&!busy.get());
+        int before=scoreA();JSONObject untouched=request("GET","/rounds/fixture-round",null);List<Map<String,Object>> selected=new ArrayList<>();for(String id:ids)selected.add(sessions.get().stream().filter(s->id.equals(s.get("id"))).findFirst().get());
+        AtomicReference<List<JSONObject>> previews=new AtomicReference<>();CountDownLatch reviewed=new CountDownLatch(1);ready(()->gateway.previewSessionDeletions(selected,p->{previews.set(p);reviewed.countDown();}));completed(reviewed,"multiple session preview");assertEquals(2,previews.get().size());assertEquals(before,scoreA());
+        ready(()->gateway.deleteSessions(selected,previews.get()));await(()->ids.stream().noneMatch(id->sessions.get().stream().anyMatch(s->id.equals(s.get("id"))))&&live.get()&&!busy.get());
+        assertEquals(before-155,scoreA());assertFalse(gateway.hasPendingBulkOperation());assertTrue(BulkWritePlan.sameJson(untouched,request("GET","/rounds/fixture-round",null)));
+        for(int n=0;n<2;n++)request("PATCH","/rounds/"+prefix+"-r"+n,new JSONObject().put("fields",SdkDocuments.fields(FirebaseGateway.map("type","hukum","timestamp",new com.google.firebase.Timestamp(2000001000+n,0),"scoreChanges",FirebaseGateway.map("a",n==0?100:-20)))));
+        await(()->rounds.get().stream().filter(r->String.valueOf(r.get("id")).startsWith(prefix+"-r")).count()==2&&live.get()&&!busy.get());int roundsBefore=scoreA();List<Map<String,Object>> chosen=new ArrayList<>();for(Map<String,Object> row:rounds.get())if(String.valueOf(row.get("id")).startsWith(prefix+"-r"))chosen.add(row);
+        ready(()->gateway.deleteDocuments("rounds",chosen));await(()->rounds.get().stream().noneMatch(r->String.valueOf(r.get("id")).startsWith(prefix+"-r"))&&live.get()&&!busy.get());assertEquals(roundsBefore-80,scoreA());assertFalse(gateway.hasPendingBulkOperation());
+        for(int n=0;n<2;n++)request("PATCH","/players/"+prefix+"-p"+n,new JSONObject().put("fields",SdkDocuments.fields(FirebaseGateway.map("name","Temporary "+n))));
+        await(()->players.get().stream().filter(p->String.valueOf(p.get("id")).startsWith(prefix+"-p")).count()==2&&live.get()&&!busy.get());List<Map<String,Object>> picked=new ArrayList<>();for(Map<String,Object> p:players.get())if(String.valueOf(p.get("id")).startsWith(prefix+"-p"))picked.add(p);
+        ready(()->gateway.deleteDocuments("players",picked));await(()->players.get().stream().noneMatch(p->String.valueOf(p.get("id")).startsWith(prefix+"-p"))&&live.get()&&!busy.get());assertTrue(players.get().stream().anyMatch(p->"a".equals(p.get("id"))));assertTrue(BulkWritePlan.sameJson(untouched,request("GET","/rounds/fixture-round",null)));
+    }
     @Test public void manualSessionCascadePreservesBackupAndExactScoresAfterRepeatedDelete()throws Exception{
         Assume.assumeTrue("true".equals(InstrumentationRegistry.getArguments().getString("kaliOnlineBackend")));String id="manual-auth-"+UUID.randomUUID();
         Map<String,Object> fields=FirebaseGateway.map("sessionName",id,"startTime",new com.google.firebase.Timestamp(2000000000,0),"endTime",new com.google.firebase.Timestamp(2000000100,0));request("PATCH","/sessions/"+id,new JSONObject().put("fields",SdkDocuments.fields(fields)));
