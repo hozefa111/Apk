@@ -38,6 +38,7 @@ public final class FirebaseGateway {
         default void dataLoading(String collection,int loaded) {}
         default void historyDeferred(boolean deferred) {}
         default void syncTimestamp(long timestamp) {}
+        default void operationProgress(String message) {}
         /** A read-only connection problem; retryAt is a wall-clock deadline, not a write queue. */
         default void syncProblem(String message,long retryAt,boolean quota) {}
     }
@@ -861,14 +862,55 @@ public final class FirebaseGateway {
     public void previewSessionDeletion(Map<String,Object> session,java.util.function.Consumer<JSONObject> ready){
         write(null,token->{JSONObject preview=sessionRequest(session,"previewDelete",null,token,null);ui.post(()->{if(running)ready.accept(preview);});});
     }
-    public void deleteSessionRounds(Map<String,Object> session,JSONObject preview){
-        write("Session, rounds and their points deleted",token->{
-            preserveBackup();JSONObject result;
-            String owner=bulkOwner(),commandId=UUID.randomUUID().toString();
-            do{result=sessionRequest(session,"delete",null,authorizeWrite(owner,false).token,preview,commandId);// CF2 deletion is alarm-driven; its status polls must stay bounded.
-                // Legacy/manual responses execute a durable step themselves, so no idle wait is needed.
-                if(result.optBoolean("pending")&&String.valueOf(session.get("id")).startsWith("cf2_"))Thread.sleep(1000);}while(result.optBoolean("pending"));
+    public void previewSessionDeletions(List<Map<String,Object>> sessions,java.util.function.Consumer<List<JSONObject>> ready){
+        final List<Map<String,Object>> selected=new ArrayList<>();for(Map<String,Object> s:sessions)selected.add(new HashMap<>(s));
+        write(null,token->{
+            List<JSONObject> previews=new ArrayList<>();String owner=bulkOwner();
+            for(Map<String,Object> session:selected){operationProgress("Reviewing session "+(previews.size()+1)+" of "+selected.size());previews.add(sessionRequest(session,"previewDelete",null,authorizeWrite(owner,false).token,null));}
+            ui.post(()->{if(running)ready.accept(previews);});
         });
+    }
+    public void deleteSessionRounds(Map<String,Object> session,JSONObject preview){
+        deleteSessions(Collections.singletonList(session),Collections.singletonList(preview));
+    }
+    public void deleteSessions(List<Map<String,Object>> sessions,List<JSONObject> previews){
+        final List<Map<String,Object>> selected=new ArrayList<>();for(Map<String,Object> s:sessions)selected.add(new HashMap<>(s));
+        final List<JSONObject> reviewed=new ArrayList<>(previews);
+        write("Selected sessions, rounds and their points deleted",token->{
+            SessionDeletePlan plan=SessionDeletePlan.create(project,bulkOwner(),selected,reviewed);
+            preserveBackup();atomicSave(sessionDeleteFile(),plan.bytes());runSessionDeletes(plan);
+        });
+    }
+    public void deleteDocuments(String collection,List<Map<String,Object>> records){
+        final List<Map<String,Object>> selected=new ArrayList<>();for(Map<String,Object> row:records)selected.add(new HashMap<>(row));
+        write("Selected "+collection+" deleted",token->{
+            if(!Arrays.asList("players","rounds").contains(collection)||selected.isEmpty())throw new IOException("Invalid deletion selection");
+            JSONArray writes=new JSONArray();Map<String,String> expected=new HashMap<>();
+            for(Map<String,Object> row:selected){
+                String path=collection+"/"+row.get("id");expected.put(path,(String)row.get("_updateTime"));
+                if("rounds".equals(collection)&&"online".equals(row.get("source")))throw new IOException("Completed online hands are immutable. Delete their stopped session instead.");
+                writes.put(new JSONObject().put("delete",documentRoot+"/"+path).put("currentDocument",precondition(expected,path)));
+            }
+            startBulk("delete",writes,token);
+        });
+    }
+    private void operationProgress(String message){ui.post(()->{if(running)listener.operationProgress(message);});}
+    private android.util.AtomicFile sessionDeleteFile(){return new android.util.AtomicFile(new File(context.getFilesDir(),"pending-session-deletion.json"));}
+    private boolean hasSessionDeletePlan(){File file=sessionDeleteFile().getBaseFile();return file.exists()||new File(file.getPath()+".bak").exists();}
+    private void runSessionDeletes(SessionDeletePlan plan)throws Exception{
+        try{
+            while(plan.remaining.length()>0){
+                JSONObject target=plan.remaining.getJSONObject(0),s=target.getJSONObject("session");
+                Map<String,Object> session=map("id",s.getString("id"),"sessionName",s.optString("sessionName",null));JSONObject result;
+                operationProgress("Deleting session "+(plan.total-plan.remaining.length()+1)+" of "+plan.total+" · "+s.optString("sessionName","Game Session"));
+                do{
+                    result=sessionRequest(session,"delete",null,authorizeWrite(plan.owner,false).token,target.getJSONObject("preview"),target.getString("commandId"));
+                    if(result.optBoolean("pending")&&s.getString("id").startsWith("cf2_"))Thread.sleep(1000);
+                }while(result.optBoolean("pending"));
+                plan=plan.acknowledged();atomicSave(sessionDeleteFile(),plan.bytes());
+            }
+            sessionDeleteFile().delete();if(hasSessionDeletePlan())throw new IOException("Cannot finish local deletion journal");
+        }catch(Exception error){throw new IOException("Deletion paused ("+(plan.total-plan.remaining.length())+"/"+plan.total+" confirmed). Retry in Settings with the same account. "+error.getMessage(),error);}
     }
     public interface Action { void run(String token) throws Exception; }
     public void write(String success,Action action) {
@@ -964,7 +1006,7 @@ public final class FirebaseGateway {
         catch(IOException error){if(out!=null)file.failWrite(out);throw error;}
     }
     public boolean hasPendingBulkOperation(){
-        File file=bulkFile().getBaseFile();return file.exists()||new File(file.getPath()+".bak").exists();
+        File file=bulkFile().getBaseFile();return hasSessionDeletePlan()||file.exists()||new File(file.getPath()+".bak").exists();
     }
     private String bulkOwner()throws IOException{
         if(auth.getCurrentUser()==null)throw new IOException("Login required");return auth.getCurrentUser().getUid();
@@ -978,6 +1020,7 @@ public final class FirebaseGateway {
     private void runBulk(BulkWritePlan plan,String token)throws Exception{
         try{
             while(plan.remaining.length()>0){
+                operationProgress("Processing "+plan.kind+" · "+(plan.total-plan.remaining.length())+" of "+plan.total+" confirmed");
                 if(signingOut||auth.getCurrentUser()==null||!plan.owner.equals(bulkOwner()))throw new IOException("Login changed");
                 JSONArray batch=plan.batch();
                 commit(batch);
@@ -994,6 +1037,10 @@ public final class FirebaseGateway {
     public void resumeBulkOperation(){
         write("Data operation completed",token->{
             if(!hasPendingBulkOperation())throw new IOException("No interrupted operation");
+            if(hasSessionDeletePlan()){
+                byte[] saved;try(FileInputStream in=sessionDeleteFile().openRead()){saved=readAll(in);}
+                runSessionDeletes(SessionDeletePlan.parse(saved,project,bulkOwner()));return;
+            }
             byte[] bytes;try(FileInputStream in=bulkFile().openRead()){bytes=readAll(in);}
             BulkWritePlan plan=BulkWritePlan.parse(bytes,project,bulkOwner());
             load();if(!freshSnapshot)throw new IOException("Live data required");
@@ -1007,6 +1054,12 @@ public final class FirebaseGateway {
     /** Explicitly stops further batches; completed remote batches remain in place. */
     public void abandonBulkOperation(){
         write("Pending operation stopped. Completed batches remain; use the recovery backup if needed.",token->{
+            if(hasSessionDeletePlan()){
+                byte[] saved;try(FileInputStream in=sessionDeleteFile().openRead()){saved=readAll(in);}
+                SessionDeletePlan.parse(saved,project,bulkOwner());sessionDeleteFile().delete();
+                if(hasSessionDeletePlan())throw new IOException("Cannot remove pending deletion plan");
+                notify("Remaining session requests stopped. Any deletion already accepted by the server will still finish.");return;
+            }
             byte[] bytes;try(FileInputStream in=bulkFile().openRead()){bytes=readAll(in);}
             BulkWritePlan.parse(bytes,project,bulkOwner());bulkFile().delete();
             if(hasPendingBulkOperation())throw new IOException("Cannot remove recovery journal");
